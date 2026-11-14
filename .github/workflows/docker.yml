@@ -1,0 +1,181 @@
+name: Docker
+
+# Build the image and push it to the private registry.
+#
+# The image carries the seeded dictionary, which is only safe because both this repository and
+# the Docker repository are private. If the Docker repository is ever made public, stop
+# publishing this image: a worked-out divine tongue that names her as its speaker reveals her,
+# and the whole of it is private-side.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # DOCKER_REPOSITORY is the registry host alone — no scheme, no path, no trailing slash.
+  # The namespace and the image name are not the registry's business, they are this
+  # repository's, so they live here where both can be read and changed in one place.
+  #
+  # IMAGE_NAMESPACE:
+  #   empty  - use the GitHub owner, lower-cased (an image reference must be lower-case,
+  #            and `StefanKnol` is not)
+  #   none   - no namespace at all, for a registry that takes <host>/<image> directly
+  #   or any name you want the image published under
+  IMAGE_NAMESPACE: none
+  IMAGE_NAME: no-return
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Every action here runs on Node 24. Node 20 leaves the runners on 2026-09-23.
+      # The whole history, not the default single commit: the build number is the count of
+      # commits, and a shallow clone counts one.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The stamp both servers report, so the live one can be told apart from the last. The
+      # number only goes up on main; the commit is what makes it unique anywhere else. The names
+      # are `BUILD_STAMP_VARIABLES` in packages/store/src/build-stamp.ts, and a test holds this
+      # file and the Dockerfile to them.
+      - name: Stamp the build
+        id: stamp
+        run: |
+          number=$(git rev-list --count HEAD)
+          commit=$(git rev-parse --short=7 HEAD)
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [ "$number" -lt 2 ]; then
+            echo "::error::The build number came out as $number, which means the checkout was shallow. The stamp would say build 1 for ever."
+            exit 1
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "built_at=$built_at" >> "$GITHUB_OUTPUT"
+          echo "Stamping build $number, $commit, $built_at."
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # DOCKER_REPOSITORY is the registry host and nothing else, so there is nothing to
+      # derive from it — the earlier guesswork about whether its first path segment "looked
+      # like a host" was solving a problem that does not exist, and got it wrong.
+      #
+      # What went wrong before: metadata-action was handed the bare host as its image, so the
+      # tag came out as `<host>:main`. Docker reads that as the image `<host>` with the tag
+      # `main`, resolves it to docker.io/library/<host>:main, and the push fails against the
+      # Official Images namespace with "access token has insufficient scopes" — an error that
+      # names neither the registry nor the real cause.
+      #
+      # Nothing below echoes the secret. Only its shape is reported.
+      - name: Check DOCKER_REPOSITORY is a bare registry host
+        env:
+          DOCKER_REPOSITORY: ${{ secrets.DOCKER_REPOSITORY }}
+        run: |
+          if [ -z "$DOCKER_REPOSITORY" ]; then
+            echo "::error::DOCKER_REPOSITORY is empty. It holds the registry host on its own, such as registry.example.com or registry.example.com:5000."
+            exit 1
+          fi
+
+          case "$DOCKER_REPOSITORY" in
+            *://*)
+              echo "::error::DOCKER_REPOSITORY carries a scheme. A registry host takes no https:// — give the host alone."
+              exit 1
+              ;;
+            */*)
+              echo "::error::DOCKER_REPOSITORY contains a '/'. It holds the registry host alone; the namespace and image name are set by IMAGE_NAMESPACE and IMAGE_NAME in this workflow."
+              exit 1
+              ;;
+          esac
+
+          echo "DOCKER_REPOSITORY is a bare host, as expected."
+
+      - name: Work out the image reference
+        id: image
+        env:
+          DOCKER_REPOSITORY: ${{ secrets.DOCKER_REPOSITORY }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          case "$IMAGE_NAMESPACE" in
+            "")
+              # An image reference must be lower-case; a GitHub owner need not be.
+              namespace=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+              ;;
+            none)
+              # Some registries take <host>/<image> with no namespace segment at all.
+              namespace=""
+              ;;
+            *)
+              namespace="$IMAGE_NAMESPACE"
+              ;;
+          esac
+
+          if [ -n "$namespace" ]; then
+            path="$namespace/$IMAGE_NAME"
+          else
+            path="$IMAGE_NAME"
+          fi
+
+          echo "reference=$DOCKER_REPOSITORY/$path" >> "$GITHUB_OUTPUT"
+          echo "Publishing as <registry>/$path."
+
+      - name: Log in to the registry
+        id: login
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ secrets.DOCKER_REPOSITORY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # A rejected login is far more often the credential than the workflow, and the error
+      # Docker returns says nothing about which. Say it here, once, so the next person does
+      # not have to guess.
+      - name: What to check if the login was refused
+        # Scoped to the login step alone. A bare `failure()` would also fire when Buildx or
+        # the checkout failed, and blame the credentials for something else entirely.
+        if: failure() && steps.login.outcome == 'failure'
+        run: |
+          echo "::error::The registry named by DOCKER_REPOSITORY refused the login. Both DOCKER_USERNAME and DOCKER_PASSWORD were present, so they were rejected rather than missing. Check that the username is the account name rather than an email address, that the password is an access token where the registry requires one, and that the token still carries write scope for this image."
+
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.reference }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=build-${{ steps.stamp.outputs.number }},enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            AENVAE_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
+            AENVAE_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
+            AENVAE_BUILT_AT=${{ steps.stamp.outputs.built_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Say where it went
+        run: |
+          echo "### Image published: build ${{ steps.stamp.outputs.number }} (${{ steps.stamp.outputs.commit }})" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "Game runs on port 80" >> "$GITHUB_STEP_SUMMARY"
