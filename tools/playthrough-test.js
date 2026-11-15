@@ -99,6 +99,46 @@ function check(description, condition, detail) {
     quiet.setting === 'quiet' && quiet.readouts && quiet.minimap && quiet.heatCold && !quiet.objectiveJustChanged && !quietLater.heatWarm, { quiet: quiet, later: quietLater });
   check('"Full instruments" shows them all', !full.readouts && !full.minimap && !full.heatCold, full);
 
+  // --- the laser lines start at the lens of the scanner in the player's hand, not in the air beside it ---
+  // The station and the scanner are drawn with different fields of view, so both are compared where they land on the screen.
+  const measureBeamOrigin = () => inGame(() => {
+    const debug = window.lastReturnDebug, renderer = debug.renderer, beamLines = debug.beamLines;
+    const projectToScreen = (matrix, x, y, z) => {
+      const w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+      return [(matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) / w, (matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) / w];
+    };
+    const lensMatrix = new Float32Array(16), projection = renderer.viewmodelProjectionMatrix, placement = renderer.viewmodelMatrix;
+    for (let column = 0; column < 4; column++) {
+      for (let row = 0; row < 4; row++) {
+        let sum = 0;
+        for (let index = 0; index < 4; index++) sum += projection[index * 4 + row] * placement[column * 4 + index];
+        lensMatrix[column * 4 + row] = sum;
+      }
+    }
+    const lens = projectToScreen(lensMatrix, debug.viewmodelLensCenter[0], debug.viewmodelLensCenter[1], debug.viewmodelLensCenter[2]);
+    let largestDistance = 0;
+    for (let lineIndex = 0; lineIndex < beamLines.count; lineIndex++) {
+      const offset = lineIndex * 8;
+      const origin = projectToScreen(renderer.viewProjectionMatrix, beamLines.vertices[offset], beamLines.vertices[offset + 1], beamLines.vertices[offset + 2]);
+      largestDistance = Math.max(largestDistance, Math.hypot(origin[0] - lens[0], origin[1] - lens[1]));
+    }
+    return { lineCount: beamLines.count, lensOnScreen: lens, largestDistanceFromLens: largestDistance, fieldOfView: debug.renderCamera.fieldOfViewDegrees };
+  });
+  await page.keyboard.down('Space');
+  await drawFrames(page, 3);
+  const beamStanding = await measureBeamOrigin();
+  await page.keyboard.down('KeyW');
+  await page.keyboard.down('ShiftLeft');
+  await drawFrames(page, 3);
+  const beamSprinting = await measureBeamOrigin();
+  await page.keyboard.up('ShiftLeft');
+  await page.keyboard.up('KeyW');
+  await page.keyboard.up('Space');
+  await inGame(() => { window.lastReturnDebug.player.heat = 0; });
+  check('the laser lines of a scan start at the lens of the scanner in hand, standing and sprinting',
+    beamStanding.lineCount > 0 && beamStanding.largestDistanceFromLens < 0.005 && beamSprinting.lineCount > 0 && beamSprinting.largestDistanceFromLens < 0.005,
+    { standing: beamStanding, sprinting: beamSprinting });
+
   // --- voice recordings: a line with a recording is played, one without stays text only ---
   // Made-up line names are used, so this works whether or not real recordings are in assets/voice.
   const voice = await inGame(async () => {
@@ -437,6 +477,24 @@ function check(description, condition, detail) {
   await drawFrames(debugPage, 3);
   await clickInPage('touch-map'); // the full map, with creature markers
   await drawFrames(debugPage, 2);
+  // The full map uses the room a big screen has, and still fits on a small one.
+  const measureFullMap = () => debugPage.evaluate(() => {
+    const canvas = document.getElementById('map-canvas'), box = canvas.getBoundingClientRect();
+    return { drawnWidth: canvas.width, drawnHeight: canvas.height, shownWidth: Math.round(box.width), shownHeight: Math.round(box.height),
+      fitsOnScreen: box.left >= 0 && box.top >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight };
+  });
+  const mapOnSmallScreen = await measureFullMap();
+  await debugPage.setViewportSize({ width: 2560, height: 1440 });
+  await drawFrames(debugPage, 2);
+  await debugPage.waitForTimeout(250); // the map is redrawn about twelve times a second
+  await drawFrames(debugPage, 2);
+  const mapOnBigScreen = await measureFullMap();
+  await debugPage.setViewportSize({ width: 1280, height: 720 });
+  await drawFrames(debugPage, 2);
+  check('the full map fills a big screen and still fits on a small one',
+    mapOnSmallScreen.fitsOnScreen && mapOnBigScreen.fitsOnScreen && mapOnBigScreen.shownWidth > 2000 && mapOnBigScreen.shownHeight > 1200 &&
+    Math.abs(mapOnBigScreen.drawnWidth - mapOnBigScreen.shownWidth) <= 2 && Math.abs(mapOnBigScreen.drawnHeight - mapOnBigScreen.shownHeight) <= 2,
+    { small: mapOnSmallScreen, big: mapOnBigScreen });
   await clickInPage('touch-map');
   check('lit station, creature bodies, sense lines and map markers draw without errors',
     debugSession.problems.length === 0 && await inDebugGame(() => window.lastReturnDebug.hollow.isActive), debugSession.problems);
