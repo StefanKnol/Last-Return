@@ -1,11 +1,6 @@
 name: Docker
 
 # Build the image and push it to the private registry.
-#
-# The image carries the seeded dictionary, which is only safe because both this repository and
-# the Docker repository are private. If the Docker repository is ever made public, stop
-# publishing this image: a worked-out divine tongue that names her as its speaker reveals her,
-# and the whole of it is private-side.
 
 on:
   push:
@@ -166,9 +161,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            AENVAE_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
-            AENVAE_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
-            AENVAE_BUILT_AT=${{ steps.stamp.outputs.built_at }}
+            NO-RETURN_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
+            NO-RETURN_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
+            NO-RETURN_BUILT_AT=${{ steps.stamp.outputs.built_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
