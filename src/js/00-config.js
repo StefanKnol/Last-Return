@@ -147,6 +147,7 @@ const TUNING = {
   noisyFloorShareWhereYouMustWalk: 0.5, // this share of them lies in corridors and a step or two inside doors; the rest anywhere
   noisyFloorLeaveMetres: 0.25,      // you (and the Hollow) count as still on one until this far past its edge, so shuffling on the edge does not set it off again and again
   noisyFloorShortestGapSeconds: 0.3, // and the same feet cannot set one off twice within this time
+  noisyFloorCaptionMetres: 20,      // the Hollow setting one off within this distance of you puts a line on screen, as its other warnings do
   waterStepNoiseFactor: 1.5,    // footsteps in water carry this much further
 
   // ---- How close the Hollow must be to notice you without any sound event --

@@ -13,11 +13,12 @@
 // The numbers are in 00-config.js under "Noisy things on the floor".
 // ---------------------------------------------------------------------------
 
-// TWEAK: the kinds. `share` is how often a kind turns up compared with the others.
+// TWEAK: the kinds. `share` is how often a kind turns up compared with the others. `hint` is what you are told the
+// first time you set one off; `caption` is the line you get when the Hollow sets one off within earshot.
 const NOISY_FLOOR_KINDS = {
-  glass: { label: 'broken glass', share: 4.5, hint: 'Broken glass. That carried. Crouch and you can cross it without a sound.' },
-  plate: { label: 'a loose floor plate', share: 3, hint: 'A loose floor plate. That carried. Crouch and you can cross it without a sound.' },
-  cans: { label: 'empty cans', share: 2.5, hint: 'Empty cans. That carried. Crouch and you can pick your way through without a sound.' }
+  glass: { label: 'broken glass', share: 4.5, hint: 'Broken glass. That carried. Crouch and you can cross it without a sound.', caption: '[glass crunches under something]' },
+  plate: { label: 'a loose floor plate', share: 3, hint: 'A loose floor plate. That carried. Crouch and you can cross it without a sound.', caption: '[a floor plate clanks under something]' },
+  cans: { label: 'empty cans', share: 2.5, hint: 'Empty cans. That carried. Crouch and you can pick your way through without a sound.', caption: '[cans scatter, and not by you]' }
 };
 
 // The patches of this station: { x, z, index, kind }. `index` is the tile; a patch is one tile.
@@ -222,6 +223,7 @@ function stepHollowOnNoisyFloor(x, z, isHunting) {
   hollowNoisyFloorLastTime = game.time;
   noisyFloorCounts.byHollow++;
   playNoisyFloorSound(patch.kind, isHunting ? 1.9 : 1.6, patch); // louder than yours on purpose: it is heavier, and this is your warning
+  if (distanceBetweenPoints(patch.x, patch.z, player.x, player.z) < TUNING.noisyFloorCaptionMetres) showCaption(NOISY_FLOOR_KINDS[patch.kind].caption);
 }
 
 // Checks the patches of the station that is loaded. Returns a list of problems (empty when fine).

@@ -135,6 +135,8 @@ function check(description, condition, detail) {
       d.spawnHollow(patch.x - lane.stepX * 2, patch.z - lane.stepZ * 2);
       d.hollow.graceTimer = 999; // it takes no notice of the player: this is only about where it puts its feet
       d.noisyFloorCounts.byHollow = 0;
+      const captionElement = document.getElementById('hud-caption');
+      captionElement.textContent = '';
       const targetX = patch.x + lane.stepX * 2, targetZ = patch.z + lane.stepZ * 2;
       let nearest = Infinity, furthestPast = -Infinity;
       for (let time = 0; time < 12; time += 0.1) {
@@ -146,6 +148,10 @@ function check(description, condition, detail) {
         if (furthestPast > 0.45) break;
       }
       const answer = { setOffByHollow: d.noisyFloorCounts.byHollow, nearestToPatch: Math.round(nearest * 100) / 100, endedPastTheMiddleBy: Math.round(furthestPast * 100) / 100 };
+      // The player was standing at the lift all that while. Out of earshot, no line comes on screen.
+      answer.playerMetresAway = Math.round(Math.hypot(d.playerStart.x - patch.x, d.playerStart.z - patch.z) * 10) / 10;
+      answer.captionMetres = d.tuning.noisyFloorCaptionMetres;
+      answer.captionFromAfar = captionElement.textContent;
 
       // Then it is made to shuffle to and fro over the edge of the patch for three seconds, ten centimetres
       // either side, standing and listening (so it takes no steps of its own). That must set the patch off
@@ -165,9 +171,15 @@ function check(description, condition, detail) {
       // And once it has gone well clear and comes back, the patch goes off again.
       d.hollow.figure.x = edgeX - lane.stepX * 1.5; d.hollow.figure.z = edgeZ - lane.stepZ * 1.5;
       d.hollow.state = 4; d.hollow.listenTimer = 5; d.simulate(0.5);
+      // This time the player stands two metres from the patch, so the line does come.
+      d.setDebugOption('creaturesIgnorePlayer', true);
+      d.teleport(patch.x + lane.stepX * 2, patch.z + lane.stepZ * 2, 0);
+      captionElement.textContent = '';
       d.hollow.figure.x = patch.x; d.hollow.figure.z = patch.z;
       d.hollow.state = 4; d.hollow.listenTimer = 5; d.simulate(0.2);
       answer.setOffAfterComingBack = d.noisyFloorCounts.byHollow;
+      answer.captionFromNear = captionElement.textContent;
+      d.setDebugOption('creaturesIgnorePlayer', false);
       d.hollow.isActive = false;
       return answer;
     }, [lane]);
@@ -175,6 +187,9 @@ function check(description, condition, detail) {
       hollowSteps.setOffByHollow >= 1 && hollowSteps.setOffByHollow <= 3 && hollowSteps.nearestToPatch < 0.6, hollowSteps);
     check('shuffling to and fro over the edge of a patch sets it off once, not every time the edge is crossed; going clear and coming back sets it off again',
       hollowSteps.setOffWhileShufflingOnTheEdge === 1 && hollowSteps.setOffAfterComingBack === 2, hollowSteps);
+    check('when the Hollow sets one off near you a line on screen says so, and from out of earshot none does',
+      /^\[.+\]$/.test(hollowSteps.captionFromNear) && (hollowSteps.playerMetresAway < hollowSteps.captionMetres || hollowSteps.captionFromAfar === ''),
+      { near: hollowSteps.captionFromNear, fromAfar: hollowSteps.captionFromAfar, playerMetresAway: hollowSteps.playerMetresAway, captionMetres: hollowSteps.captionMetres });
   }
 
   check('no script errors were reported', problems.length === 0, problems);
