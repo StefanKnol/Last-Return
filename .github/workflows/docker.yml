@@ -38,10 +38,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The stamp both servers report, so the live one can be told apart from the last. The
-      # number only goes up on main; the commit is what makes it unique anywhere else. The names
-      # are `BUILD_STAMP_VARIABLES` in packages/store/src/build-stamp.ts, and a test holds this
-      # file and the Dockerfile to them.
+      # The stamp the game shows on its pause screen and puts into bug reports. The number only
+      # goes up on main; the commit is what makes it unique anywhere else. The Dockerfile hands
+      # NO_RETURN_BUILD_NUMBER and NO_RETURN_BUILD_COMMIT on to build.js, which reads them in
+      # `readBuildStamp`. Underscores only: a name with a hyphen is not a valid environment
+      # variable, and the build would never see it.
       - name: Stamp the build
         id: stamp
         run: |
@@ -161,9 +162,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NO-RETURN_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
-            NO-RETURN_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
-            NO-RETURN_BUILT_AT=${{ steps.stamp.outputs.built_at }}
+            NO_RETURN_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
+            NO_RETURN_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
+            NO_RETURN_BUILT_AT=${{ steps.stamp.outputs.built_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

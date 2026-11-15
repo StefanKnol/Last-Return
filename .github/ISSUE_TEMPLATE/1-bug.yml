@@ -15,6 +15,8 @@ body:
 
         If a generated station cannot be walked or finished, use the **Broken station** form: it asks for the seed.
 
+        "Report a problem" on the pause screen opens this form with the version, the seed and the room you are standing in filled in.
+
   - type: textarea
     id: what-happened
     attributes:
@@ -128,7 +130,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: The game does not show a version number. For a hosted page, give its address. For your own build, give the commit (`git rev-parse --short HEAD`).
+      placeholder: "1.11.0 · build 214 · a5f1785"
+      description: The "Version" line on the pause screen, or the "Build" line on the ending screen.
 
   - type: textarea
     id: console
