@@ -23,7 +23,7 @@ env:
   #   none   - no namespace at all, for a registry that takes <host>/<image> directly
   #   or any name you want the image published under
   IMAGE_NAMESPACE: none
-  IMAGE_NAME: no-return
+  IMAGE_NAME: last-return
 
 jobs:
   build-and-push:
@@ -40,7 +40,7 @@ jobs:
 
       # The stamp the game shows on its pause screen and puts into bug reports. The number only
       # goes up on main; the commit is what makes it unique anywhere else. The Dockerfile hands
-      # NO_RETURN_BUILD_NUMBER and NO_RETURN_BUILD_COMMIT on to build.js, which reads them in
+      # LAST_RETURN_BUILD_NUMBER and LAST_RETURN_BUILD_COMMIT on to build.js, which reads them in
       # `readBuildStamp`. Underscores only: a name with a hyphen is not a valid environment
       # variable, and the build would never see it.
       - name: Stamp the build
@@ -162,9 +162,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            NO_RETURN_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
-            NO_RETURN_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
-            NO_RETURN_BUILT_AT=${{ steps.stamp.outputs.built_at }}
+            LAST_RETURN_BUILD_NUMBER=${{ steps.stamp.outputs.number }}
+            LAST_RETURN_BUILD_COMMIT=${{ steps.stamp.outputs.commit }}
+            LAST_RETURN_BUILT_AT=${{ steps.stamp.outputs.built_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
