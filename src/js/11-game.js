@@ -826,6 +826,7 @@ function updateAscending(dt) {
     game.mode = 'ending';
     setLiftMachinerySound(0);
     setGeneratorSoundRunning(false);
+    stopExtraGeneratorSounds();
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
     if (debugState.hasBeenUsedThisRun) {
       game.statistics.bestTime = null; // a run with debug mode does not count
