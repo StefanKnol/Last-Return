@@ -454,6 +454,8 @@ Then the apparitions. Where and when they come is chance, so nothing there trust
 
 It ends with the workshop: on a copy of `src/` in a temporary folder it builds a room by clicking and dragging, saves it, finds it again in generated stations, changes a creature's proportions and writes them to the file, and checks that the page survives a source file that does not parse.
 
+Every pull request gets both: `.github/workflows/ci.yml` builds the page as it ships and runs `npm test`, on a machine that draws a good deal slower than a desktop. A check that only passes on a fast machine is a check that depends on the clock, and fails there.
+
 ```bash
 npm run dev
 ```
@@ -503,3 +505,9 @@ The apparitions keep to their rules, which is what the test can show. How often 
 The small generators are checked for their rules and for where they and their cans stand. Whether two or three of them make a descent tenser or only longer has not been played, and neither has how loud "loud" should be: `noiseRadiusGeneratorStart` in `src/js/00-config.js` is a first guess. Their two sounds were tuned by measuring, not by ear. Dispatch's line for them (`generatorsWanted`) has no recording yet.
 
 The extra jobs and the stations with two or three keycards are checked the same way: they can always be finished, and the rules do what this page says. Whether a second walk for a fuel can is dread or a chore has not been played. Dispatch's five new lines for them (`lowerKeycardTaken`, `generatorNoFuel`, `coresWanted`, `winchBreakerOpen`, `breakerClosed`) have no recordings yet and show as text.
+
+## License
+
+The code and everything else in this repository is [MIT](LICENSE), with one exception.
+
+The voice recordings in `assets/voice/` are not under the MIT licence. They were generated with ElevenLabs and are here so the game can play them. They remain subject to [ElevenLabs' terms](https://elevenlabs.io/terms-of-use) and [use policy](https://elevenlabs.io/use-policy), which among other things do not allow using them to train an AI model. If you fork the game and want different voices, [record your own](#voice-lines).
