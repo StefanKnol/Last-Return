@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Is it meant to do that?
+    url: https://github.com/StefanKnol/No-Return/blob/main/README.md#how-the-scanner-works
+    about: How the scanner works and, under the spoiler fold below it, the rules everything that hunts you follows. Worth a look before reporting odd behaviour.

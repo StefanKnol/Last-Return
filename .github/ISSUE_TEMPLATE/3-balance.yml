@@ -1,0 +1,84 @@
+name: Balance and feel
+description: Too hard, too easy, unfair, or not frightening. Nothing is broken, but it does not play right.
+labels: ["balance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For how a descent plays, not for things that are broken. One descent that went badly is worth reporting: say what happened in it.
+
+  - type: dropdown
+    id: about
+    attributes:
+      label: What it is about
+      options:
+        - The Hollow (what it hears, how fast it is, its anger, how hard it presses)
+        - The Stills
+        - The apparitions
+        - The scanner (heat, beam, full sweep, how long points last)
+        - Moving and noise (sprint, crouch, stamina, vents)
+        - Objectives and extra jobs
+        - Station size and layout
+        - Sound (what you can and cannot hear)
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: threat
+    attributes:
+      label: Threat level
+      options:
+        - Survey only
+        - Standard
+        - Nightmare
+        - Custom
+    validations:
+      required: true
+
+  - type: input
+    id: custom
+    attributes:
+      label: Custom values
+      description: Only for Custom. What you changed, and from which starting point.
+
+  - type: input
+    id: station
+    attributes:
+      label: Station
+      description: Kessel-9, or for an Uncharted annex its size, layout, levels and seed.
+      placeholder: "Uncharted annex, massive, sprawling, two levels, seed 48213"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: experience
+    attributes:
+      label: How well you know the game
+      options:
+        - This was my first descent
+        - A few descents
+        - Many descents
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The moment or the stretch that felt wrong. Where you were, what you were doing, what it did.
+    validations:
+      required: true
+
+  - type: textarea
+    id: better
+    attributes:
+      label: What would feel right
+      description: If you have an idea. "I do not know, but this was not it" is a fine answer.
+
+  - type: input
+    id: device
+    attributes:
+      label: Device and controls
+      description: Touch plays differently from keyboard and mouse, and headphones from speakers.
+      placeholder: "Laptop, keyboard and mouse, headphones"

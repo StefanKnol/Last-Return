@@ -1,0 +1,52 @@
+name: Idea
+description: Something the game could have - a room, a job, a thing in the dark, a setting.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        [docs/ideas.md](https://github.com/StefanKnol/No-Return/blob/main/docs/ideas.md) lists what is already being considered and what has been done. An idea that is on it is still welcome if you have something to add.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of idea
+      options:
+        - A room, a place or a kind of station
+        - Something that hunts you, or something only the scanner sees
+        - An objective or an extra job
+        - The scanner and what you carry
+        - Sound, the radio and the story
+        - Controls, the map, settings
+        - Debug mode, the workshop, the build
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What a player would see, hear or do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What it adds to a descent
+      description: What is missing now, or what moment this would make.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rules
+    attributes:
+      label: How it stays fair
+      description: The game keeps a few promises - it is never told where you are, everything real makes its own noise, a station can always be finished. If your idea touches one of those, how would it work?
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Sketches and references
+      description: Drawings, pictures, or another game that does something like it.

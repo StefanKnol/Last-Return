@@ -1,0 +1,53 @@
+name: Accessibility
+description: Something that keeps you from playing, or makes it much harder than it is meant to be.
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The game leans hard on hearing, on small points of light in the dark and on holding buttons down. If that shuts you out, this is the place to say so.
+
+  - type: dropdown
+    id: about
+    attributes:
+      label: What it is about
+      options:
+        - Hearing (the game tells you things only by sound)
+        - Seeing the points (contrast, colour, size, brightness)
+        - Flashing, flicker or motion
+        - Sudden scares
+        - Controls (holding keys, the mouse, touch, reach)
+        - Reading (text size, how long messages stay, the radio)
+        - Menus, keyboard-only use or a screen reader
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What gets in the way
+      description: What you could not do, see or hear, and where in the game.
+    validations:
+      required: true
+
+  - type: textarea
+    id: help
+    attributes:
+      label: What would help
+      description: A setting, another way to get the same information, something you have seen work in another game.
+
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup
+      description: Device, browser, and anything you use to play or browse (screen reader, magnifier, switch, one-handed controls, no sound).
+      placeholder: "Windows 11, Firefox 145, mouse only, sound off"
+    validations:
+      required: true
+
+  - type: input
+    id: settings
+    attributes:
+      label: Settings you tried
+      description: Point colours (`V`), quality, "Full instruments", look speed, a custom threat level.

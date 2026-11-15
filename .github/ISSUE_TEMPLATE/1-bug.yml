@@ -1,0 +1,144 @@
+name: Bug
+description: Something in the game does not work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A few things look like bugs and are not:
+
+        - Points stay where they were measured. An opened door or something that walked away leaves its old points behind until they fade.
+        - Nothing that hunts you is ever drawn. You only see the points a scan left on it.
+        - Some figures are only in the point cloud and are gone when you look again.
+
+        The rules are in the README, under [How the scanner works](https://github.com/StefanKnol/No-Return/blob/main/README.md#how-the-scanner-works) and the spoiler fold below it.
+
+        If a generated station cannot be walked or finished, use the **Broken station** form: it asks for the seed.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw or heard, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: What you did just before, step by step. If it only happened once, say so.
+      placeholder: |
+        1. Start a descent into Kessel-9 on Standard
+        2. Start Generator 2
+        3. Open the map while a full sweep is running
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: What it is about
+      options:
+        - Scanner and point cloud
+        - The Hollow, the Stills or the apparitions
+        - Doors, power, keycards and objectives
+        - Moving around (walking, crouching, stairs, ducts, vents)
+        - Sound and the radio
+        - Controls (keyboard, mouse, touch)
+        - Map, messages and menus
+        - Slow or stuttering
+        - Does not load, freezes or crashes
+        - Settings, checkpoints or best times
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: station
+    attributes:
+      label: Station
+      options:
+        - Kessel-9
+        - Uncharted annex
+        - Not in a descent (title screen, menus)
+    validations:
+      required: true
+
+  - type: input
+    id: seed
+    attributes:
+      label: Seed and station options
+      description: Uncharted annex only. The seed is on the pause and ending screens, and on the title screen afterwards as "Last descent". Add the size, layout and levels you chose.
+      placeholder: "48213, large, mixed, two levels"
+
+  - type: dropdown
+    id: threat
+    attributes:
+      label: Threat level
+      options:
+        - Survey only
+        - Standard
+        - Nightmare
+        - Custom
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where in the station
+      description: The name above the nearest door, or the room you were in.
+      placeholder: "Pump Hall B, by the door to the generator room"
+
+  - type: input
+    id: device
+    attributes:
+      label: Device, operating system and browser
+      placeholder: "Windows 11, Firefox 145. Or: Pixel 9, Android 16, Chrome 142"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: quality
+    attributes:
+      label: Quality setting
+      description: Matters most for anything about how it looks or how fast it runs.
+      options:
+        - Low
+        - Medium
+        - High
+        - Ultra
+        - I do not know
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: How you played
+      options:
+        - A page hosted online
+        - index.html I built myself (npm run build)
+        - Docker
+        - The dev build (npm run dev), with debug mode or the workshop
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The game does not show a version number. For a hosted page, give its address. For your own build, give the commit (`git rev-parse --short HEAD`).
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console
+      description: On a desktop browser, press F12, open the Console tab and paste anything in red. No need to format it.
+      render: text
+
+  - type: textarea
+    id: pictures
+    attributes:
+      label: Screenshots or video
+      description: Drag files in here. For anything about a place, a picture of the map (`Tab` or `M`) helps as well.

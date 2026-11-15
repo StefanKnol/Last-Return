@@ -1,0 +1,116 @@
+name: Broken station
+description: An Uncharted annex that cannot be walked or finished, or a seed that did not give the same station twice.
+labels: ["bug", "generated-station"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every generated station is supposed to be finishable: nothing unreachable, every door usable from both sides, the generator reachable without power, each keycard reachable with the one before it. If yours was not, the seed and the four options below are what it takes to build it again.
+
+        The seed is on the pause and ending screens, and on the title screen afterwards as "Last descent".
+
+  - type: input
+    id: seed
+    attributes:
+      label: Seed
+      description: Exactly as shown, or exactly as you typed it.
+      placeholder: "48213"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options:
+        - Small
+        - Medium
+        - Large
+        - Massive
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layout
+    attributes:
+      label: Layout
+      options:
+        - Tight
+        - Mixed
+        - Sprawling
+        - Sparse
+    validations:
+      required: true
+
+  - type: dropdown
+    id: levels
+    attributes:
+      label: Levels
+      options:
+        - One
+        - Two
+    validations:
+      required: true
+
+  - type: dropdown
+    id: problem
+    attributes:
+      label: What is wrong
+      options:
+        - A room or part of the station cannot be reached
+        - A door will not open, or only opens from one side
+        - A spool, keycard or other pickup cannot be reached or used
+        - No way forward (a lock, the fuel, the samples or the breaker in the wrong order)
+        - Something stands in a doorway, a wall or another object
+        - Stairs, a duct or a vent cannot be used
+        - A sign, arrow, note or radio line points to the wrong place
+        - The same seed gave a different station
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What blocked you, and how you could tell.
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The name above the door, or the rooms on either side of the problem.
+      placeholder: "The door between the battery room and the corridor"
+
+  - type: textarea
+    id: progress
+    attributes:
+      label: How far you were
+      description: Was the power on? What were you carrying? The map screen lists it (`Tab` or `M`).
+      placeholder: "Power on, keycard 1 of 2, one spool, the fuel can"
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: How you played
+      options:
+        - A page hosted online
+        - index.html I built myself (npm run build)
+        - Docker
+        - The dev build (npm run dev)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: A seed gives a different station once rooms are added or changed, so this matters here. For a hosted page, give its address. For your own build, give the commit (`git rev-parse --short HEAD`).
+
+  - type: textarea
+    id: pictures
+    attributes:
+      label: Map and screenshots
+      description: Drag files in here. A picture of the map (`Tab` or `M`) with the trouble spot scanned is the most useful one.
