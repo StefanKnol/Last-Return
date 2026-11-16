@@ -16,7 +16,8 @@ const interfaceState = {
   lastStatusSignature: '',  // objective and chip state as last shown, to notice when it changes
   objectiveShownUntil: 0,   // on the quiet screen the objective block is visible until this moment
   messages: [],
-  captionExpiresAt: 0,
+  captionLines: [],     // the caption lines on screen: { slot, key, rank, source, expiresAt, element, textElement, whereElement, whereText }
+  captionCounts: {},    // how often each caption has been shown since the page was opened, by key (for the tests)
   textRefreshTimer: 0,
   minimapRefreshTimer: 0,
   visitedZones: new Set(),
@@ -40,7 +41,8 @@ function initializeInterface() {
     'difficulty-description', 'button-begin', 'intro-lines', 'button-skip-intro', 'pause-objective', 'button-resume',
     'button-pause-restart', 'reader-source', 'reader-heading', 'reader-body', 'button-close-reader', 'death-title',
     'death-lines', 'button-retry', 'button-death-restart', 'ending-stats', 'ending-manifest', 'button-ending-restart',
-    'button-ending-uncharted', 'station-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem'
+    'button-ending-uncharted', 'station-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem',
+    'title-build', 'link-report-problem-title'
   ];
   for (const elementId of elementIds) interfaceState.elements[elementId] = getElement(elementId);
 
@@ -53,6 +55,14 @@ function initializeInterface() {
 
   const elements = interfaceState.elements;
   elements['button-begin'].addEventListener('click', function () { beginNewGame(); });
+  // Which build this is, and "Report a problem", on the title screen and the pause screen. The address is worked
+  // out at the moment the link is reached for, so it carries the settings as they are then.
+  elements['title-build'].textContent = 'Version: ' + describeBuild();
+  for (const link of [elements['link-report-problem-title'], elements['link-report-problem']]) {
+    for (const eventName of ['pointerdown', 'focus', 'click']) {
+      link.addEventListener(eventName, function () { link.href = buildReportProblemAddress(); });
+    }
+  }
   elements['button-skip-intro'].addEventListener('click', function () { finishIntro(); });
   elements['button-resume'].addEventListener('click', function () { resumeGame(); });
   elements['button-pause-restart'].addEventListener('click', function () { returnToTitle(); });
@@ -345,12 +355,13 @@ function drawMinimap() {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(interfaceState.mapSourceCanvas, sourceX, sourceY, sourceSize, sourceSize, 0, 0, canvas.width, canvas.height);
   const scale = canvas.width / spanMetres;
-  context.fillStyle = '#f2a93b';
   for (const interactable of interactables) {
     if (!interactable.isAvailable || !interactable.isDiscovered) continue;
     const markerX = (interactable.x - player.x) * scale + canvas.width / 2;
     const markerY = (interactable.z - player.z) * scale + canvas.height / 2;
     if (markerX < 0 || markerY < 0 || markerX > canvas.width || markerY > canvas.height) continue;
+    // Bright for what can be acted on now, dim for the rest (see isInteractableWantedNow).
+    context.fillStyle = isInteractableWantedNow(interactable) ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
     context.fillRect(markerX - 3, markerY - 3, 6, 6);
   }
   if (debugHooks.drawMapMarkers) {
@@ -361,9 +372,33 @@ function drawMinimap() {
   drawPlayerMarker(context, canvas.width / 2, canvas.height / 2, player.yaw, 7);
 }
 
+// The full map is drawn at 760 by 640 at least, and larger when the screen has room for more. On a small
+// screen the style sheet scales that drawing down; on a big one the station is drawn with more pixels per
+// metre, where it used to stay a small picture in the middle of the screen.
+const FULL_MAP_MINIMUM_WIDTH = 760, FULL_MAP_MINIMUM_HEIGHT = 640;
+const FULL_MAP_HEIGHT_KEPT_FREE = 150; // header, objective, legend and padding: the same 150px as in the style sheet
+
+function fitFullMapCanvasToScreen(canvas) {
+  const overlay = interfaceState.elements['map-overlay'];
+  const overlayStyle = window.getComputedStyle(overlay);
+  const canvasBorder = 2;
+  const availableWidth = overlay.clientWidth - (parseFloat(overlayStyle.paddingLeft) || 0) - (parseFloat(overlayStyle.paddingRight) || 0) - canvasBorder;
+  const availableHeight = window.innerHeight - FULL_MAP_HEIGHT_KEPT_FREE;
+  const wantedWidth = Math.max(FULL_MAP_MINIMUM_WIDTH, Math.floor(availableWidth));
+  const wantedHeight = Math.max(FULL_MAP_MINIMUM_HEIGHT, Math.floor(availableHeight));
+  // Setting the size clears the canvas, so only do it when the size really changes.
+  if (canvas.width !== wantedWidth) canvas.width = wantedWidth;
+  if (canvas.height !== wantedHeight) canvas.height = wantedHeight;
+}
+
+// TWEAK: the colours of the marks on the map. "Wanted" is something you can act on right now.
+const MAP_MARKER_WANTED_COLOUR = '#f2a93b';
+const MAP_MARKER_OTHER_COLOUR = 'rgba(163, 122, 54, 0.5)';
+
 function drawFullMap() {
   flushMapPixels();
   const canvas = interfaceState.elements['map-canvas'];
+  fitFullMapCanvasToScreen(canvas);
   const context = canvas.getContext('2d');
   // Show only the part of the map the station occupies, as large as fits.
   const viewWidth = level.boundsMaximumX - level.boundsMinimumX, viewDepth = level.boundsMaximumZ - level.boundsMinimumZ;
@@ -399,8 +434,10 @@ function drawFullMap() {
   context.textAlign = 'left';
   for (const interactable of interactables) {
     if (!interactable.isAvailable || !interactable.isDiscovered) continue;
-    context.fillStyle = '#f2a93b';
-    context.fillRect(toCanvasX(interactable.x) - 4, toCanvasY(interactable.z) - 4, 8, 8);
+    // Bright, with a full-size mark, for what can be acted on now; dim and smaller for the rest.
+    const isWanted = isInteractableWantedNow(interactable), half = isWanted ? 4 : 3;
+    context.fillStyle = isWanted ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
+    context.fillRect(toCanvasX(interactable.x) - half, toCanvasY(interactable.z) - half, half * 2, half * 2);
     if (interactable.mapLabel) context.fillText(interactable.mapLabel, toCanvasX(interactable.x) + 8, toCanvasY(interactable.z) + 4);
   }
   if (debugHooks.drawMapMarkers) debugHooks.drawMapMarkers(context, toCanvasX, toCanvasY, 7);
@@ -459,18 +496,116 @@ function playRadioLine(key) {
   });
 }
 
-function showCaption(text) {
-  const element = interfaceState.elements['hud-caption'];
-  if (!element) return;
-  element.textContent = text;
-  element.classList.add('is-visible');
-  interfaceState.captionExpiresAt = game.realTime + 3.2;
+// ---- captions. What each one says, and who gets to see it, is the table CAPTIONS in 00-config.js. ----
+
+// The eight arrows, clockwise from straight ahead. (On screen it is one arrow, turned: the slanting ones of
+// most typefaces are too small to read at a glance. These are what the tests are given.)
+const CAPTION_ARROWS = ['\u2191', '\u2197', '\u2192', '\u2198', '\u2193', '\u2199', '\u2190', '\u2196'];
+
+// Whether the "Captions" setting lets captions of this level ('tell' or 'sound') through.
+function isCaptionLevelShown(level) {
+  return settings.captions === 'all' || (settings.captions === 'tells' && level === 'tell');
+}
+
+// Where a sound comes from, the way the player would point at it: which of eight ways (0 is straight ahead of
+// them, 2 to their right, 4 behind) and "close", "near" or "far". Something within arm's reach is simply
+// "right here", with no direction (-1).
+function describeCaptionSource(source) {
+  const offsetX = source.x - player.x, offsetZ = source.z - player.z;
+  const metres = Math.hypot(offsetX, offsetZ);
+  if (metres < 1.2) return { eighth: -1, word: 'right here' };
+  const ahead = offsetX * Math.sin(player.yaw) - offsetZ * Math.cos(player.yaw);
+  const toTheRight = offsetX * Math.cos(player.yaw) + offsetZ * Math.sin(player.yaw);
+  const eighth = (Math.round(Math.atan2(toTheRight, ahead) / (Math.PI / 4)) + 8) % 8;
+  return { eighth: eighth, word: metres < TUNING.captionCloseMetres ? 'close' : (metres < TUNING.captionNearMetres ? 'near' : 'far') };
+}
+
+function removeCaptionLine(line) {
+  line.element.remove();
+  const index = interfaceState.captionLines.indexOf(line);
+  if (index >= 0) interfaceState.captionLines.splice(index, 1);
+}
+
+// Puts a caption on screen, if the "Captions" setting shows captions of its kind and the thing is near enough
+// to be heard. `key` is its name in CAPTIONS. `source` is where the sound comes from: anything with an x and
+// a z (a figure, a door, a hatch); leave it out for a sound that comes from nowhere in particular. A source
+// that moves is followed: its arrow is worked out afresh every frame.
+// Calling this again while the line is still up keeps it up, so a sound that goes on (footsteps, a growl) is
+// one steady line and not a flicker. Returns whether the caption is now on screen.
+function showCaption(key, source) {
+  const caption = CAPTIONS[key], container = interfaceState.elements['hud-caption'];
+  if (!caption || !container || !isCaptionLevelShown(caption.level)) return false;
+  if (source && caption.withinMetres > 0 && distanceBetweenPoints(source.x, source.z, player.x, player.z) > caption.withinMetres) return false;
+  const slot = caption.slot || key, rank = caption.rank || 0;
+  let line = null;
+  for (const existing of interfaceState.captionLines) if (existing.slot === slot) line = existing;
+  // Something more telling has this line and has not had its time yet: this one waits.
+  if (line && line.key !== key && rank < line.rank && game.time < line.expiresAt) return false;
+  if (!line) {
+    line = { slot: slot, key: '', rank: 0, source: null, expiresAt: 0, whereText: '',
+      element: document.createElement('div'), textElement: document.createElement('span'), whereElement: document.createElement('span'),
+      arrowElement: document.createElement('span'), wordElement: document.createElement('span') };
+    line.element.className = 'hud-caption-line';
+    line.whereElement.className = 'hud-caption-where';
+    line.whereElement.setAttribute('aria-hidden', 'true'); // it changes as you turn: not something to read out each time
+    line.whereElement.hidden = true;
+    line.arrowElement.className = 'hud-caption-arrow';
+    line.arrowElement.textContent = CAPTION_ARROWS[0];
+    line.whereElement.appendChild(line.arrowElement);
+    line.whereElement.appendChild(line.wordElement);
+    line.element.appendChild(line.textElement);
+    line.element.appendChild(line.whereElement);
+    container.appendChild(line.element);
+    interfaceState.captionLines.push(line);
+    // Too many lines: the one that says least goes, and of those the one that has least time left.
+    while (interfaceState.captionLines.length > TUNING.captionMostLines) {
+      let weakest = null;
+      for (const other of interfaceState.captionLines) {
+        if (other !== line && (!weakest || other.rank < weakest.rank || (other.rank === weakest.rank && other.expiresAt < weakest.expiresAt))) weakest = other;
+      }
+      removeCaptionLine(weakest);
+    }
+  }
+  if (line.key !== key) { line.key = key; line.textElement.textContent = caption.text; }
+  line.rank = rank;
+  line.source = source || null;
+  line.expiresAt = game.time + caption.seconds;
+  interfaceState.captionCounts[key] = (interfaceState.captionCounts[key] || 0) + 1;
+  return true;
+}
+
+// Called every frame: takes down the lines whose time is up, and keeps the arrows pointing the right way.
+function updateCaptions() {
+  const container = interfaceState.elements['hud-caption'];
+  if (!container) return;
+  const isEverySound = settings.captions === 'all';
+  container.classList.toggle('is-every-sound', isEverySound);
+  for (let index = interfaceState.captionLines.length - 1; index >= 0; index--) {
+    const line = interfaceState.captionLines[index];
+    // (The second test: a new descent starts the clock again, and a line left over from the last one must not outstay it.)
+    if (game.time > line.expiresAt || line.expiresAt - game.time > 30 || !isCaptionLevelShown(CAPTIONS[line.key].level)) { removeCaptionLine(line); continue; }
+    const where = isEverySound && line.source ? describeCaptionSource(line.source) : null;
+    const whereText = where ? (where.eighth >= 0 ? CAPTION_ARROWS[where.eighth] + ' ' : '') + where.word : '';
+    if (whereText !== line.whereText) {
+      line.whereText = whereText;
+      line.whereElement.hidden = !where;
+      if (where) {
+        line.arrowElement.hidden = where.eighth < 0;
+        line.arrowElement.style.transform = 'rotate(' + Math.max(0, where.eighth) * 45 + 'deg)';
+        line.wordElement.textContent = where.word;
+      }
+    }
+  }
+}
+
+function clearCaptions() {
+  while (interfaceState.captionLines.length > 0) removeCaptionLine(interfaceState.captionLines[0]);
 }
 
 function clearMessages() {
   for (const message of interfaceState.messages) message.element.remove();
   interfaceState.messages.length = 0;
-  interfaceState.elements['hud-caption'].classList.remove('is-visible');
+  clearCaptions();
 }
 
 // ---------------------------------------------------------------------------
@@ -485,11 +620,7 @@ function getKeycardStatusText() {
 
 // What the extra jobs of this station want shown: "FUEL CAN", "CORES 1/3", "BREAKER OPEN". Empty when there is nothing to say.
 function getExtraJobStatusText() {
-  const flags = game.flags, parts = [];
-  if (flags.hasFuel) parts.push('FUEL CAN');
-  if (level.mission.coreCount > 0) parts.push('CORES ' + flags.coresCollected + '/' + level.mission.coreCount);
-  if (flags.spoolsUploaded && !flags.breakerClosed) parts.push('BREAKER OPEN');
-  return parts.join(' · ');
+  return getQuestChips().join(' · ');
 }
 
 function updateHud(realDt) {
@@ -501,7 +632,7 @@ function updateHud(realDt) {
       interfaceState.messages.splice(index, 1);
     }
   }
-  if (now > interfaceState.captionExpiresAt) elements['hud-caption'].classList.remove('is-visible');
+  updateCaptions();
 
   if (game.mode === 'title') {
     interfaceState.textRefreshTimer -= realDt;
@@ -704,21 +835,49 @@ function describeBuild() {
   return parts.length > 0 ? parts.join(' · ') : 'unknown';
 }
 
-// The address "Report a problem" on the pause screen opens: the bug form in .github/ISSUE_TEMPLATE/1-bug.yml,
+// The address "Report a problem" on the title screen and the pause screen opens: the bug form in .github/ISSUE_TEMPLATE/1-bug.yml,
 // with what the game knows already filled in. Each name here is the `id` of a field in that form, so a field
-// renamed there must be renamed here. Nothing is sent anywhere: the player sees the form and decides.
+// renamed there must be renamed here. GitHub fills in text fields only, never a list to pick from, which is why
+// those fields are text in the form. Nothing is sent anywhere: the player sees the form and decides.
+// What the server this page came from calls itself, such as "Official server", or '' if it does not say.
+// A server says it by filling in the page's `last-return-server` line (see docker/40-server-name.sh).
+function readServerName() {
+  const tag = document.querySelector('meta[name="last-return-server"]');
+  return tag ? tag.content.trim().slice(0, 40) : '';
+}
+
+// Where this page came from, as far as a page can tell: the dev build, a file opened from disk, a server on this
+// computer (which is also what Docker looks like), or a page online. Only the host and the path are given, and
+// for a file nothing at all, because its path has the player's user name in it. A server that names itself goes
+// in front, and what the page can tell still follows, because a page saved from that server keeps the name.
+function describeHowThePageIsServed() {
+  if (BUILD_STAMP.isDevBuild) return 'The dev build (npm run dev)';
+  const protocol = window.location.protocol, host = window.location.host;
+  let served = 'Online at ' + host + window.location.pathname;
+  if (protocol === 'file:') served = 'index.html opened from disk';
+  else if (protocol !== 'http:' && protocol !== 'https:') served = 'Inside another page';
+  else if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host)) served = 'Served from this computer (' + host + ')';
+  const serverName = readServerName();
+  return serverName ? serverName + ' · ' + served : served;
+}
+
 const REPORT_PROBLEM_ADDRESS = 'https://github.com/StefanKnol/Last-Return/issues/new';
 function buildReportProblemAddress() {
+  // From the title screen there is no descent to describe: the threat level is the one chosen there, and there
+  // is no room. A generated station stays loaded after a descent, so its seed is still given, as the last one.
+  const isOnTitleScreen = game.mode === 'title';
   const isGenerated = level.kind === 'generated';
+  const difficulty = isOnTitleScreen ? getChosenDifficulty() : game.difficulty;
   const fields = {
     template: '1-bug.yml',
     version: describeBuild(),
-    station: isGenerated ? 'Uncharted annex' : 'Kessel-9',
-    threat: game.difficulty.label,
-    where: ZONE_NAMES[getZoneAtPosition(player.x, player.z)] + ' (x ' + player.x.toFixed(1) + ', z ' + player.z.toFixed(1) + ')',
+    station: isOnTitleScreen ? 'Title screen' + (isGenerated ? ', after a descent into an Uncharted annex' : '') : (isGenerated ? 'Uncharted annex' : 'Kessel-9'),
+    threat: difficulty.isCustom ? difficulty.label + ': ' + difficulty.description : difficulty.label,
     quality: settings.quality.charAt(0).toUpperCase() + settings.quality.slice(1),
-    device: navigator.userAgent
+    device: navigator.userAgent,
+    build: describeHowThePageIsServed()
   };
+  if (!isOnTitleScreen) fields.where = ZONE_NAMES[getZoneAtPosition(player.x, player.z)] + ' (x ' + player.x.toFixed(1) + ', z ' + player.z.toFixed(1) + ')';
   if (isGenerated) fields.seed = [level.seed, level.sizeKey, level.layoutKey, level.levelsKey === 'two' ? 'two levels' : 'one level'].join(', ');
   return REPORT_PROBLEM_ADDRESS + '?' + new URLSearchParams(fields).toString();
 }

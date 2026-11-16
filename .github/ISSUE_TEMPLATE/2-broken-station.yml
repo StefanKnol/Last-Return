@@ -108,7 +108,7 @@ body:
     attributes:
       label: Version
       placeholder: "1.11.0 · build 214 · a5f1785"
-      description: The "Version" line on the pause screen, or the "Build" line on the ending screen. A seed gives a different station once rooms are added or changed, so this matters here.
+      description: The "Version" line on the title screen and the pause screen. A seed gives a different station once rooms are added or changed, so this matters here.
 
   - type: textarea
     id: pictures

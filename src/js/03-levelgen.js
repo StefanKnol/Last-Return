@@ -18,13 +18,15 @@ const ZONE_GENERATED_ROOM = 250; // stand-in zone for rooms that only exist in g
 // TWEAK: how big each size of station is. "fillers" are the extra rooms per tier (no power, power, keycard).
 const GENERATED_SIZE_PRESETS = {
   // vents: crawl-height tunnels between rooms. loops: full-height service ducts. Both join places far apart on foot.
-  // extraJobs: the fewest and the most extra jobs a station of this size is given (see EXTRA_JOBS below).
+  // extraJobs, errands: the fewest and the most quests a station of this size is given from each of the two
+  //           draws of quests (QUEST_POOLS in 09-quests.js, where every quest is described).
+  // extraGenerators: the fewest and the most generators it has besides Generator 2.
   // keycards: 1 to 3. Each card opens one more ring of doors, and the next card is somewhere inside that ring;
   //           Shaft 9 is behind the last. The third number of "fillers" is shared out between the rings.
-  small: { label: 'Small', fillers: [2, 1, 0], loops: 2, vents: 1, keycards: 1, extraJobs: [0, 1], spineLength: [10, 14] },
-  medium: { label: 'Medium', fillers: [4, 2, 1], loops: 3, vents: 2, keycards: 1, extraJobs: [1, 1], spineLength: [13, 18] },
-  large: { label: 'Large', fillers: [7, 4, 2], loops: 5, vents: 3, keycards: 2, extraJobs: [1, 2], spineLength: [16, 22] },
-  massive: { label: 'Massive', fillers: [12, 6, 4], loops: 7, vents: 7, keycards: 3, extraJobs: [2, 3], spineLength: [18, 26] },
+  small: { label: 'Small', fillers: [2, 1, 0], loops: 2, vents: 1, keycards: 1, extraJobs: [0, 1], errands: [0, 0], extraGenerators: [0, 1], spineLength: [10, 14] },
+  medium: { label: 'Medium', fillers: [4, 2, 1], loops: 3, vents: 2, keycards: 1, extraJobs: [1, 1], errands: [0, 1], extraGenerators: [0, 2], spineLength: [13, 18] },
+  large: { label: 'Large', fillers: [7, 4, 2], loops: 5, vents: 3, keycards: 2, extraJobs: [1, 2], errands: [0, 1], extraGenerators: [1, 2], spineLength: [16, 22] },
+  massive: { label: 'Massive', fillers: [12, 6, 4], loops: 7, vents: 7, keycards: 3, extraJobs: [2, 3], errands: [1, 2], extraGenerators: [1, 3], spineLength: [18, 26] },
 };
 
 // TWEAK: how spread out a station is.
@@ -38,13 +40,6 @@ const GENERATED_LAYOUT_PRESETS = {
   sparse: { label: 'Sparse', corridorChance: 0.8, corridorLength: [7, 16], spread: 70 },
 };
 
-// TWEAK: the extra jobs a generated station can be given on top of "power, three spools, lift".
-//   fuel     Generator 2 will not start until you bring it the fuel can, which is somewhere you can reach without power.
-//   cores    The lift terminal will not take the upload until you also hold every core sample (2 to 4 of them).
-//   breaker  After the upload the lift does not come: you must close the winch breaker, somewhere behind a powered
-//            door, and then get back to the lobby with the lift already on its way and the Hollow told where you are.
-// Remove a name from the list and no station will get that job.
-const EXTRA_JOBS = ['fuel', 'cores', 'breaker'];
 
 // How many levels a station has. With two, everything behind the keycard (Shaft 9 included) is down a flight of stairs.
 const GENERATED_LEVEL_PRESETS = {
@@ -861,12 +856,9 @@ function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
   plan.ventCount = planLoops(plan, size.vents || 0, true, false);
   if (plan.ventCount < (size.vents || 0)) plan.ventCount += planLoops(plan, size.vents - plan.ventCount, true, true);
   plan.loopCount = planLoops(plan, size.loops, false);
-  // The extra jobs, drawn by the seed like everything else. They are drawn last, so adding a job to the
-  // list above does not change the rooms and corridors an existing seed gives.
-  const jobRange = size.extraJobs || [0, 0];
-  const jobCount = Math.min(EXTRA_JOBS.length, jobRange[0] + Math.floor(random() * (jobRange[1] - jobRange[0] + 1)));
-  const jobs = EXTRA_JOBS.map(function (job) { return [random(), job]; }).sort(function (a, b) { return a[0] - b[0]; }).slice(0, jobCount).map(function (pair) { return pair[1]; });
-  plan.mission = { needsFuel: jobs.indexOf('fuel') >= 0, coreCount: jobs.indexOf('cores') >= 0 ? 2 + Math.floor(random() * 3) : 0, needsBreaker: jobs.indexOf('breaker') >= 0 };
+  // The quests, drawn last so that nothing about them changes the rooms and corridors a seed gives.
+  plan.seed = seed;
+  plan.quests = planQuests(seed, size, random);
   return plan;
 }
 
@@ -960,61 +952,6 @@ function findDropSpot(room, random, takenSpots) {
     }
   }
   return candidates.length > 0 ? candidates[Math.floor(random() * candidates.length)] : null;
-}
-
-// Puts out whatever the station's extra jobs need. A job that finds no room for its things is dropped,
-// so the station is never left asking for something that is not there.
-function placeMissionObjects(plan, random) {
-  const mission = level.mission;
-  mission.needsFuel = false; mission.coreCount = 0; mission.needsBreaker = false;
-  const takenSpots = [];
-  const roomsOfTiers = function (lowestTier, highestTier) {
-    const rooms = plan.rooms.filter(function (room) {
-      return !room.isCorridor && room.tier >= lowestTier && room.tier <= highestTier &&
-        ['liftLobby', 'generatorRoom', 'calibrationStore', 'shaftChamber', 'stairwell'].indexOf(room.key) < 0;
-    });
-    return rooms.map(function (room) { return [random(), room]; }).sort(function (a, b) { return a[0] - b[0]; }).map(function (pair) { return pair[1]; });
-  };
-  const placeIn = function (rooms, place) {
-    for (const room of rooms) {
-      const spot = findDropSpot(room, random, takenSpots);
-      if (!spot) continue;
-      takenSpots.push(spot);
-      clearPlacement();
-      placement.offsetY = room.floorY;
-      place(spot[0], spot[1], room);
-      clearPlacement();
-      return room;
-    }
-    return null;
-  };
-  if (plan.mission.needsFuel) {
-    // Somewhere you can get to before the power is on.
-    mission.needsFuel = placeIn(roomsOfTiers(0, 0), function (x, z) { addFuelCan(x, z); }) !== null;
-  }
-  if (plan.mission.coreCount > 0) {
-    // Scattered through everything short of the last ring, one to a room.
-    const rooms = roomsOfTiers(0, plan.finalTier - 1);
-    for (let core = 0; core < Math.min(plan.mission.coreCount, MAXIMUM_CORE_SAMPLES); core++) {
-      const room = placeIn(rooms, function (x, z) { addCoreSample(OBJECT_CORE_FIRST + mission.coreCount, x, z, random() * 3); });
-      if (!room) break;
-      rooms.splice(rooms.indexOf(room), 1);
-      mission.coreCount++;
-    }
-    if (mission.coreCount < 2) {
-      // One sample is not a job. Take it back out.
-      for (let index = interactables.length - 1; index >= 0; index--) {
-        if (interactables[index].objectId >= OBJECT_CORE_FIRST) { for (const prop of interactables[index].props) prop.isRemoved = true; interactables.splice(index, 1); }
-      }
-      mission.coreCount = 0;
-    }
-  }
-  if (plan.mission.needsBreaker) {
-    // Behind a powered door, so it cannot be dealt with before the Hollow is awake.
-    mission.needsBreaker = placeIn(roomsOfTiers(1, 1), function (x, z) { addWinchBreaker(x, z); }) !== null;
-  }
-  // The crates and the cabinet stand on the floor: work out again where things can walk.
-  computeNavigationGrid();
 }
 
 // Direction signs, like the ones in Kessel-9: which way to the lift, and which way to where you are probably going.
@@ -1287,7 +1224,7 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   placement.isGenerating = false;
   computeNavigationGrid();
   computeLevelBounds();
-  placeMissionObjects(plan, random);
+  placeQuests(plan, random);
   addCorridorDirectionSigns(plan);
 
   // Places for the Hollow to wander between: the middle of every room and corridor.
@@ -1317,6 +1254,8 @@ function buildStation(kind, seed, sizeKey, layoutKey, levelsKey) {
   const wasBuiltAsAsked = buildStationRooms(kind, seed, sizeKey, layoutKey, levelsKey);
   // Last of all, the ceiling hatches of the Hollow's crawlspace: they depend on where the locked doors ended up.
   placeHollowHatches();
+  // And the loose things on the floor that are loud to walk on. After the hatches, so that none lies under one.
+  placeNoisyFloor();
   return wasBuiltAsAsked;
 }
 
@@ -1386,24 +1325,8 @@ function auditLevelProgression() {
       }
     } else if (!canReach(OBJECT_SPOOL_3)) problems.push('the third spool cannot be reached at all');
   }
-  // The extra jobs: each thing they need must exist, and be where its job says it is.
-  const mission = level.mission;
-  if (mission.needsFuel) {
-    reach(function (door) { return door.kind === DOOR_KIND_POWERED || door.kind === DOOR_KIND_KEYCARD; });
-    if (!canReach(OBJECT_FUEL_CAN)) problems.push('the fuel can cannot be reached without power');
-    mustExistOnce.push(OBJECT_FUEL_CAN);
-  }
-  if (mission.needsBreaker) {
-    reach(function (door) { return door.kind === DOOR_KIND_KEYCARD; });
-    if (!canReach(OBJECT_WINCH_BREAKER)) problems.push('the winch breaker cannot be reached with power alone');
-    mustExistOnce.push(OBJECT_WINCH_BREAKER);
-  }
-  reach(function () { return false; });
-  for (let core = 0; core < mission.coreCount; core++) {
-    if (!canReach(OBJECT_CORE_FIRST + core)) problems.push('core sample ' + (core + 1) + ' cannot be reached at all');
-    mustExistOnce.push(OBJECT_CORE_FIRST + core);
-  }
-  if (mission.coreCount === 1) problems.push('a station asks for exactly one core sample');
+  // The quests: each thing they need must exist, and be where its quest says it is (09-quests.js).
+  auditQuests(problems, reach, canReach, mustExistOnce);
   if (!level.storeZone) problems.push('there is no calibration store');
   // Everything you must use has to be within arm's reach of somewhere you can stand.
   for (const objectId of mustExistOnce) {

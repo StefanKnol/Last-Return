@@ -14,6 +14,32 @@ function check(description, condition, detail) {
   const inGame = (callback, argument) => page.evaluate(callback, argument);
 
   check('layout audit finds nothing unreachable', (await inGame(() => window.lastReturnDebug.auditLayout())).length === 0);
+
+  // --- the title screen says which build this is, and its "Report a problem" has no descent to describe ---
+  const title = await inGame(() => {
+    const link = document.getElementById('link-report-problem-title');
+    link.focus();
+    const address = new URL(link.href);
+    return { buildLine: document.getElementById('title-build').textContent, isVisible: link.getBoundingClientRect().height > 0,
+      address: address.origin + address.pathname, fields: Object.fromEntries(address.searchParams) };
+  });
+  check('the title screen shows the build, and "Report a problem" there opens the bug form with the build, the chosen threat level and no room',
+    /^Version: \d+\.\d+\.\d+ · build \d+ · [0-9a-f]{7}\+?$/.test(title.buildLine) && title.isVisible &&
+    title.address === 'https://github.com/StefanKnol/Last-Return/issues/new' && title.fields.template === '1-bug.yml' &&
+    'Version: ' + title.fields.version === title.buildLine && title.fields.station === 'Title screen' && title.fields.threat === 'Standard' &&
+    title.fields.where === undefined && title.fields.seed === undefined && title.fields.build.length > 0, title);
+  // --- a server that names itself is named in the report, in front of what the page can tell by itself ---
+  const named = await inGame(() => {
+    const tag = document.querySelector('meta[name="last-return-server"]'), link = document.getElementById('link-report-problem-title');
+    const read = () => { link.dispatchEvent(new Event('pointerdown')); return new URL(link.href).searchParams.get('build'); };
+    const result = { asBuilt: tag ? tag.content : null, unnamed: read() };
+    tag.content = 'Official server';
+    result.named = read();
+    tag.content = '';
+    return result;
+  });
+  check('the page is built naming no server, and one that names itself goes in front of "How you played" in the report',
+    named.asBuilt === '' && named.unnamed.length > 0 && named.unnamed.indexOf('Official') < 0 && named.named === 'Official server · ' + named.unnamed, named);
   await startGame(page, false);
 
   // --- walking out of the lift ---
@@ -22,6 +48,16 @@ function check(description, condition, detail) {
   await page.keyboard.up('KeyW');
   const afterWalking = await inGame(() => ({ x: window.lastReturnDebug.player.x, hasLeftLift: window.lastReturnDebug.game.flags.hasLeftLift }));
   check('walking forward leaves the lift car', afterWalking.hasLeftLift && afterWalking.x > 10, afterWalking);
+  // Leaving the lift has just changed the objective, and the quiet screen shows it for eight seconds after that.
+  // So it is looked at here and not further down with the rest of the quiet screen: by then the pause screen has
+  // come and gone, and on a machine that draws slowly that takes most of those eight seconds, or all of them.
+  await drawFrames(page, 1);
+  // The screen learns of the new objective in the first frame it draws after the change, and one screenshot
+  // does not promise that such a frame has been drawn: on the machine that checks pull requests the look
+  // below once came first, and found the objective still hidden from before. So this waits for the screen
+  // itself, as the heat meter's check further down does. If the objective never shows, the check says so.
+  await page.waitForFunction(() => !document.getElementById('hud-block-objective').classList.contains('is-faded'), null, { polling: 20, timeout: 3000 }).catch(() => {});
+  const objectiveFadedJustAfterItChanged = await inGame(() => document.getElementById('hud-block-objective').classList.contains('is-faded'));
   await inGame(() => window.lastReturnDebug.simulate(4));
   check('lift door closes behind the player', (await inGame(() => window.lastReturnDebug.doors[0].openFraction)) === 0);
 
@@ -36,19 +72,30 @@ function check(description, condition, detail) {
   check('"Report a problem" opens the bug form with the build, the station, the threat level and the room filled in',
     paused.mode === 'paused' && paused.address === 'https://github.com/StefanKnol/Last-Return/issues/new' && paused.fields.template === '1-bug.yml' &&
     'Version: ' + paused.fields.version === paused.buildLine && paused.fields.station === 'Kessel-9' && paused.fields.seed === undefined &&
-    paused.fields.threat === 'Standard' && /^[A-Z0-9 ]+ \(x [\d.]+, z [\d.]+\)$/.test(paused.fields.where) && paused.fields.where.indexOf('UNSURVEYED') < 0 && paused.fields.device.length > 0, paused);
+    paused.fields.threat === 'Standard' && /^[A-Z0-9 ]+ \(x [\d.]+, z [\d.]+\)$/.test(paused.fields.where) && paused.fields.where.indexOf('UNSURVEYED') < 0 && paused.fields.device.length > 0 && paused.fields.quality === 'High' && // the video quality a fresh game starts on
+    
+    /^(index\.html opened from disk|Served from this computer \(.+\))$/.test(paused.fields.build), paused);
+  // Pausing lets go of the mouse, and the browser reports that a moment later. Resuming before it has would
+  // let that report arrive in the middle of play, where it means "the player pressed Escape": paused again.
+  await page.waitForFunction(() => document.pointerLockElement === null, null, { polling: 50 });
+  await page.waitForTimeout(100);
   await page.keyboard.press('Escape');
-  check('Escape resumes the descent', (await inGame(() => window.lastReturnDebug.game.mode)) === 'playing');
+  await page.waitForTimeout(300);
+  check('Escape resumes the descent, and it stays resumed', (await inGame(() => window.lastReturnDebug.game.mode)) === 'playing');
 
   // --- the quiet screen: instruments stay out of the way until they have something to say ---
   await drawFrames(page, 2);
   const quiet = await inGame(() => {
     const debug = window.lastReturnDebug, faded = (id) => document.getElementById(id).classList.contains('is-faded');
-    const result = { setting: debug.settings.hud, readouts: faded('hud-readouts'), minimap: faded('hud-block-map'), heatCold: faded('meter-heat'), objectiveJustChanged: faded('hud-block-objective') };
+    const result = { setting: debug.settings.hud, readouts: faded('hud-readouts'), minimap: faded('hud-block-map'), heatCold: faded('meter-heat') };
     debug.player.heat = 0.6;
     return result;
   });
-  await drawFrames(page, 2);
+  quiet.objectiveJustChanged = objectiveFadedJustAfterItChanged;
+  // The emitter cools as the clock runs, a second and a half from here to cold enough to hide the meter again. So
+  // this waits for the meter itself and not for two screenshots: on a machine that draws slowly, as the one that
+  // checks pull requests does, those take longer than that. If the meter never shows, the check below says so.
+  await page.waitForFunction(() => !document.getElementById('meter-heat').classList.contains('is-faded'), null, { polling: 20, timeout: 3000 }).catch(() => {});
   const quietLater = await inGame(() => {
     const debug = window.lastReturnDebug, faded = (id) => document.getElementById(id).classList.contains('is-faded');
     const result = { heatWarm: faded('meter-heat') };
@@ -66,6 +113,46 @@ function check(description, condition, detail) {
   check('the quiet screen hides the readouts, the minimap and a cold heat meter, shows the objective when it has just changed, and shows the heat meter once the emitter is warm',
     quiet.setting === 'quiet' && quiet.readouts && quiet.minimap && quiet.heatCold && !quiet.objectiveJustChanged && !quietLater.heatWarm, { quiet: quiet, later: quietLater });
   check('"Full instruments" shows them all', !full.readouts && !full.minimap && !full.heatCold, full);
+
+  // --- the laser lines start at the lens of the scanner in the player's hand, not in the air beside it ---
+  // The station and the scanner are drawn with different fields of view, so both are compared where they land on the screen.
+  const measureBeamOrigin = () => inGame(() => {
+    const debug = window.lastReturnDebug, renderer = debug.renderer, beamLines = debug.beamLines;
+    const projectToScreen = (matrix, x, y, z) => {
+      const w = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+      return [(matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) / w, (matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) / w];
+    };
+    const lensMatrix = new Float32Array(16), projection = renderer.viewmodelProjectionMatrix, placement = renderer.viewmodelMatrix;
+    for (let column = 0; column < 4; column++) {
+      for (let row = 0; row < 4; row++) {
+        let sum = 0;
+        for (let index = 0; index < 4; index++) sum += projection[index * 4 + row] * placement[column * 4 + index];
+        lensMatrix[column * 4 + row] = sum;
+      }
+    }
+    const lens = projectToScreen(lensMatrix, debug.viewmodelLensCenter[0], debug.viewmodelLensCenter[1], debug.viewmodelLensCenter[2]);
+    let largestDistance = 0;
+    for (let lineIndex = 0; lineIndex < beamLines.count; lineIndex++) {
+      const offset = lineIndex * 8;
+      const origin = projectToScreen(renderer.viewProjectionMatrix, beamLines.vertices[offset], beamLines.vertices[offset + 1], beamLines.vertices[offset + 2]);
+      largestDistance = Math.max(largestDistance, Math.hypot(origin[0] - lens[0], origin[1] - lens[1]));
+    }
+    return { lineCount: beamLines.count, lensOnScreen: lens, largestDistanceFromLens: largestDistance, fieldOfView: debug.renderCamera.fieldOfViewDegrees };
+  });
+  await page.keyboard.down('Space');
+  await drawFrames(page, 3);
+  const beamStanding = await measureBeamOrigin();
+  await page.keyboard.down('KeyW');
+  await page.keyboard.down('ShiftLeft');
+  await drawFrames(page, 3);
+  const beamSprinting = await measureBeamOrigin();
+  await page.keyboard.up('ShiftLeft');
+  await page.keyboard.up('KeyW');
+  await page.keyboard.up('Space');
+  await inGame(() => { window.lastReturnDebug.player.heat = 0; });
+  check('the laser lines of a scan start at the lens of the scanner in hand, standing and sprinting',
+    beamStanding.lineCount > 0 && beamStanding.largestDistanceFromLens < 0.005 && beamSprinting.lineCount > 0 && beamSprinting.largestDistanceFromLens < 0.005,
+    { standing: beamStanding, sprinting: beamSprinting });
 
   // --- voice recordings: a line with a recording is played, one without stays text only ---
   // Made-up line names are used, so this works whether or not real recordings are in assets/voice.
@@ -115,7 +202,42 @@ function check(description, condition, detail) {
   });
   check('standing among the dummies without scanning stores no points', figureTrace.returnsAdded === 0 && figureTrace.stillCount === 9, figureTrace);
 
-  // --- first spool and the reader ---
+  // --- a door that opens leaves its old points behind until they fade ---
+  const doorPoints = await inGame(() => {
+    const debug = window.lastReturnDebug;
+    const door = debug.doors.find((candidate) => candidate !== debug.getLiftDoor() && candidate.openFraction === 0 && debug.getDoorSides(candidate));
+    const cloud = debug.pointCloud;
+    const firstPointIndex = cloud.writeIndex, pointCount = 20;
+    for (let pointNumber = 0; pointNumber < pointCount; pointNumber++) {
+      debug.addScanPoint(door.centerX, door.baseY + 0.2 + pointNumber * 0.1, door.centerZ, 0.8, door.slab.surfaceClass, 0);
+    }
+    const describePoints = () => {
+      let stillThere = 0, fading = 0, faded = 0;
+      for (let pointNumber = 0; pointNumber < pointCount; pointNumber++) {
+        const pointIndex = (firstPointIndex + pointNumber) % cloud.capacity;
+        const birthTime = cloud.floatView[pointIndex * 5 + 3];
+        const lifeSeconds = cloud.byteView[pointIndex * 20 + 18] * 0.25;
+        if (birthTime > -1e8) stillThere++;
+        if (birthTime > -1e8 && lifeSeconds > 0) fading++;
+        if (birthTime > -1e8 && lifeSeconds > 0 && debug.game.time - birthTime >= lifeSeconds) faded++;
+      }
+      return { stillThere: stillThere, fading: fading, faded: faded };
+    };
+    const whileShut = describePoints();
+    const side = debug.getDoorSides(door)[0];
+    debug.teleport(side.x, side.z, 0);
+    debug.simulate(0.5);
+    const justOpened = describePoints();
+    justOpened.openFraction = door.openFraction;
+    debug.simulate(debug.tuning.doorImprintSeconds + 0.5);
+    return { pointCount: pointCount, whileShut: whileShut, justOpened: justOpened, later: describePoints() };
+  });
+  check('points on a shut door are permanent', doorPoints.whileShut.stillThere === doorPoints.pointCount && doorPoints.whileShut.fading === 0, doorPoints.whileShut);
+  check('a door that opens keeps its old points, and they start to fade',
+    doorPoints.justOpened.openFraction > 0 && doorPoints.justOpened.stillThere === doorPoints.pointCount &&
+    doorPoints.justOpened.fading === doorPoints.pointCount && doorPoints.justOpened.faded === 0, doorPoints.justOpened);
+  check('the old points of an opened door are gone after doorImprintSeconds', doorPoints.later.faded === doorPoints.pointCount, doorPoints.later);
+
   await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(53, 35.2, 0); debug.use(3); });
   check('taking a spool opens its log', (await inGame(() => window.lastReturnDebug.game.mode)) === 'reading');
   await page.keyboard.press('KeyE');
@@ -188,7 +310,8 @@ function check(description, condition, detail) {
     debug.hollow.nextListenIn = 0.05;
     debug.simulate(0.5);
     const during = { state: debug.hollow.state, speed: debug.hollow.currentSpeed, timer: debug.hollow.listenTimer };
-    debug.simulate(7.5);
+    // However long it may stand there, and a little more: the pause is drawn between two tuning values.
+    debug.simulate(debug.tuning.hollowListenSecondsMaximum + 0.5);
     return { during: during, stateAfter: debug.hollow.state };
   });
   check('wandering near the player it stops dead to listen, then moves on',
@@ -254,6 +377,10 @@ function check(description, condition, detail) {
     // The player keeps quiet for twenty seconds: it must never come nearer than it was, and it must get to a far
     // room. (Where it is at the twentieth second is not asked: if the far room was close enough to reach in
     // fourteen, it is by then on its way to the next far room, and that walk can lead back past the middle.)
+    // A wandering Hollow near the player now and then stops dead to listen, for up to ten seconds. That is a
+    // different rule with its own chance, and a long pause would eat the twenty seconds measured here, so
+    // it is put off for this stretch.
+    hollow.nextListenIn = 999;
     let nearestSteps = Infinity, farthestSteps = 0;
     const stepsAtStart = debug.stepsFromPlayerTo(hollow.figure.x, hollow.figure.z);
     for (let second = 0; second < 20; second++) {
@@ -369,6 +496,24 @@ function check(description, condition, detail) {
   await drawFrames(debugPage, 3);
   await clickInPage('touch-map'); // the full map, with creature markers
   await drawFrames(debugPage, 2);
+  // The full map uses the room a big screen has, and still fits on a small one.
+  const measureFullMap = () => debugPage.evaluate(() => {
+    const canvas = document.getElementById('map-canvas'), box = canvas.getBoundingClientRect();
+    return { drawnWidth: canvas.width, drawnHeight: canvas.height, shownWidth: Math.round(box.width), shownHeight: Math.round(box.height),
+      fitsOnScreen: box.left >= 0 && box.top >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight };
+  });
+  const mapOnSmallScreen = await measureFullMap();
+  await debugPage.setViewportSize({ width: 2560, height: 1440 });
+  await drawFrames(debugPage, 2);
+  await debugPage.waitForTimeout(250); // the map is redrawn about twelve times a second
+  await drawFrames(debugPage, 2);
+  const mapOnBigScreen = await measureFullMap();
+  await debugPage.setViewportSize({ width: 1280, height: 720 });
+  await drawFrames(debugPage, 2);
+  check('the full map fills a big screen and still fits on a small one',
+    mapOnSmallScreen.fitsOnScreen && mapOnBigScreen.fitsOnScreen && mapOnBigScreen.shownWidth > 2000 && mapOnBigScreen.shownHeight > 1200 &&
+    Math.abs(mapOnBigScreen.drawnWidth - mapOnBigScreen.shownWidth) <= 2 && Math.abs(mapOnBigScreen.drawnHeight - mapOnBigScreen.shownHeight) <= 2,
+    { small: mapOnSmallScreen, big: mapOnBigScreen });
   await clickInPage('touch-map');
   check('lit station, creature bodies, sense lines and map markers draw without errors',
     debugSession.problems.length === 0 && await inDebugGame(() => window.lastReturnDebug.hollow.isActive), debugSession.problems);

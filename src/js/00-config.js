@@ -123,6 +123,8 @@ const TUNING = {
   sweepHeatCost: 0.35,              // heat added by one sweep. Sweeps are refused above 0.78 heat.
   sweepHalfWidthDegrees: 55,        // how far left and right of centre a sweep reaches
   sweepHalfHeightDegrees: 40,       // how far above and below centre a sweep reaches
+  doorImprintSeconds: 4,            // how long the points on a door stay where they were measured once it slides away
+                                    // (maximum 63). They are solid for the first half and thin out over the second.
 
   // ---- Noise you make ------------------------------------------------------
   // Each of these is a one-off sound. If the Hollow is within this many metres it hears it
@@ -136,6 +138,25 @@ const TUNING = {
   noiseRadiusSweep: 22,
   noiseRadiusDoor: 8,           // a door you open (doors the Hollow opens do not count)
   noiseRadiusPickup: 4,
+  noiseRadiusValve: 18,          // shutting an isolation valve: its actuator squeals. On Standard that is heard from 14 m.
+  noiseRadiusGeneratorStart: 30, // starting one of the small generators (1, 3, 4). On Standard that is heard from 24 m, and within 7 m of it the Hollow knows where you are.
+  // ---- Captions (the lines themselves are in CAPTIONS, further down) ----
+  captionMostLines: 4,              // never more than this many caption lines on screen at once
+  captionCloseMetres: 5,            // with "every sound" on, a sound nearer than this is called "close" ...
+  captionNearMetres: 12,            // ... nearer than this "near", and anything further "far"
+  captionOwnDoorMetres: 3.5,        // a door opening or closing this near to you is your own doing and gets no caption
+  captionHeartbeatPressure: 0.55,   // how hard you are pressed (0 to 1) before your heartbeat is put into words
+  captionShriekLevel: 0.3,          // how loud its shriek in the beam (0 to 1) before that is put into words
+
+  // ---- Noisy things on the floor (see 03-noisy-floor.js): broken glass, a loose plate, empty cans ----
+  noiseRadiusNoisyFloorWalk: 10,    // walking over one. A plain walking step carries 4.
+  noiseRadiusNoisyFloorSprint: 19,  // running over one. A plain sprinting step carries 14. Crouched, they make no noise at all.
+  noisyFloorPerRoom: 0.4,           // how many a station has: this many for every room and corridor (Kessel-9: 8, a massive station: about 24)
+  noisyFloorFewest: 3,              // ... but never fewer than this
+  noisyFloorLeastMetresApart: 6,    // and never two closer together than this
+  noisyFloorShareWhereYouMustWalk: 0.5, // this share of them lies in corridors and a step or two inside doors; the rest anywhere
+  noisyFloorLeaveMetres: 0.25,      // you (and the Hollow) count as still on one until this far past its edge, so shuffling on the edge does not set it off again and again
+  noisyFloorShortestGapSeconds: 0.3, // and the same feet cannot set one off twice within this time
   waterStepNoiseFactor: 1.5,    // footsteps in water carry this much further
 
   // ---- How close the Hollow must be to notice you without any sound event --
@@ -353,16 +374,117 @@ const RADIO_MESSAGES = {
   // Only in stations with more than one keycard: said for every card except the last.
   lowerKeycardTaken: 'That card opens some of the doors. Not the way to Shaft 9. There is another card further in.',
   secondSpool: 'That is two. Do not stay in that room.',
-  // ---- Extra jobs. A generated station may have none, one or several of these (see "mission" in 03-levelgen.js).
-  //      They are new, so they have no recordings yet: docs/voice-lines.md lists them. ----
-  generatorNoFuel: 'Day tank reads empty from here. There will be a fuel can somewhere on your level. Bring it to Generator 2.',
+  // ---- Quests. A generated station may have none, one or several (09-quests.js says which line goes with
+  //      which quest and when). None of these names a number: how many there are is on screen, so one recording
+  //      does for every station. docs/voice-lines.md lists the ones still to be recorded. ----
+  // Said the first time any generator will not start for want of fuel, Generator 2 or one of the small ones.
+  generatorNoFuel: 'Day tank reads empty from here. There will be a fuel can somewhere on your level. Bring it to the generator.',
+  generatorsWanted: 'One set will not lift the car. There are more generators on your level, and the winch wants every one of them running before you call the lift. We have marked them for you. They are not quiet.',
+  badgesWanted: 'Personnel wants the badges of Crew 2 back. They will be with whatever the crew left lying about. Bring every one you find. The terminal will count them.',
+  valvesWanted: 'One more for the list. The isolation valves on your level have to be shut before we bring you up. I have marked them. Those actuators have not turned in years. They will complain.',
   coresWanted: 'One more thing while you are down there. The lab wants the core samples Crew 2 pulled. Grey tubes. Bring them all.',
   winchBreakerOpen: 'Upload received. But the car is not answering. The winch breaker has tripped. I have marked the panel on your map. Close it.',
   breakerClosed: 'Breaker is in. The car is on its way down. Forty seconds. Get back to the lobby.',
   doorBroken: 'I just lost a door on the board. Those are rated for the whole shaft coming down. Do not count on the ones you have left.',
-  allSpools: 'That is all three. Go back to the lift lobby and upload them.',
+  allSpools: 'That is all of them. Go back to the lift lobby and upload them.',
   uploadStarted: 'Upload received. The car is on its way down. Forty seconds. It is not a quiet machine.',
   liftArrived: 'The car is at your level. Get in quick.'
+};
+
+// TWEAK: when Dispatch speaks. Each entry: something that happens (`when`), the line of RADIO_MESSAGES he says,
+// and how many seconds after it. `onlyWithHollow: true` leaves a line out on a threat level with no Hollow.
+// What can happen:
+//   leftLift, mainsOn, firstSpool, allSpools, keycard (any card), lowerKeycard, lastKeycard,
+//   stillsWake      the Stills of a room have woken: a line that goes with that room, whatever you came for
+//   enter:NAME      the first time you set foot in a room, by the name on its door: 'enter:PUMP HALL B'
+// A line about a quest is not here but with its quest (`tell` in 09-quests.js). Three lines are said from the
+// code that does the thing itself: uploadStarted, breakerClosed and liftArrived (the lift), and doorBroken.
+const DISPATCH_CUES = [
+  { when: 'leftLift', line: 'leftLift', seconds: 3.0 },
+  { when: 'firstSpool', line: 'firstSpool', seconds: 1.5 },
+  { when: 'stillsWake', line: 'secondSpool', seconds: 1.5 },
+  { when: 'allSpools', line: 'allSpools', seconds: 1.5 },
+  { when: 'mainsOn', line: 'generatorStarted', seconds: 4.5 },
+  { when: 'mainsOn', line: 'generatorFollowUp', seconds: 11, onlyWithHollow: true },
+  { when: 'lastKeycard', line: 'keycardTaken', seconds: 1.5 },
+  { when: 'lowerKeycard', line: 'lowerKeycardTaken', seconds: 1.5 }
+];
+
+// ---------------------------------------------------------------------------
+// Captions: the lines in square brackets at the bottom of the screen.
+//
+// The "Captions" setting has three levels:
+//   off     none of them. You go by your ears.
+//   tells   only the ones that say what the Hollow has just done (level 'tell'). This is what a new game starts on.
+//   all     every sound that matters as well (level 'sound'), each with an arrow to where it comes from
+//           (the arrow pointing up is straight ahead) and "close", "near" or "far". For playing without hearing the game.
+// Messages (a locked door, lift control, a hint) and Dispatch's words are not captions and always show.
+//
+// TWEAK: one line for each caption.
+//   text          what it says
+//   level         'tell' or 'sound', as above
+//   withinMetres  it only shows if what makes the sound is this near to you; 0 means at any distance.
+//                 For a sound this is as far as it can be heard: the distance at which it has faded to the
+//                 level of the room tone (-48 dB in "npm run audio-check", which measures each one 3 m away).
+//                 Make a sound louder in SOUND_LEVELS and it carries further: about 1.25 times as far for each
+//                 2 dB it gains. Walls do not stop sound in this game, so they do not stop a caption either.
+//   seconds       how long the line stays after the sound was last made
+//   slot          captions with the same slot take turns on one line (its voice; its feet; the door it is at)
+//   rank          within a slot, a caption with a lower rank waits until one with a higher rank has had its time
+// ---------------------------------------------------------------------------
+const CAPTIONS = {
+  // ---- what the Hollow has just done ----
+  hollowFound: { text: '[it has found you]', level: 'tell', withinMetres: 0, seconds: 3.2, slot: 'hollowVoice', rank: 3 },
+  hollowLost: { text: '[it has lost you]', level: 'tell', withinMetres: 0, seconds: 3.2, slot: 'hollowVoice', rank: 3 },
+  hollowEnraged: { text: '[the beam no longer holds it]', level: 'tell', withinMetres: 0, seconds: 3.2 },
+  hollowTurns: { text: '[it turns toward the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },
+  hollowMovingOff: { text: '[it is moving off]', level: 'tell', withinMetres: 22, seconds: 3.2 },
+
+  // ---- its voice ----
+  hollowGrowl: { text: '[a low, rattling growl]', level: 'sound', withinMetres: 6, seconds: 1.2, slot: 'hollowVoice', rank: 0 },
+  hollowGrowlHunting: { text: '[growling, loud and fast]', level: 'sound', withinMetres: 13, seconds: 1.2, slot: 'hollowVoice', rank: 0 },
+  hollowShriek: { text: '[it shrieks in the beam]', level: 'sound', withinMetres: 50, seconds: 1.2, slot: 'hollowVoice', rank: 2 },
+  hollowRoar: { text: '[it roars]', level: 'sound', withinMetres: 50, seconds: 2.5, slot: 'hollowVoice', rank: 3 },
+  hollowSnarl: { text: '[it snarls]', level: 'sound', withinMetres: 60, seconds: 1.8, slot: 'hollowVoice', rank: 2 },
+  hollowSniff: { text: '[it sniffs the air]', level: 'sound', withinMetres: 50, seconds: 2, slot: 'hollowVoice', rank: 2 },
+  hollowTrill: { text: '[a short, rising trill]', level: 'sound', withinMetres: 23, seconds: 2.5, slot: 'hollowVoice', rank: 2 },
+
+  // ---- where it puts its feet ----
+  hollowSteps: { text: '[heavy footsteps]', level: 'sound', withinMetres: 10, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
+  hollowStepsHunting: { text: '[heavy footsteps, fast]', level: 'sound', withinMetres: 12, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
+  hollowVentSteps: { text: '[sheet metal booms: something is in a vent]', level: 'sound', withinMetres: 12, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
+  hollowOverhead: { text: '[something crawls overhead]', level: 'sound', withinMetres: 10, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
+  hollowOnGlass: { text: '[glass crunches under something]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
+  hollowOnPlate: { text: '[a floor plate clanks under something]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
+  hollowOnCans: { text: '[cans scatter, and not by you]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
+
+  // ---- hatches and doors ----
+  hatchRattle: { text: '[a ceiling hatch rattles]', level: 'sound', withinMetres: 10, seconds: 1.5, slot: 'hatch', rank: 0 },
+  hatchForced: { text: '[a ceiling hatch is forced open]', level: 'sound', withinMetres: 25, seconds: 3.2, slot: 'hatch', rank: 1 },
+  hatchBurst: { text: '[a ceiling hatch bursts open]', level: 'sound', withinMetres: 25, seconds: 3.2, slot: 'hatch', rank: 1 },
+  doorPounded: { text: '[it is at the door]', level: 'sound', withinMetres: 17, seconds: 1.5, slot: 'doorPounded', rank: 0 },
+  doorPoundedAgain: { text: '[it is at the door again]', level: 'sound', withinMetres: 17, seconds: 1.5, slot: 'doorPounded', rank: 0 },
+  doorPoundedLast: { text: '[it is at the door again. The door will not hold]', level: 'sound', withinMetres: 17, seconds: 1.5, slot: 'doorPounded', rank: 0 },
+  doorBreaks: { text: '[the door gives way]', level: 'sound', withinMetres: 26, seconds: 3.2, slot: 'doorPounded', rank: 1 },
+  doorOpens: { text: '[a door opens]', level: 'sound', withinMetres: 26, seconds: 2.2, slot: 'door', rank: 0 },
+  doorCloses: { text: '[a door closes]', level: 'sound', withinMetres: 26, seconds: 2.2, slot: 'door', rank: 0 },
+
+  // ---- the Stills and the apparitions ----
+  stillShifts: { text: '[something shifts]', level: 'sound', withinMetres: 6, seconds: 2.5 },
+  phantomBreath: { text: '[a breath behind you]', level: 'sound', withinMetres: 12, seconds: 3 },
+
+  // ---- the station ----
+  ambientDrips: { text: '[water drips]', level: 'sound', withinMetres: 8, seconds: 2.5, slot: 'station', rank: 0 },
+  ambientPipe: { text: '[a pipe groans]', level: 'sound', withinMetres: 19, seconds: 3, slot: 'station', rank: 0 },
+  ambientMetal: { text: '[metal ticks as it settles]', level: 'sound', withinMetres: 37, seconds: 2.5, slot: 'station', rank: 0 },
+  ambientKnocks: { text: '[knocking, far below]', level: 'sound', withinMetres: 13, seconds: 3.5, slot: 'station', rank: 0 },
+  liftBell: { text: '[the lift bell rings]', level: 'sound', withinMetres: 50, seconds: 2.2 },
+
+  // ---- you ----
+  ownGlass: { text: '[glass crunches under your boots]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  ownPlate: { text: '[a floor plate clanks under you]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  ownCans: { text: '[cans scatter from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  heartbeat: { text: '[your heart is pounding]', level: 'sound', withinMetres: 0, seconds: 1.5 }
 };
 
 // Everything you can read: the three spools and the four notes.
@@ -443,6 +565,9 @@ const OBJECTIVE_TEXT = {
   findFuel: 'Generator 2 has no fuel. Find the fuel can on this level.',
   bringFuel: 'Carry the fuel can to Generator 2, off Pump Hall B.',
   collectCores: 'Dispatch also wants the core samples.',   // added after the spool objective while samples are missing
+  // Added while some of the station's generators are not running. {running} and {total} count Generator 2 as well.
+  startGenerators: 'The lift winch needs every generator running: {running} of {total} so far. They are marked on the map.',
+  fuelForGenerator: 'You are carrying a fuel can. One of the generators has an empty tank.',
   closeBreaker: 'The lift will not come. Close the winch breaker: it is marked on the map.',
   surviveLift: 'The lift is coming. Stay alive until it arrives.',
   boardLift: 'Board the lift.'

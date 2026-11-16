@@ -24,6 +24,7 @@ const TILE_FLAG_GRATE = 4;
 const TILE_FLAG_HAZARD = 8;
 const TILE_FLAG_DOOR = 16;
 const TILE_FLAG_VENT = 32; // a crawl-height tunnel: sheet metal underfoot, and no room to stand
+const TILE_FLAG_DEBRIS = 64; // something loose lies here that is loud to walk on (see 03-noisy-floor.js)
 
 // TWEAK: how high a vent is inside, in metres. You crouch at 1.0 m and the Hollow crawls at about the same,
 // so much lower than 1.1 and neither of you fits.
@@ -157,7 +158,8 @@ const level = {
   ventCount: 0,           // crawl-height vents (generated stations only)
   keycardRoomText: 'the laboratory', // filled into the security office note
   // Extra jobs on top of "power, three spools, lift". Kessel-9 has none; a generated station may have some.
-  mission: { needsFuel: false, coreCount: 0, needsBreaker: false },
+  // The quests of this station: what it asks of you besides power, spools and lift. See 09-quests.js.
+  quests: [],
   keycardCount: 1,        // how many keycards this station has. Card 1 opens "card 1" doors, card 2 the next ring in, and so on.
   loopCount: 0,
   storeZone: 0,           // the calibration store: the Hollow will not enter it
@@ -167,6 +169,7 @@ const level = {
   attractCamera: { x: 16.9, y: 1.5, z: 50.3, yaw: -1.95 },
   boundsMinimumX: 0, boundsMinimumZ: 0, boundsMaximumX: GRID_WIDTH, boundsMaximumZ: GRID_DEPTH,
   roomCount: 0,
+  noisyFloorCount: 0,     // patches of floor that are loud to walk on (see 03-noisy-floor.js)
   hatchCount: 0,          // ceiling hatches of the Hollow's crawlspace (see 08-crawlspace.js)
   description: 'Kessel-9 (classic)'
 };
@@ -272,6 +275,7 @@ function resetWorldForNewLevel() {
   worldProps.length = 0; dynamicBoxProps.length = 0; doors.length = 0; interactables.length = 0;
   roamingWaypoints.length = 0;
   clearHollowHatches();
+  clearNoisyFloor();
   clearPlacement();
   placement.isGenerating = false;
 }
@@ -562,12 +566,18 @@ function addTank(x, z, radius, height) {
   addBoxProp(x + 0.2, height / 2 - 0.2, z + radius + 0.09, 0.015, height / 2 - 0.2, 0.015, CLUTTER);
 }
 
-function addPumpUnit(x, z) {
+// TWEAK: how high the pipe that rises out of a pump unit goes, in metres above the floor.
+const PUMP_UNIT_PIPE_TOP = 5.4;
+
+// `ceilingHeight` is the ceiling of the room it stands in: the pipe stops there instead of going on through it.
+// Left out, the pipe has its full height.
+function addPumpUnit(x, z, ceilingHeight) {
+  const pipeTop = ceilingHeight === undefined ? PUMP_UNIT_PIPE_TOP : Math.min(PUMP_UNIT_PIPE_TOP, ceilingHeight);
   addBoxBetween(x - 0.95, 0, z - 0.5, x + 0.95, 0.32, z + 0.5, { surfaceClass: SURFACE_METAL });
   addCylinderProp(AXIS_X, x - 0.3, 0.82, z, 0.4, 0.52, { surfaceClass: SURFACE_METAL });
   addCylinderProp(AXIS_X, x + 0.52, 0.82, z, 0.55, 0.17, { surfaceClass: SURFACE_METAL });
   addCylinderProp(AXIS_X, x - 0.9, 0.82, z, 0.2, 0.08, { surfaceClass: SURFACE_METAL, blocksMovement: false });
-  addVerticalPipe(x + 0.52, z, 1.3, 5.4, 0.14, false);
+  addVerticalPipe(x + 0.52, z, 1.3, pipeTop, 0.14, false);
   addCylinderProp(AXIS_Y, x + 0.52, 2.2, z, 0.2, 0.04, { surfaceClass: SURFACE_METAL, blocksMovement: false });
 }
 

@@ -160,6 +160,23 @@ function checkSourcePatching() {
     await setNumber('workshop-item-z', 1.5);
     check('and not once it is moved away', (await inPage(() => window.lastReturnDebug.roomWorkshop.problems.length)) === 0, await inPage(() => window.lastReturnDebug.roomWorkshop.problems));
 
+    // --- a pump unit's pipe stops at the ceiling of a low room, and is not reported as too tall ---
+    await page.selectOption('#workshop-add-type', 'pumpUnit');
+    await page.click('#workshop-add-item');
+    await frames();
+    const pumpUnit = await inPage(() => {
+      const state = window.lastReturnDebug.roomWorkshop;
+      const shapes = state.itemShapes[state.selectedIndex] || [];
+      return { type: state.room.items[state.selectedIndex].type, ceiling: state.room.ceiling, shapeCount: shapes.length,
+        highestPoint: Math.max.apply(null, shapes.map((shape) => shape.maximumY)), problems: state.problems.slice() };
+    });
+    check('a pump unit in a low room has its pipe end at the ceiling',
+      pumpUnit.type === 'pumpUnit' && pumpUnit.shapeCount > 0 && Math.abs(pumpUnit.highestPoint - pumpUnit.ceiling) < 0.001 &&
+      !pumpUnit.problems.some((problem) => problem.includes('ceiling')), pumpUnit);
+    await page.keyboard.press('Delete');
+    await frames();
+    check('and the room is as it was once the pump unit is removed', (await inPage(() => window.lastReturnDebug.roomWorkshop.room.items.length)) === 2);
+
     // --- saving: a file appears, the page reloads into the saved room ---
     await page.fill('#workshop-room-key', 'testRoom');
     await page.locator('#workshop-room-key').blur();
@@ -226,24 +243,39 @@ function checkSourcePatching() {
     // --- the creature tool ---
     await page.click('#workshop-tab-creatures');
     await frames(4);
+    // The body walks on the spot, and its height rises and falls some twenty centimetres with every stride.
+    // So "how tall" is the tallest it gets at eight places round the stride. The stride is put at each place by
+    // hand, one drawn frame each: letting it walk there by itself took ninety frames, which is minutes on a
+    // machine that draws slowly.
+    const tallestOverAStride = async () => {
+      let tallest = 0;
+      for (let place = 0; place < 8; place++) {
+        await inPage((phase) => { window.lastReturnDebug.creatureWorkshop.standIn.walkPhase = phase; }, place * Math.PI / 4);
+        await frames(1);
+        tallest = Math.max(tallest, await inPage(() => { const figure = window.lastReturnDebug.creatureWorkshop.figure; return (figure.boundsCenterY - figure.y) * 2; }));
+      }
+      return Math.round(tallest * 1000) / 1000;
+    };
     const before = await inPage(() => {
       const state = window.lastReturnDebug.creatureWorkshop;
-      return { thigh: state.figure.proportions.thigh, height: (state.figure.boundsCenterY - state.figure.y) * 2, capsules: state.figure.capsuleCount };
+      return { thigh: state.figure.proportions.thigh, capsules: state.figure.capsuleCount };
     });
+    before.tallest = await tallestOverAStride();
     // Whatever the file holds today, a thigh 30 cm longer makes a taller body.
     const longThigh = Math.round((before.thigh + 0.3) * 1000) / 1000;
     await setNumber('workshop-proportion-thigh', longThigh);
-    await frames(4);
+    await frames(1);
     const after = await inPage(() => {
       const debug = window.lastReturnDebug, state = debug.creatureWorkshop;
       return {
-        thigh: state.figure.proportions.thigh, height: (state.figure.boundsCenterY - state.figure.y) * 2,
+        thigh: state.figure.proportions.thigh,
         gameThigh: debug.hollow.figure.proportions.thigh, changes: Object.keys(state.overrides.hollow),
         originalThigh: state.originalFigure.proportions.thigh
       };
     });
+    after.tallest = await tallestOverAStride();
     check('a proportion slider changes the body at once, for the whole game, and keeps the file\'s shape to compare',
-      after.thigh === longThigh && after.height > before.height + 0.02 && after.gameThigh === longThigh && after.changes.join() === 'thigh' && after.originalThigh === before.thigh, { before: before, after: after });
+      after.thigh === longThigh && after.tallest > before.tallest + 0.1 && after.gameThigh === longThigh && after.changes.join() === 'thigh' && after.originalThigh === before.thigh, { before: before, after: after });
 
     await page.selectOption('#workshop-creature-behaviour', 'hunt');
     await frames(40);

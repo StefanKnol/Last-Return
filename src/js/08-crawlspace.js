@@ -21,7 +21,8 @@ const tileBlocksHollow = new Uint8Array(TILE_COUNT);
 // Goes up by one whenever a door opens or closes to the Hollow, so that it knows to work out its way again.
 let hollowNavigationVersion = 0;
 
-// The ceiling hatches of this station: { x, z, index, part, ceilingY }.
+// The ceiling hatches of this station: { x, z, index, part, ceilingY, isOpen, cover }.
+// `isOpen` is false until the Hollow has used the hatch once; `cover` is the part of it that moves.
 // `index` is the tile, `part` the number of the locked-off part of the station the hatch is in.
 const hollowHatches = [];
 // For every tile, the number of the part of the station it is in (0: none). Parts are what is left when every
@@ -197,7 +198,9 @@ function beginHollowCrawl(fromHatch, toHatch) {
     soundTimer: 0
   };
   hollow.figure.x = fromHatch.x; hollow.figure.z = fromHatch.z;
-  playHatchRattle(fromHatch.x, fromHatch.z, 1);
+  // The first time through a hatch it has to force the cover, and that is loud. After that the cover only rattles.
+  if (fromHatch.isOpen) { playHatchRattle(fromHatch.x, fromHatch.z, 1); showCaption('hatchRattle', fromHatch); }
+  else forceHollowHatchOpen(fromHatch, false);
 }
 
 // One frame of the Hollow going through the crawlspace. While this runs it does nothing else: it cannot be
@@ -223,6 +226,7 @@ function updateHollowInCrawlspace(dt) {
     if (crawl.timer > 0.4 && crawl.soundTimer <= 0) {
       crawl.soundTimer = 0.34;
       playHollowCeilingStep(figure.x, figure.z, 0.7);
+      showCaption('hollowOverhead', figure);
     }
     if (crawl.timer >= TUNING.hollowCrawlClimbSeconds) {
       crawl.phase = CRAWL_PHASE_TRAVELLING; crawl.timer = 0; crawl.soundTimer = 0;
@@ -238,10 +242,7 @@ function updateHollowInCrawlspace(dt) {
     if (crawl.soundTimer <= 0) {
       crawl.soundTimer = 0.42 + Math.random() * 0.14;
       playHollowCeilingStep(figure.x, figure.z, hollow.state === HOLLOW_STATE_HUNT ? 1 : 0.8);
-      if (hollow.turnCaptionCooldown <= 0 && distanceBetweenPoints(figure.x, figure.z, player.x, player.z) < 12) {
-        showCaption('[something crawls overhead]');
-        hollow.turnCaptionCooldown = 15;
-      }
+      showCaption('hollowOverhead', figure);
     }
     if (amount >= 1) { crawl.phase = CRAWL_PHASE_RATTLING; crawl.timer = 0; crawl.soundTimer = 0; }
     return;
@@ -252,6 +253,7 @@ function updateHollowInCrawlspace(dt) {
   if (crawl.soundTimer <= 0) {
     crawl.soundTimer = 0.55;
     playHatchRattle(crawl.to.x, crawl.to.z, 0.7 + 0.3 * crawl.timer / Math.max(0.1, TUNING.hollowCrawlDropWarningSeconds));
+    showCaption('hatchRattle', crawl.to);
   }
   if (crawl.timer >= TUNING.hollowCrawlDropWarningSeconds) {
     hollow.crawlspace = null;
@@ -263,7 +265,10 @@ function updateHollowInCrawlspace(dt) {
     hollow.graceTimer = Math.max(hollow.graceTimer, TUNING.hollowCrawlLandingGraceSeconds);
     hollow.fieldTargetIndex = -1; // work out the way again from where it now is
     playHollowFootstep(figure.x, figure.z, 1.6);
-    playHatchRattle(crawl.to.x, crawl.to.z, 1.2);
+    showCaption('hollowSteps', figure);
+    // Out through a hatch nothing has come through before: the cover goes with a bang as it drops.
+    if (crawl.to.isOpen) { playHatchRattle(crawl.to.x, crawl.to.z, 1.2); showCaption('hatchRattle', crawl.to); }
+    else forceHollowHatchOpen(crawl.to, true);
   }
 }
 
@@ -378,8 +383,9 @@ function updateHollowDoorBang(dt) {
       // What you are told depends on the state of the door: untouched, already battered, or about to go.
       const damageBefore = door.damage - damagePerBlow;
       const willGoThisBout = damageBefore + damagePerBlow * blowsInOneBout >= 0.999;
-      showCaption(willGoThisBout ? '[it is at the door again. The door will not hold]' : (damageBefore > 0.01 ? '[it is at the door again]' : '[it is at the door]'));
+      bang.captionKey = willGoThisBout ? 'doorPoundedLast' : (damageBefore > 0.01 ? 'doorPoundedAgain' : 'doorPounded');
     }
+    showCaption(bang.captionKey, { x: door.centerX, z: door.centerZ }); // every blow keeps the line up for as long as it goes on
     if (door.damage >= 1) { breakDoor(door); hollow.doorBang = null; hollow.fieldTargetIndex = -1; return; }
     if (bang.hits >= blowsInOneBout) {
       // The door held. It leaves it for now and goes round; what it did to the door stays done.
@@ -404,7 +410,7 @@ function breakDoor(door) {
   slab.centerY = door.baseY + 0.04; slab.minimumY = door.baseY; slab.maximumY = door.baseY + 0.08;
   slab.blocksMovement = false; slab.isRemoved = false;
   playDoorBreak(door.centerX, door.centerZ);
-  showCaption('[the door gives way]');
+  showCaption('doorBreaks', { x: door.centerX, z: door.centerZ });
   if (!game.flags.hasHeardOfBrokenDoor) {
     game.flags.hasHeardOfBrokenDoor = true;
     scheduleEvent(3.5, function () { playRadioLine('doorBroken'); });
@@ -510,8 +516,11 @@ function rateHollowHatchTile(index) {
   return isNearDoor || ZONE_NAMES[tileZone[index]] === 'LIFT LOBBY' ? 2 : 3;
 }
 
-// The hatch itself: a square frame let into the ceiling, with its cover hanging down from one edge.
-// In the scan it shows in the warning colour, so that you can learn what one looks like and where they are.
+// The hatch itself: a square frame let into the ceiling, and its cover. In the scan both show in the warning
+// colour, so that you can learn what a hatch looks like and where they are.
+// The cover starts shut, flat in its frame. The first time the Hollow goes up or comes down through a hatch it
+// forces the cover, which from then on hangs down from one edge: an open hatch is one it has been through.
+// Returns the cover, which is the one part that moves.
 function addHollowHatchProps(tileX, tileZ, ceilingY) {
   const saved = { turns: placement.turns, offsetX: placement.offsetX, offsetZ: placement.offsetZ, offsetY: placement.offsetY };
   placement.turns = 0; placement.offsetX = 0; placement.offsetZ = 0; placement.offsetY = 0;
@@ -521,9 +530,46 @@ function addHollowHatchProps(tileX, tileZ, ceilingY) {
   addBoxBetween(minimumX, low, maximumZ - 0.09, maximumX, ceilingY, maximumZ, options);
   addBoxBetween(minimumX, low, minimumZ, minimumX + 0.09, ceilingY, maximumZ, options);
   addBoxBetween(maximumX - 0.09, low, minimumZ, maximumX, ceilingY, maximumZ, options);
-  // The cover, hanging open from the edge.
-  addBoxBetween(maximumX - 0.12, ceilingY - 0.62, minimumZ + 0.08, maximumX - 0.09, ceilingY - 0.05, maximumZ - 0.08, options);
+  const cover = addBoxBetween(minimumX + 0.08, ceilingY - 0.06, minimumZ + 0.08, maximumX - 0.08, ceilingY - 0.03, maximumZ - 0.08,
+    { surfaceClass: SURFACE_HAZARD, blocksMovement: false, isDynamic: true });
   placement.turns = saved.turns; placement.offsetX = saved.offsetX; placement.offsetZ = saved.offsetZ; placement.offsetY = saved.offsetY;
+  return cover;
+}
+
+// Puts a hatch's cover where it belongs for the state the hatch is in: flat in the frame, or hanging from one edge.
+function placeHollowHatchCover(hatch) {
+  const cover = hatch.cover, tileX = Math.floor(hatch.x), tileZ = Math.floor(hatch.z);
+  if (hatch.isOpen) {
+    cover.centerX = tileX + 0.845; cover.centerZ = tileZ + 0.5; cover.centerY = hatch.ceilingY - 0.335;
+    cover.halfX = 0.015; cover.halfY = 0.285; cover.halfZ = 0.37;
+  } else {
+    cover.centerX = tileX + 0.5; cover.centerZ = tileZ + 0.5; cover.centerY = hatch.ceilingY - 0.045;
+    cover.halfX = 0.37; cover.halfY = 0.015; cover.halfZ = 0.37;
+  }
+  cover.boundsHalfX = cover.halfX; cover.boundsHalfZ = cover.halfZ;
+  cover.minimumY = cover.centerY - cover.halfY; cover.maximumY = cover.centerY + cover.halfY;
+}
+
+// The Hollow forces a hatch that has not been used yet: a bang you hear from a long way off, and the cover is
+// left hanging. `isComingOut` says which way it is going (the sound is the same; what you are told is not).
+// A hatch that is already open is left as it is.
+function forceHollowHatchOpen(hatch, isComingOut) {
+  if (hatch.isOpen) return;
+  hatch.isOpen = true;
+  // The points a scan left on the shut cover stay a moment and fade, as a door's do.
+  fadePointsInsideBox(hatch.x - 0.5, hatch.ceilingY - 0.12, hatch.z - 0.5, hatch.x + 0.5, hatch.ceilingY, hatch.z + 0.5,
+    convertSecondsToPointLifeCode(TUNING.doorImprintSeconds));
+  placeHollowHatchCover(hatch);
+  playHatchBurst(hatch.x, hatch.z);
+  showCaption(isComingOut ? 'hatchBurst' : 'hatchForced', hatch);
+}
+
+// Shuts every hatch again. For the start of a new descent.
+function shutHollowHatches() {
+  for (const hatch of hollowHatches) {
+    hatch.isOpen = false;
+    placeHollowHatchCover(hatch);
+  }
 }
 
 // Gives every part of the station at least one hatch, and the larger parts more, spread out.
@@ -561,8 +607,9 @@ function placeHollowHatches() {
       }
       if (bestIndex < 0) break;
       const tileX = bestIndex % GRID_WIDTH, tileZ = (bestIndex - tileX) / GRID_WIDTH;
-      const hatch = { x: tileX + 0.5, z: tileZ + 0.5, index: bestIndex, part: partNumber, ceilingY: tileCeilingHeight[bestIndex] };
-      addHollowHatchProps(tileX, tileZ, hatch.ceilingY);
+      const hatch = { x: tileX + 0.5, z: tileZ + 0.5, index: bestIndex, part: partNumber, ceilingY: tileCeilingHeight[bestIndex],
+        isOpen: false, cover: null }; // shut until the Hollow has been through it once
+      hatch.cover = addHollowHatchProps(tileX, tileZ, hatch.ceilingY);
       chosen.push(hatch);
       hollowHatches.push(hatch);
     }

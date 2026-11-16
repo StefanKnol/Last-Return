@@ -15,7 +15,7 @@ body:
 
         If a generated station cannot be walked or finished, use the **Broken station** form: it asks for the seed.
 
-        "Report a problem" on the pause screen opens this form with the version, the seed and the room you are standing in filled in.
+        "Report a problem" on the title screen and the pause screen opens this form with everything from "Station" down to "Version" filled in. What happened, and what it is about, are yours to say.
 
   - type: textarea
     id: what-happened
@@ -57,14 +57,13 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  # Station, threat level, quality and how you played are text fields and not lists to pick from, because
+  # GitHub only fills in text fields from a link, and "Report a problem" in the game fills in all four.
+  - type: input
     id: station
     attributes:
       label: Station
-      options:
-        - Kessel-9
-        - Uncharted annex
-        - Not in a descent (title screen, menus)
+      placeholder: "Kessel-9, Uncharted annex, or the title screen"
     validations:
       required: true
 
@@ -75,15 +74,11 @@ body:
       description: Uncharted annex only. The seed is on the pause and ending screens, and on the title screen afterwards as "Last descent". Add the size, layout and levels you chose.
       placeholder: "48213, large, mixed, two levels"
 
-  - type: dropdown
+  - type: input
     id: threat
     attributes:
       label: Threat level
-      options:
-        - Survey only
-        - Standard
-        - Nightmare
-        - Custom
+      placeholder: "Survey only, Standard, Nightmare, or Custom and what you changed"
     validations:
       required: true
 
@@ -102,27 +97,18 @@ body:
     validations:
       required: true
 
-  - type: dropdown
+  - type: input
     id: quality
     attributes:
       label: Quality setting
       description: Matters most for anything about how it looks or how fast it runs.
-      options:
-        - Low
-        - Medium
-        - High
-        - Ultra
-        - I do not know
+      placeholder: "Low, Medium, High or Ultra"
 
-  - type: dropdown
+  - type: input
     id: build
     attributes:
       label: How you played
-      options:
-        - A page hosted online
-        - index.html I built myself (npm run build)
-        - Docker
-        - The dev build (npm run dev), with debug mode or the workshop
+      placeholder: "A page online (which one), index.html I built myself, Docker, or the dev build (npm run dev)"
     validations:
       required: true
 
@@ -131,7 +117,7 @@ body:
     attributes:
       label: Version
       placeholder: "1.11.0 · build 214 · a5f1785"
-      description: The "Version" line on the pause screen, or the "Build" line on the ending screen.
+      description: The "Version" line on the title screen and the pause screen.
 
   - type: textarea
     id: console

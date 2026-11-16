@@ -22,6 +22,13 @@ const OBJECT_FUEL_CAN = 13;
 const OBJECT_WINCH_BREAKER = 14;
 const OBJECT_CORE_FIRST = 20;   // core samples are numbered 20, 21, 22 ...
 const MAXIMUM_CORE_SAMPLES = 6;
+const OBJECT_EXTRA_GENERATOR_FIRST = 30; // the generators a station has besides Generator 2 are numbered 30, 31, 32
+const MAXIMUM_EXTRA_GENERATORS = 3;
+const EXTRA_GENERATOR_NUMBERS = [1, 3, 4]; // what they are called: Generator 1, Generator 3, Generator 4 (2 is the big one)
+const OBJECT_EXTRA_FUEL_CAN_FIRST = 40;  // the fuel can that goes with extra generator 30 is 40, with 31 it is 41 ...
+
+const SPOOL_COUNT = 3; // the survey spools of a descent
+// (Quests that do not name object numbers of their own are given them from 100 upward: see 09-quests.js.)
 
 // Where things are in the station that is loaded. The rooms below fill these in as they are built,
 // so they are right for the classic station and for generated ones.
@@ -61,12 +68,26 @@ function addKeycard(x, y, z, cardLevel) {
 
 // ---- Things for the extra jobs. Each stands on a spot the planner has checked is clear all round. ----
 
-// A fuel can on a low crate.
-function addFuelCan(x, z) {
+// A fuel can on a low crate. `objectId` is OBJECT_FUEL_CAN (the one for Generator 2) unless another is given.
+function addFuelCan(x, z, objectId) {
   addBoxBetween(x - 0.3, 0, z - 0.3, x + 0.3, 0.3, z + 0.3);
   const body = addBoxProp(x, 0.3 + 0.19, z, 0.16, 0.19, 0.11, { yaw: 0.4, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
   const spout = addBoxProp(x + 0.07, 0.3 + 0.42, z + 0.03, 0.03, 0.04, 0.03, { yaw: 0.4, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  registerInteractable(OBJECT_FUEL_CAN, x, 0.55, z, 'Take the fuel can', [body, spout], { removeWhenUsed: true, mapLabel: 'FUEL' });
+  registerInteractable(objectId || OBJECT_FUEL_CAN, x, 0.55, z, 'Take the fuel can', [body, spout], { removeWhenUsed: true, mapLabel: 'FUEL' });
+}
+
+// One of the generators a station has besides Generator 2: a set on a skid, small enough to stand in any room.
+// A bed, an engine block with its exhaust stack, the alternator beside it, and the start panel on the front.
+// TWEAK: the sizes are metres. It stands on one tile and must stay inside it (within 0.5 m of x, z).
+function addExtraGenerator(objectId, number, x, z) {
+  addBoxBetween(x - 0.46, 0, z - 0.32, x + 0.46, 0.14, z + 0.32, { surfaceClass: SURFACE_METAL });                       // the skid
+  addBoxBetween(x - 0.42, 0.14, z - 0.26, x + 0.08, 0.95, z + 0.26, { surfaceClass: SURFACE_METAL });                    // the engine
+  addCylinderProp(AXIS_X, x + 0.25, 0.5, z, 0.24, 0.17, { surfaceClass: SURFACE_METAL });                                 // the alternator
+  addVerticalPipe(x - 0.3, z - 0.14, 0.95, 1.55, 0.05, false);                                                            // the exhaust
+  addBoxBetween(x - 0.4, 0.95, z + 0.02, x - 0.1, 1.12, z + 0.22, { surfaceClass: SURFACE_METAL, blocksMovement: false }); // the tank on top
+  const panel = addBoxBetween(x - 0.3, 0.45, z + 0.26, x + 0.02, 0.85, z + 0.31, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  const panelBack = addBoxBetween(x - 0.3, 0.45, z - 0.31, x + 0.02, 0.85, z - 0.26, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  registerInteractable(objectId, x, 0.65, z, 'Start generator ' + number, [panel, panelBack], { mapLabel: 'GENERATOR ' + number });
 }
 
 // A core sample: a grey tube as long as your forearm, lying in a cradle.
@@ -83,6 +104,30 @@ function addWinchBreaker(x, z) {
   const handle = addBoxBetween(x - 0.05, 1.05, z + 0.2, x + 0.05, 1.4, z + 0.27, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
   const handleBack = addBoxBetween(x - 0.05, 1.05, z - 0.27, x + 0.05, 1.4, z - 0.2, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
   registerInteractable(OBJECT_WINCH_BREAKER, x, 1.2, z, 'Close the winch breaker', [handle, handleBack], { mapLabel: 'WINCH BREAKER' });
+}
+
+// A crew badge: a hard hat left on a low crate, with the badge clipped to its brim. The badge is what you take.
+function addCrewBadge(objectId, x, z, yaw) {
+  addBoxBetween(x - 0.28, 0, z - 0.28, x + 0.28, 0.34, z + 0.28);
+  addSphereProp(x, 0.34 + 0.07, z, 0.15, { blocksMovement: false });                                                    // the hat
+  addCylinderProp(AXIS_Y, x, 0.34 + 0.02, z, 0.19, 0.012, { blocksMovement: false });                                  // its brim
+  const badge = addBoxProp(x + Math.cos(yaw) * 0.2, 0.34 + 0.03, z + Math.sin(yaw) * 0.2, 0.07, 0.008, 0.045,
+    { yaw: yaw, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  const clip = addBoxProp(x + Math.cos(yaw) * 0.16, 0.34 + 0.045, z + Math.sin(yaw) * 0.16, 0.012, 0.012, 0.012,
+    { yaw: yaw, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  registerInteractable(objectId, x, 0.42, z, 'Take the crew badge', [badge, clip], { removeWhenUsed: true, mapLabel: 'BADGE' });
+}
+
+// An isolation valve: a stub of pipe coming up out of the floor, the valve body on it, and the box of the
+// actuator on top with its push panel. `letter` is its name: A, B or C.
+function addIsolationValve(objectId, letter, x, z) {
+  addVerticalPipe(x, z, 0, 0.75, 0.13, true);
+  addBoxBetween(x - 0.2, 0.75, z - 0.2, x + 0.2, 1.0, z + 0.2, { surfaceClass: SURFACE_METAL });                       // the valve body
+  addCylinderProp(AXIS_X, x, 0.875, z, 0.09, 0.34, { surfaceClass: SURFACE_METAL, blocksMovement: false });             // the line through it
+  addBoxBetween(x - 0.16, 1.0, z - 0.16, x + 0.16, 1.32, z + 0.16, { surfaceClass: SURFACE_METAL });                   // the actuator
+  const panel = addBoxBetween(x - 0.1, 1.06, z + 0.16, x + 0.1, 1.26, z + 0.2, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  const panelBack = addBoxBetween(x - 0.1, 1.06, z - 0.2, x + 0.1, 1.26, z - 0.16, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  registerInteractable(objectId, x, 1.16, z, 'Shut isolation valve ' + letter, [panel, panelBack], { mapLabel: 'VALVE ' + letter });
 }
 
 // A generated station may move the first spool or the keycard out of its usual room (see 03-levelgen.js).
@@ -504,7 +549,7 @@ function buildFacilityLayout() {
   level.description = 'Kessel-9 (classic)';
   level.keycardRoomText = 'the laboratory';
   level.keycardCount = 1;
-  level.mission.needsFuel = false; level.mission.coreCount = 0; level.mission.needsBreaker = false;
+  clearQuests(); addBuiltInQuests(); // Kessel-9 asks for nothing but power, the spools and the lift
   level.stillZones.length = 0;
   level.stillZones.push(ZONE_CALIBRATION_STORE, ZONE_ARCHIVE);
   level.unlabelledZones.length = 0;

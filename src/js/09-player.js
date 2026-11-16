@@ -54,7 +54,7 @@ const player = {
 const settings = {
   sensitivity: 1.0,
   volume: 0.8,
-  quality: 'medium',
+  quality: 'high',
   palette: 0,
   difficulty: 'standard',   // a key of DIFFICULTY_PRESETS, or 'custom'
   customDifficulty: createCustomDifficultyValues('standard'), // what 'custom' means: one value for each of CUSTOM_DIFFICULTY_OPTIONS
@@ -63,7 +63,8 @@ const settings = {
   stationLayout: 'mixed',   // a key of GENERATED_LAYOUT_PRESETS
   stationLevels: 'two',     // a key of GENERATED_LEVEL_PRESETS
   seedText: '',             // what is typed in the seed box; empty means a new random station each descent
-  hud: 'quiet'              // 'quiet' shows instruments only while they matter; 'full' shows everything all the time
+  hud: 'quiet',             // 'quiet' shows instruments only while they matter; 'full' shows everything all the time
+  captions: 'tells'         // the lines in square brackets: 'off', 'tells' (what the Hollow has just done) or 'all' (every sound, with where it comes from)
 };
 
 // The game was called No Return before it was Last Return. Whatever a browser kept under the old name (the
@@ -101,6 +102,7 @@ function loadSettings() {
       if (GENERATED_LEVEL_PRESETS[stored.stationLevels]) settings.stationLevels = stored.stationLevels;
       if (typeof stored.seedText === 'string') settings.seedText = stored.seedText.slice(0, 24);
       if (stored.hud === 'quiet' || stored.hud === 'full') settings.hud = stored.hud;
+      if (stored.captions === 'off' || stored.captions === 'tells' || stored.captions === 'all') settings.captions = stored.captions;
     }
   } catch (error) { /* storage is optional */ }
 }
@@ -431,6 +433,7 @@ function updatePlayerMovement(dt) {
 
   // Footsteps are what the Hollow listens for.
   player.strideDistance += movedDistance;
+  updatePlayerOnNoisyFloor(); // walking onto glass, a loose plate or cans is heard at once
   // TWEAK: metres between footsteps (sprinting, crouching, walking). Each footstep is one noise the Hollow can hear,
   // so shorter strides mean more chances to be heard.
   const strideLength = player.isSprinting ? 1.15 : (player.isCrouching ? 0.62 : 0.8);
@@ -441,6 +444,8 @@ function updatePlayerMovement(dt) {
     let radius = player.isSprinting ? TUNING.noiseRadiusSprintStep : (player.isCrouching ? TUNING.noiseRadiusCrouchStep : TUNING.noiseRadiusWalkStep);
     if (isInVent) { radius = TUNING.noiseRadiusVentStep; playVentCrawlSound(); }
     if (isInWater) radius *= TUNING.waterStepNoiseFactor;
+    // Something loose underfoot (glass, a floor plate, cans) carries much further than the step itself, unless you are crouched.
+    radius = Math.max(radius, stepPlayerOnNoisyFloor());
     emitNoise(player.x, player.z, radius);
   }
 
@@ -511,6 +516,8 @@ function updateScanner(dt, eyeX, eyeY, eyeZ) {
   const quality = QUALITY_PRESETS[settings.quality];
   computeScannerBasis(player.yaw, player.pitch);
   const basis = scannerBasis;
+  // Roughly where the scanner is held. While the scanner is on screen the renderer moves the start of the
+  // laser lines onto its lens (moveBeamLineOriginsToViewmodelLens); this is what is left when it is not.
   resetBeamLines(
     eyeX + basis.rightX * 0.2 + basis.upX * -0.16 + basis.forwardX * 0.55,
     eyeY + basis.rightY * 0.2 + basis.upY * -0.16 + basis.forwardY * 0.55,

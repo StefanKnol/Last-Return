@@ -1,4 +1,4 @@
-# Last Return
+# [Last Return](https://last-return.sknol.com)
 
 A first-person horror game where a handheld LiDAR scanner is the only way to see.
 
@@ -91,12 +91,67 @@ If the browser will not capture the mouse, hold the mouse button and drag to loo
 
 The screen is quiet by default: there is the dark, the points and the aiming ring. The objective shows for a few seconds when it changes, the heat and stamina meters only while they are in use, and everything else is on the map screen (`Tab` or `M`). "Full instruments" in the settings puts the range readouts, the minimap and all the meters back, as in the pictures here.
 
+## Captions
+
+The lines in square brackets at the bottom of the screen. **Captions** in the settings (title screen and pause menu) has three levels:
+
+| Level | What you get |
+|---|---|
+| **Off** | No captions. You go by your ears. |
+| **Tells** | Only what the Hollow has just done: `[it has found you]`, `[it has lost you]`, `[it is moving off]`, `[it turns toward the light]`, `[the beam no longer holds it]`. A new game starts here. |
+| **Every sound** | The tells, and every sound that matters, each with an arrow to where it comes from and how near it is. For playing without hearing the game. |
+
+Messages are not captions and always show: a locked door, lift control, a hint, and everything Dispatch says.
+
+On **every sound**:
+
+- Each line ends in an arrow and a word: `[heavy footsteps] ← near`. The arrow pointing up is straight ahead of you, down is behind. The word is `close` (under 5 m), `near` (under 12 m) or `far`. Both follow the sound as it moves and as you turn.
+- A caption only shows where its sound could be heard. Each has a distance, worked out from how loud the sound measures: the Hollow's calm growl carries about 6 m, its footsteps 10, a door 26, its roar 50. Walls do not stop sound in this game, so they do not stop a caption.
+- A sound that goes on is one steady line for as long as it lasts. The Hollow's footsteps are one line and its voice another, so when it stops dead to listen the footsteps line goes and the growl stays. That is the same tell ears get.
+- Never more than four lines. When there are more, the ones that say least make way.
+- A door you open yourself gets no caption. A door that opens somewhere else does: nothing but you and what hunts you opens doors.
+
+<details>
+<summary><strong>Every caption (spoilers)</strong></summary>
+
+| Caption | When |
+|---|---|
+| `[it has found you]` | It starts to hunt you, with the stinger. Tell. |
+| `[it has lost you]` | It gives up the chase and starts to search. Tell. |
+| `[it is moving off]` | A breather begins while it is within 22 m. Tell. |
+| `[it turns toward the light]` | The beam first touches it while it is not hunting. Tell. |
+| `[the beam no longer holds it]` | Its anger is full. Tell. |
+| `[a low, rattling growl]` / `[growling, loud and fast]` | It is near: calm, or hunting. |
+| `[it roars]` | It finds you again too soon after the last time for the stinger. |
+| `[it snarls]` / `[it sniffs the air]` / `[a short, rising trill]` | While it hunts / while it searches / it heard something and goes to look. |
+| `[it shrieks in the beam]` | Held in the beam and angry. |
+| `[heavy footsteps]` / `[heavy footsteps, fast]` | It walks / it hunts. |
+| `[sheet metal booms: something is in a vent]` | It crawls through a vent. |
+| `[something crawls overhead]` | It is above the ceiling. |
+| `[a ceiling hatch rattles]` | It goes into an open hatch, or is about to drop out of one. |
+| `[a ceiling hatch is forced open]` / `[a ceiling hatch bursts open]` | The first time it goes in through a hatch / comes out of one. |
+| `[it is at the door]` / `[it is at the door again]` / `[it is at the door again. The door will not hold]` | It pounds on a door: untouched, battered, about to go. |
+| `[the door gives way]` | The door breaks. |
+| `[a door opens]` / `[a door closes]` | A door more than 3.5 m from you. |
+| `[glass crunches under something]`, `[a floor plate clanks under something]`, `[cans scatter, and not by you]` | The Hollow sets off a noisy patch of floor. |
+| `[glass crunches under your boots]`, `[a floor plate clanks under you]`, `[cans scatter from your feet]` | You do. |
+| `[something shifts]` | One of the Stills moves. |
+| `[a breath behind you]` | The apparition that stands behind you. |
+| `[water drips]`, `[a pipe groans]`, `[metal ticks as it settles]`, `[knocking, far below]` | The station. |
+| `[the lift bell rings]` | The lift is on its way down, or has arrived. |
+| `[your heart is pounding]` | Something is pressing you hard. |
+
+</details>
+
+Not captioned: your own footsteps, the scanner, the hum of the generator and the lift machinery, and the stingers. The stance, heat and interference meters and the lift countdown already show those.
+
 ## How the scanner works
 
 - **Paint** fires a cone of pulses for as long as you hold it. Each pulse that hits something leaves one point. Narrow the beam for detail, widen it to cover ground.
 - **Full sweep** rakes the whole view from top to bottom in about two and a half seconds. It is loud, and it costs a lot of emitter heat.
 - **Heat** builds while you scan. An overheated emitter shuts off until it cools.
 - **Colour** shows distance from where you are standing now: pale close up, deep blue far away. Doors are green when they will open and red when they will not. Amber marks things you can use.
+- **The warning colour on the floor** means the floor there is loud: broken glass, a loose plate, empty cans. Walk round it, or crouch across it.
 - Points stay where they were measured. A door that has since opened, or a thing that has since walked away, leaves its old points behind until they fade.
 
 <details>
@@ -120,9 +175,9 @@ The screen is quiet by default: there is the dark, the points and the aiming rin
 - It is taller than most of the station's ceilings. It bends to fit under whatever is over it, ducks through doorways, and draws itself up to the ceiling when it stops to listen.
 - It will not enter the calibration store.
 - It has no keycard. A door that opens by itself opens for it, and so does a powered door once the mains is on. A keycard door never opens for it, and neither does the lift door. It gets through one of those only while it stands open for you, so a keycard door closing behind you is a real way to break a chase.
-- It has its own way round: the **crawlspace** above the ceilings. Every part of the station that keycard doors close off has at least one ceiling hatch, which shows in a scan as a square frame with its cover hanging down, in the warning colour. The Hollow reaches up into one, crawls, and drops out of another.
+- It has its own way round: the **crawlspace** above the ceilings. Every part of the station that keycard doors close off has at least one ceiling hatch, which shows in a scan in the warning colour. A hatch starts shut, a flat square in the ceiling. The first time the Hollow goes up or comes down through one it forces the cover with a bang you hear from a long way off, and from then on that cover hangs down: an open hatch is one it has been through. The Hollow reaches up into one, crawls, and drops out of another.
 - That way round is slow and loud. You hear it thumping overhead, from where it is, all the way. The hatch it is about to come out of rattles for two and a half seconds before it drops, and for its first second on the floor it cannot catch you. Up there a scan finds nothing, and it cannot reach down.
-- Before it goes round, it goes at the door. Hunting you, with a keycard door shut in its face that you hold the card for, it walks up to it and **pounds** on it for a few seconds. A door takes two bouts of that. In the third it gives way for good: the slab lies in the doorway and the opening stays open for the rest of the descent. Angry, it hits harder and the door goes sooner. So a door will save you twice, and the caption tells you when it is at a door it has battered before, and when that door will not hold.
+- Before it goes round, it goes at the door. Hunting you, with a keycard door shut in its face that you hold the card for, it walks up to it and **pounds** on it for a few seconds. A door takes two bouts of that. In the third it gives way for good: the slab lies in the doorway and the opening stays open for the rest of the descent. Angry, it hits harder and the door goes sooner. So a door will save you twice. Each blow lands heavier on a door it has battered before, and with captions on "every sound" the line says so in words: at the door, at the door again, and when that door will not hold.
 - It only goes at a door you could open yourself, so a door it breaks was never one that kept you out, and it cannot be baited into opening a lock for you. The lift door cannot be broken.
 - It only goes up when walking is much further or impossible. In Kessel-9, getting round one shut keycard door to a player nine metres away on the other side takes it a little under forty seconds.
 
@@ -146,15 +201,41 @@ Three things keep them fair, and are worth knowing:
 - They belong to the quiet stretches. None comes while the Hollow is hunting, searching or near, or while the Stills are close, and one that is out vanishes the moment that changes. When something real is happening, everything the scanner shows you is real.
 - They are rare: about four in Kessel-9, up to ten in a massive station. One you never scanned does not count. A descent shows you as many different kinds as it can before it repeats one.
 
+**Noisy things on the floor** are broken glass, a loose floor plate and a spill of empty cans. Each is one square metre of floor, and in a scan it shows in the warning colour.
+
+- Walk over one and the Hollow hears it from eight metres on Standard, where it hears a walking step from a little over three. Run over one and it hears it from fifteen, where a running step carries eleven. It comes to look at that spot. (On Nightmare, where it hears further: eleven and a half metres, and twenty-two.)
+- **Crouched, you cross one without a sound.** That is the whole trick, and the first one you set off tells you so.
+- It goes off the moment you step onto it, and again with every footstep you take on it. It never wears out. Shuffling about on its edge does not set it off again: you have to get clear of it and come back.
+- The Hollow sets them off too. It does not care. You should: a crunch of glass two rooms away, with nobody else down here, tells you where it is. With captions on "every sound" a line says so as well, from as far as it can be heard: `[glass crunches under something]`.
+- About half of them lie where you have to walk, in corridors and a step or two inside doors. The rest lie anywhere. Never on a doorstep, on stairs, in water, over a pit or a grate, in a vent, in the lift or its lobby, or under your feet at something you have to use.
+- Kessel-9 has eight. A generated station has about two for every five rooms and corridors, never two within six metres of each other. The seed decides where, so the same seed has them in the same places.
+
 **The lift** takes forty seconds to arrive once the spools are uploaded, and the Hollow can hear it from anywhere in the station.
 
-**Extra jobs** only come up in the Uncharted annex. The seed decides which of the three a station has: a small station has none or one, a medium one, a large one or two, a massive two or all three.
+**Quests** are what a descent asks of you besides power, the spools and the lift. They only come up in the Uncharted annex; the seed decides which a station has. A quest holds up one of three moments: Generator 2 starting, the lift terminal taking the spools, or the lift coming after it has.
 
-- **No fuel.** Generator 2 will not start: the day tank is empty. A fuel can stands somewhere you can reach without power. You find out at the generator, so the walk for the can is a walk back through rooms you thought you were done with.
-- **Core samples.** Dispatch wants the grey sample tubes Crew 2 pulled, two to four of them, one to a room, anywhere short of the last keycard's doors. The lift terminal refuses the upload until you carry them all.
-- **The winch breaker.** The upload goes through, but the lift does not come: its breaker has tripped. The panel is somewhere behind a powered door, dispatch marks it on your map, and it needs mains power to hold. Close it and the forty seconds start there, a long way from the lobby. If you find the panel earlier and close it then, the upload calls the lift as usual.
+| Quest | What it asks | Holds up |
+|---|---|---|
+| **No fuel** | Generator 2's day tank is empty. A fuel can stands in a room near it that you can reach without power. | The mains |
+| **Core samples** | Two to four grey sample tubes, one to a room, anywhere short of the last keycard's doors. | The upload |
+| **More generators** | One to three small generators that the lift winch needs. See below. | The upload |
+| **Crew badges** | Two or three badges of Crew 2, each clipped to a hard hat left on a crate. | The upload |
+| **Isolation valves** | Two or three valves to drive shut. They need the mains, and their actuators squeal: on Standard the Hollow hears one from 14 m. Dispatch marks them on your map once you have taken a keycard. | The upload |
+| **The winch breaker** | The upload goes through, but the lift does not come until the breaker is closed. The panel is behind a powered door, Dispatch marks it, and the forty seconds start there. Close it earlier and the upload calls the lift as usual. | The lift |
 
-What you are carrying for these jobs is listed on the map with the spools and the keycards.
+How many a station has depends on its size. The first, second and last come from one draw (a small station has none or one of them, a medium one, a large one or two, a massive two or three). Badges and valves come from a second draw (small none, medium and large none or one, massive one or two). The generators are counted by themselves. A massive station can have all six, and that is a long descent.
+
+**More generators.** A generated station may also have one to three small generators besides Generator 2: Generator 1, 3 and 4, each a set on a skid standing in some room short of the last keycard's doors. A small station has none or one, a medium one up to two, a large one or two, a massive one to three.
+
+- Generator 2 still restores the mains, and still wakes what is in the shaft. The small ones only start once the mains is on, so they are always started with the Hollow about.
+- The lift winch needs every one of them. Until they all run, the lift terminal refuses the upload and says how many do. A little after Generator 2 starts, Dispatch tells you and marks them on your map.
+- **Starting one is loud.** On Standard the Hollow hears it from 24 m and comes to look at that generator; within 7 m of it, it knows where you are. Start it and be somewhere else.
+- About half of them have an empty tank. The fuel can for one stands in the nearest room that has space, usually ten to twenty-five metres' walk away, and never behind a door the generator is not behind itself.
+- Any can fills any tank, and you carry one can at a time.
+
+What you are carrying for a quest, and how far along each one is, is listed on the map with the spools and the keycards.
+
+**The map marks what you have found in two ways.** Bright: something you can act on now (a spool, a keycard, a core sample, a generator that will start, a fuel can while some tank is empty). Dim and smaller: found, but not of use yet (a note, a small generator before the mains is on or without its fuel, the lift terminal while it would only refuse). Nothing you have found is ever hidden.
 
 Three threat levels are offered on the title screen. "Survey only" removes everything that hunts you.
 
@@ -178,9 +259,9 @@ Each row says what its value comes to in play ("It hunts at 3.9 m/s. You sprint 
 
 ## Reporting a problem
 
-The pause screen says which build you are playing: the version, the build number (how many commits it was built from) and the commit, with a `+` after it if the source had changes that were not committed. The ending screen says it too.
+The title screen and the pause screen say which build you are playing: the version, the build number (how many commits it was built from) and the commit, with a `+` after it if the source had changes that were not committed. The ending screen says it too.
 
-**Report a problem** on the pause screen opens a bug report on GitHub with that line, the station, its seed and options, the threat level, the room you are standing in and your browser already filled in. Nothing is sent until you submit the form.
+**Report a problem** on either screen opens a bug report on GitHub with that line, the station, its seed and options, the threat level, the room you are standing in and your browser already filled in. Nothing is sent until you submit the form.
 
 A Docker build has no git to ask, so the image only carries the build number and the commit if you pass them in:
 
@@ -189,6 +270,14 @@ docker build --build-arg LAST_RETURN_BUILD_NUMBER=$(git rev-list --count HEAD) -
 ```
 
 Without them the game shows the version alone.
+
+A server can say what it is called, and the game then puts that in front of "How you played" in the report. Give the container `LAST_RETURN_SERVER_NAME`, or the Helm chart `serverName`:
+
+```bash
+helm upgrade last-return ./chart --namespace last-return --reset-then-reuse-values --set serverName="Official server"
+```
+
+The name is written into the page when the container starts. Left out, a report gives the address alone.
 
 ## Debug mode
 
@@ -273,6 +362,14 @@ How bent the Hollow is has two values there: `hollowBaseStoop` (how bent it alwa
 
 For looks and feel that live elsewhere (point colours and size, glow, mouse sensitivity, footstep spacing, door speed, body shapes), search the `src/js` folder for `TWEAK`. How loud each sound is, is in one table: `SOUND_LEVELS` at the top of `src/js/07-audio.js`, best tuned with [the sound board](#the-workshop). Each one marks a number that is safe to change and says what it does.
 
+Every caption is one line in `CAPTIONS` in `src/js/00-config.js`: what it says, whether it is a tell or a sound, from how far it shows, how long it stays, and which captions it shares a line with. If you make a sound louder in `SOUND_LEVELS`, it carries further; `npm run audio-check` prints a **heard to** distance for every sound that comes from somewhere, which is the number to put in that caption's `withinMetres`. To caption a new sound, add a line to the table and call `showCaption('itsName', whereItComesFrom)` next to the line that plays the sound.
+
+**Adding a quest** is one entry in `QUESTS` in `src/js/09-quests.js`; the top of that file explains every field. The entry says what kind it is (`collect`: take things; `activate`: switch machines on; `supply`: bring something to a machine that is already there), what it holds up, how many things it has, which ring of rooms they stand in, what builds one of them, and every sentence it uses. Nothing else needs to change: which stations get it, placing, the rules, the objective line, the count on screen, the marks on the map, the terminal's refusal and the check that it can be finished all come from the entry. The crew badges are 14 lines there and the isolation valves 20, plus a few lines each in `src/js/03-layout.js` for what the thing looks like. A quest draws its random numbers from a sequence of its own, so adding one moves nothing in any existing station.
+
+How many quests a size of station gets is in `GENERATED_SIZE_PRESETS` at the top of `src/js/03-levelgen.js`: `extraJobs`, `errands` and `extraGenerators`, each a fewest and a most. Set both to 0 and that draw gives none.
+
+**When Dispatch speaks** is the table `DISPATCH_CUES` in `src/js/00-config.js`: something that happens, the line he says, how many seconds after. What can happen includes the Stills of a room waking (`stillsWake`) and you setting foot in a room for the first time (`enter:PUMP HALL B`), so a line can go with a place and not with how far along you are. A line about a quest is with its quest instead (`tell`). None of the quest lines names a number, so one recording does for every station; the number is on screen.
+
 To change rooms, objects or wall lettering, see the short guide at the top of `buildFacilityLayout` in `src/js/03-layout.js`. To see what a change to a room or a body looks like while you make it, use [the workshop](#the-workshop).
 
 Generated stations are tuned at the top of `src/js/03-levelgen.js`: `GENERATED_SIZE_PRESETS` sets how many extra rooms and ducts each size gets, and `GENERATED_LAYOUT_PRESETS` sets how often rooms get corridors and how far from the lift they spread. `STAIR_STEP_COUNT` and `STAIR_STEP_HEIGHT` set how long and steep the stairs are, and so how deep the lower level is. Each size's `vents` is how many vents it tries to fit; `VENT_HEIGHT` in `src/js/02-world.js` is how high they are inside. To add a kind of room, build it in [the workshop](#the-workshop), or write a `furnish...` function for it there (the room's north-west corner is at 0, 0) and add one entry to `ROOM_CATALOGUE` with its size, the places a door may go, and which lock tiers it may sit behind. Keep the floor just inside each door clear. Then run `npm test`: it builds 120 stations and reports any that cannot be walked or finished.
@@ -298,6 +395,7 @@ The game is plain JavaScript and WebGL 2 with no libraries and no asset files.
 | `src/js/02-world.js` | Tile grid, props, signs, doors, collision, navigation, occluder mesh |
 | `src/js/03-layout.js` | Every hand-built room with its props, signs and pickups, and how Kessel-9 puts them together |
 | `src/js/03-levelgen.js` | Generated stations: the extra rooms, the room catalogue, the planner, locks, ducts and signs |
+| `src/js/03-noisy-floor.js` | Noisy things on the floor: the kinds, where a station gets them, what stepping on one does |
 | `src/js/03-workshop-rooms.js` | Rooms made in the workshop: what they can contain, and how a file in `src/rooms/` becomes a catalogue room |
 | `src/js/04-figures.js` | The capsule bodies used for everything that stands upright |
 | `src/js/05-raycast.js` | What one laser pulse hits, and how far away |
@@ -307,8 +405,9 @@ The game is plain JavaScript and WebGL 2 with no libraries and no asset files.
 | `src/js/08-entities.js` | Doors, the Hollow and its director, the Stills |
 | `src/js/08-phantoms.js` | The apparitions: each kind, and the part that decides when one comes |
 | `src/js/09-difficulty.js` | Threat levels: turns the "Custom" settings into the same kind of record a preset is |
+| `src/js/09-quests.js` | Quests: every quest described once, and the code that places them, runs their rules and checks them |
 | `src/js/09-player.js` | Keyboard, mouse and touch input, movement, the scanner |
-| `src/js/10-interface.js` | HUD, map, messages and overlay screens |
+| `src/js/10-interface.js` | HUD, map, messages, captions and overlay screens |
 | `src/js/11-game.js` | Objectives, checkpoints, death, ending and the main loop |
 | `src/js/12-debug.js` | The little the game itself knows about debug mode: switches that are all off, and hooks that stay empty |
 | `src/js/13-start.js` | One line that starts the game once everything above is loaded |
@@ -327,7 +426,7 @@ A few details worth knowing if you change things:
 - Creatures are built from capsules (rods with rounded ends): 25 for the Hollow, down to three long fingers on each hand, and 24 for a dummy. The Hollow's pose follows its mood: hunched when wandering, reaching when it hunts, drawn up to its full height when it stops to listen.
 - Sound is synthesised live, mostly from noise shaped by filters. The Hollow's growl is a recorded-in-code rattle of clicks pushed through three resonances, the way a throat and chest shape a voice.
 - Points live in a ring buffer on the graphics card (250,000 to 1,000,000 depending on the quality setting). The oldest points are overwritten first.
-- Points left on a creature carry a lifetime and fade; points on the station are permanent.
+- Points left on a creature carry a lifetime and fade; points on the station are permanent, except those on a door, which fade once it slides away (`doorImprintSeconds`).
 
 ## Building and testing
 
@@ -355,13 +454,23 @@ plays the whole objective chain in a headless browser and checks each step: leav
 
 It then builds 120 generated stations (40 of each size, across the three layouts, half with one level and half with two) and checks each one: nothing unreachable, every door usable from both sides, every objective within arm's reach, the generator reachable without power, each keycard only with the one before it, the shaft only with the last, and the fuel can, the core samples and the winch breaker where their rules say they must be. It checks that a seed always gives the same station (also after the browser has warmed up, which is what once broke it), plays the rules of each extra job, builds eight massive stations with three keycards each, walks down a flight of stairs on foot, tries a vent standing (no) and crouched (yes), sends the Hollow through it, and plays one two-level station from lift to lift, whatever extra job that station has, which includes the Hollow climbing the stairs from the shaft. Set `GENERATED_SEEDS` to try more, for example `GENERATED_SEEDS=300 node tools/generated-station-test.js`.
 
-Then the Hollow and locked doors: each kind of door with the Hollow standing at it (the keycard door and the lift door stay shut, even with every card in your pocket), a keycard door shut between it and you (it never walks through, goes round through the crawlspace, and takes the time the numbers say: the climb, the metres, the full warning), a look from straight underneath it (a scan finds nothing and it cannot reach down), the landing (under the hatch that rattled, harmless for its first second), a keycard door held open by you (it simply walks through), pounding on a door (one bout, the door holds, it leaves that door alone for a while; the second bout adds to the damage; the third breaks it and it comes straight through; the broken door stays open and can be walked over; no pounding without the card, none on the lift door, harder when angry, and it stops if the door opens), short walks from under a hatch (it never takes to the ceiling for those), the lift car, and the hatches themselves. The 120 generated stations are each checked too: every locked-off part has a hatch, the Hollow can reach everywhere it may go, and without the crawlspace it really is shut in.
+Then the Hollow and locked doors: each kind of door with the Hollow standing at it (the keycard door and the lift door stay shut, even with every card in your pocket), a keycard door shut between it and you (it never walks through, goes round through the crawlspace, and takes the time the numbers say: the climb, the metres, the full warning), a look from straight underneath it (a scan finds nothing and it cannot reach down), the landing (under the hatch that rattled, harmless for its first second), a keycard door held open by you (it simply walks through), pounding on a door (one bout, the door holds, it leaves that door alone for a while; the second bout adds to the damage; the third breaks it and it comes straight through; the broken door stays open and can be walked over; no pounding without the card, none on the lift door, harder when angry, and it stops if the door opens), short walks from under a hatch (it never takes to the ceiling for those), the lift car, the hatches being shut until it has been through them (the one it climbs into is forced as it goes in, the one it comes out of only as it drops, the rest stay shut, and a new descent shuts them all), and the hatches themselves. The 120 generated stations are each checked too: every locked-off part has a hatch, the Hollow can reach everywhere it may go, and without the crawlspace it really is shut in.
+
+Then the quest system: every quest is described completely (kind, what it holds up, sentences, lines Dispatch really has); 64 stations with whatever quests their seeds gave them can each be finished; each size gets as many as its ranges allow; no two things share an object number; three stations have their fuel cans, core samples, breaker and generators exactly where they stood before the quest system existed. Then a made-up quest is added as one more entry while the test runs: it turns up in every station, not one thing of any other quest moves, the terminal refuses for it, it can be done, and the upload then goes through. Then the badges and the valves are played by their rules, Dispatch's fuel line is said once for a small generator, "Do not stay in that room" comes with the Stills waking, and a line tied to a room is said the first time you enter it and not the second.
+
+Then the generators: 64 stations of every size have as many small generators as their size allows, each still finishable, each fuel can near its generator (half within 25 steps, none over 60; for Generator 2 half within 30, none over 45), and the same seed gives the same ones. Then the rules in one station: a small generator will not start before the mains is on or with an empty tank; any can fills any tank and a second can is refused while you carry one; Dispatch tells you and marks them; the lift terminal refuses while one is not running; starting one brings a Hollow twelve metres off to that generator, and one four metres off straight at you; with all running the lift is called; a new descent puts everything back. The map's bright and dim marks are checked at each step.
+
+Then the noisy things on the floor: Kessel-9 and a generated station get the number the size calls for, of more than one kind, none in a bad place, and the same seed puts them in the same places. Then a patch is walked over with the Hollow standing far enough away that it could not have heard a footstep (it comes to look at that very spot, and you are told what it was), crossed again crouched with the Hollow three and a half metres off (nothing carries, it does not stir), run over with the Hollow further away than a running step carries, and walked over by the Hollow itself (once or twice in a crossing; made to shuffle to and fro over the edge for three seconds, it sets it off once, not thirty times; with you two metres away a line on screen says so, and with you at the lift none does). The 120 generated stations each have theirs checked for being in a place they are allowed.
+
+Then the captions: every caption the game asks for is in the table and every one in the table is used; a new game starts on "tells", both menus change the level, and it is kept between visits; off shows none, tells shows only the tells, every sound shows all; each caption shows just inside its distance and not just outside it; the arrow is right in all eight directions and follows both a sound that moves and a player who turns; the growl waits for a snarl on the line they share; a sound that goes on is one steady line; there are never more than four. Then each caption is made to happen in play, from the Hollow wandering past (footsteps and growl; footsteps gone when it stops to listen) to a door it opens eight metres away, the Stills, the breath, the lift bell, the station's own sounds and a vent in a generated station. The locked-door and noisy-floor tests run with captions on every sound and check theirs.
 
 Then the Custom threat level: the panel opens and closes, a moved control changes the setting and the sentence beside it, the values survive closing the page, bad stored values are put right, a descent plays by what was set, heat, temper, stamina and apparitions each change by the factor asked for, one life really offers no checkpoint, and the ending names the descent as custom and keeps its best time apart.
 
 Then the apparitions. Where and when they come is chance, so nothing there trusts one lucky try: each kind is summoned from about two thousand standing places in three stations and every one must be where its rules allow (in range, in sight, on good floor, never popping into the beam). Each kind is then played through: the watcher scanned, approached and ignored; the one behind you turned on and not turned on; the dummy coming closer and going; the crosser waiting, walking and vanishing; the crawler in its vent; the one in your face with loaded dice, with its limit, and switched off. Two long quiet walks check the timing (none too soon, never two at once, never the same kind twice running, never more than the descent is allowed), and a last part checks that none comes while the Hollow hunts or is near, and that one that is out goes when a hunt starts.
 
 It ends with the workshop: on a copy of `src/` in a temporary folder it builds a room by clicking and dragging, saves it, finds it again in generated stations, changes a creature's proportions and writes them to the file, and checks that the page survives a source file that does not parse.
+
+Every pull request gets both: `.github/workflows/ci.yml` builds the page as it ships and runs `npm test`, on a machine that draws a good deal slower than a desktop. A check that only passes on a fast machine is a check that depends on the clock, and fails there.
 
 ```bash
 npm run dev
@@ -373,7 +482,7 @@ starts the dev build, with [debug mode](#debug-mode) and [the workshop](#the-wor
 npm run audio-check
 ```
 
-measures every sound, because a test cannot listen: how loud each one is to an ear, how large its wave is at the speakers, how much the compressor held it back and where its energy sits. It fails only if one is silent. It then lists, for you to judge, the sounds whose wave is over what a speaker can take, and the ones with a big wave that an ear hears little of. It takes about three minutes; name one or more sounds to measure only those, for example `npm run audio-check -- hollow door`. It cannot tell you whether a sound is good. Only ears can:
+measures every sound, because a test cannot listen: how loud each one is to an ear, how large its wave is at the speakers, how much the compressor held it back, where its energy sits, and for a sound that comes from somewhere, how far away it can still be heard (the distance its caption should have). It fails only if one is silent. It then lists, for you to judge, the sounds whose wave is over what a speaker can take, and the ones with a big wave that an ear hears little of. It takes about three minutes; name one or more sounds to measure only those, for example `npm run audio-check -- hollow door`. It cannot tell you whether a sound is good. Only ears can:
 
 ```bash
 npm run audio-check -- --listen
@@ -403,6 +512,20 @@ Generated stations are proven finishable, not proven good. Nobody has yet walked
 
 The locked doors and the crawlspace are checked for their rules and their timings. Whether half a minute overhead is the right price for a door, whether the thumps tell you enough about where it is going, and whether the rattle is enough warning, need ears and play. The numbers are in `src/js/00-config.js` under "The crawlspace", and the two sounds are on the sound board. How many bouts a door should take, and whether the pounding frightens or only delays, need play: `hollowDoorDamagePerBout` in the same place sets it (0.34 is three bouts, 0.5 two, 0 never). Dispatch has one new line for the first broken door (`doorBroken`), not yet recorded. Not done: you cannot lock or bar a door yourself. The Stills still open the doors of their own rooms.
 
+The noisy things on the floor are checked for where they lie and for what stepping on them does. Nobody has heard them: the three sounds were tuned by measuring, not by ear, and are on the sound board to be listened to and changed. How many is right, and whether half of them in the walking lines is a hazard or a nuisance, need play. The numbers are in `src/js/00-config.js` under "Noisy things on the floor", and how often each kind turns up is at the top of `src/js/03-noisy-floor.js`.
+
+The captions are checked for what shows when and where. Whether "every sound" is enough to play by has not been tried by anyone who cannot hear the game, and that is the only test that counts. The distances come from measurements of each sound alone in silence, down to the level of the room tone; with the growl and a heartbeat going, ears lose the quiet ones sooner than the captions do. The wording, the three distance words and the limit of four lines are first guesses.
+
 The apparitions keep to their rules, which is what the test can show. How often is right, whether the dummy that comes closer frightens or annoys, and whether the one in your face reads as a face or only as a mass of points a metre away, need playing. All their numbers are in `src/js/00-config.js` under "Apparitions", and debug mode can summon each kind where you stand.
 
+The quest system is checked for doing what each entry says, and for leaving every older station as it was. What it cannot check is the sum: a massive station can now ask for six things besides the spools, and nobody has played one. The numbers that set that are the three ranges in `GENERATED_SIZE_PRESETS`. The badges and the valves are new and unplayed; the valve's squeal was tuned by measuring. Three of Dispatch's lines for quests have no recording yet (`generatorsWanted`, `badgesWanted`, `valvesWanted`), and `allSpools.mp3` still says "all three" where the text now says "all of them".
+
+The small generators are checked for their rules and for where they and their cans stand. Whether two or three of them make a descent tenser or only longer has not been played, and neither has how loud "loud" should be: `noiseRadiusGeneratorStart` in `src/js/00-config.js` is a first guess. Their two sounds were tuned by measuring, not by ear. Dispatch's line for them (`generatorsWanted`) has no recording yet.
+
 The extra jobs and the stations with two or three keycards are checked the same way: they can always be finished, and the rules do what this page says. Whether a second walk for a fuel can is dread or a chore has not been played. Dispatch's five new lines for them (`lowerKeycardTaken`, `generatorNoFuel`, `coresWanted`, `winchBreakerOpen`, `breakerClosed`) have no recordings yet and show as text.
+
+## License
+
+The code and everything else in this repository is [MIT](LICENSE), with one exception.
+
+The voice recordings in `assets/voice/` are not under the MIT licence. They were generated with ElevenLabs and are here so the game can play them. They remain subject to [ElevenLabs' terms](https://elevenlabs.io/terms-of-use) and [use policy](https://elevenlabs.io/use-policy), which among other things do not allow using them to train an AI model. If you fork the game and want different voices, [record your own](#voice-lines).

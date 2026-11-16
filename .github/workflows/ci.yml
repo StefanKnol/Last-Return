@@ -1,0 +1,48 @@
+name: CI
+
+# Build the game and run every test on each pull request, before it reaches main.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a pull request makes the run for the push before it pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    # The tests take about 25 minutes here and a slow runner adds a few. This is the limit for a run that hangs.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      # The default single commit is enough here: the tests only want the build stamp to have a
+      # number and a commit in it, not the right number. Docker.yml is the one that needs the history.
+      - uses: actions/checkout@v7
+
+      # The same Node the Dockerfile builds the shipped page with.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # `npm install` and not `npm ci`: package-lock.json is in .gitignore, so there is no lock
+      # file in a checkout to install from. Playwright is the only thing this installs.
+      - name: Install Playwright
+        run: npm install
+
+      # The tests open the built page in headless Chromium, drawn in software (SwiftShader), so
+      # a runner without a graphics card is fine. --with-deps adds the system libraries it needs.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # `npm test` builds the dev page (debug mode and the workshop included). This is the page
+      # as it ships, which nothing else on a pull request would build.
+      - name: Build the page as it ships
+        run: npm run build
+
+      - name: Test
+        run: npm test

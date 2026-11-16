@@ -25,6 +25,9 @@ const SOUND_LEVELS = {
   footstep: 0.8,            // your footsteps on a dry floor (and the ring of a grate)
   footstepWater: 5,       // your footsteps in water
   ventCrawl: 3,           // the sheet metal under you in a vent, on top of a footstep
+  floorGlass: 1,          // broken glass underfoot (yours, and the Hollow's from where it is)
+  floorPlate: 1,          // a loose floor plate underfoot
+  floorCans: 1,           // empty cans kicked over
   heartbeat: 4,
 
   // ---- the scanner and the interface ----
@@ -41,6 +44,9 @@ const SOUND_LEVELS = {
   door: 1,
   generatorStart: 1,      // the turns of the starter
   generatorRunning: 1,
+  extraGeneratorStart: 1,   // one of the small generators (1, 3, 4): a pull of its starter and the catch
+  extraGeneratorRunning: 1, // ... and its engine running, a higher and busier note than Generator 2
+  valve: 1,                 // an isolation valve driven shut: the squeal of its actuator and the thud as it seats
   liftMachinery: 1,       // arriving, leaving, on its way down
   liftBell: 1,
 
@@ -57,7 +63,8 @@ const SOUND_LEVELS = {
   hollowFootstep: 1,
   hollowVentStep: 1,      // crawling in a vent
   hollowCeilingStep: 1,   // crawling above the ceiling, on its way round a locked door
-  hatchRattle: 1,         // a ceiling hatch: it has gone in, or it is about to come out
+  hatchRattle: 1,         // a ceiling hatch that is already open: it has gone in, or it is about to come out
+  hatchBurst: 1,          // a ceiling hatch forced open for the first time
   doorBang: 1,            // one blow of it pounding on a door
   doorBreak: 1,           // a door giving way
   hollowRumble: 1,
@@ -101,7 +108,7 @@ const SOUND_LEVELS = {
 //     not help it; more of the sound between 150 and 600 Hz does.
 // The Sounds tab has both numbers below as controls to try by ear. Numbers tried there are not kept: write them here.
 const SOUND_OUTPUT = {
-  compressorThresholdDecibels: -16, // sounds above this level are held back. 0 is the loudest a speaker can go; -16 is about a sixth of that.
+  compressorThresholdDecibels: -14, // sounds above this level are held back. 0 is the loudest a speaker can go; -16 is about a sixth of that.
                                     // Nearer 0: more room for loud sounds, and more risk of the speakers overloading.
   compressorRatio: 5                // how hard they are held back. 1 is not at all; 20 is a wall. Lower: loud sounds stand out more.
 };
@@ -513,6 +520,46 @@ function initializeAudioEngine() {
   generatorRattle.connect(generatorRattleFilter); generatorRattleFilter.connect(generatorRattleGain);
   generatorRattleGain.connect(audio.generatorGain);
   generatorRattle.start();
+
+  // The small generators a station may have besides Generator 2. They share one engine sound: a higher hum
+  // and a quicker, lighter chug. Each has a place and a volume of its own, silent until it is started.
+  const smallEngine = context.createGain();
+  smallEngine.gain.value = 1;
+  for (const partial of [[86, 0.4], [172.7, 0.22], [259.1, 0.1]]) {
+    const hum = context.createOscillator();
+    hum.type = 'triangle';
+    hum.frequency.value = partial[0];
+    const humGain = context.createGain();
+    humGain.gain.value = partial[1];
+    hum.connect(humGain); humGain.connect(smallEngine);
+    hum.start();
+  }
+  const smallRattle = context.createBufferSource();
+  smallRattle.buffer = audio.brownNoiseBuffer;
+  smallRattle.loop = true;
+  const smallRattleFilter = context.createBiquadFilter();
+  smallRattleFilter.type = 'bandpass';
+  smallRattleFilter.frequency.value = 520;
+  smallRattleFilter.Q.value = 0.8;
+  const smallRattleGain = context.createGain();
+  smallRattleGain.gain.value = 1.6;
+  const smallChug = context.createOscillator();
+  smallChug.frequency.value = 21.5; // firing strokes per second
+  const smallChugDepth = context.createGain();
+  smallChugDepth.gain.value = 1.0;
+  smallChug.connect(smallChugDepth); smallChugDepth.connect(smallRattleGain.gain);
+  smallChug.start();
+  smallRattle.connect(smallRattleFilter); smallRattleFilter.connect(smallRattleGain);
+  smallRattleGain.connect(smallEngine);
+  smallRattle.start();
+  audio.extraGeneratorPanners = []; audio.extraGeneratorGains = [];
+  for (let slot = 0; slot < MAXIMUM_EXTRA_GENERATORS; slot++) {
+    const panner = createPannerNode(0, 0.6, 0, 3, 1.1);
+    const gain = context.createGain();
+    gain.gain.value = 0;
+    smallEngine.connect(gain); gain.connect(panner);
+    audio.extraGeneratorPanners.push(panner); audio.extraGeneratorGains.push(gain);
+  }
 
   audio.liftPanner = createPannerNode(LIFT_POSITION.x, 2.5, LIFT_POSITION.z, 5, 0.8);
   audio.liftGain = context.createGain();
@@ -1140,6 +1187,49 @@ function playVentCrawlSound() {
   playNoiseBurst({ duration: 0.05, filterType: 'bandpass', frequency: 1700, gain: 0.05 * SOUND_LEVELS.ventCrawl });
 }
 
+// Something loose on the floor being stepped on: broken glass, a loose floor plate, or empty cans.
+// `weight` is how hard (crouched is about 0.2, a sprint 1). `source` is null for your own feet, or { x, z } for
+// something else's, which is then heard from there.
+// TWEAK: each kind has its layers here; how loud each kind is, is SOUND_LEVELS.floorGlass, floorPlate and floorCans.
+function playNoisyFloorSound(kind, weight, source) {
+  if (!isAudioReady()) return;
+  let destination = audio.masterGain;
+  if (source) {
+    destination = createTemporaryPanner(source.x, getFloorHeightAt(source.x, source.z) + 0.1, source.z);
+    if (!destination) return;
+  }
+  if (kind === 'glass') {
+    // A handful of short bright grains, crushed one after another, and a shard skittering off.
+    const level = weight * SOUND_LEVELS.floorGlass, grains = 4 + Math.floor(Math.random() * 3);
+    for (let grain = 0; grain < grains; grain++) {
+      playNoiseBurst({ duration: 0.035 + Math.random() * 0.03, filterType: 'bandpass', frequency: 2400 + Math.random() * 3200, resonance: 2.2,
+        gain: (2.6 - grain * 0.25) * level, attack: 0.001, delay: grain * (0.022 + Math.random() * 0.02), destination: destination });
+    }
+    playNoiseBurst({ duration: 0.16, filterType: 'bandpass', frequency: 900, resonance: 1.1, gain: 1.6 * level, attack: 0.002, destination: destination });
+    if (audio.metalStruck) playMetalStrike({ shape: 'bar', frequency: 2900 + Math.random() * 1400, duration: 0.18, hardness: 1, gain: 0.35 * level, delay: 0.09 + Math.random() * 0.06, destination: destination });
+    return;
+  }
+  if (kind === 'plate') {
+    // The plate rocks down onto its frame and back: two knocks, the second smaller.
+    const level = weight * SOUND_LEVELS.floorPlate;
+    playNoiseBurst({ duration: 0.1, filterType: 'bandpass', frequency: 520, resonance: 1.3, gain: 3.0 * level, attack: 0.002, destination: destination });
+    for (let knock = 0; knock < 2; knock++) {
+      const delay = knock * (0.13 + Math.random() * 0.05), size = knock === 0 ? 1 : 0.55;
+      if (audio.metalStruck) playMetalStrike({ shape: 'plate', frequency: 190 + Math.random() * 40, duration: 0.9, hardness: 0.7, damping: 0.5, bend: 0.03, gain: 1.1 * size * level, delay: delay, destination: destination });
+      else playResonantNoise({ frequency: 310 + Math.random() * 60, resonance: 16, duration: 0.5, gain: 1.8 * size * level, attack: 0.002, delay: delay, destination: destination });
+    }
+    return;
+  }
+  // Cans: one kicked, the rest knocked into each other and rolling to a stop.
+  const level = weight * SOUND_LEVELS.floorCans, hits = 4 + Math.floor(Math.random() * 2);
+  for (let hit = 0; hit < hits; hit++) {
+    const delay = hit * (0.07 + Math.random() * 0.07), size = 1 - hit * 0.15;
+    if (audio.metalStruck) playMetalStrike({ shape: 'bar', frequency: 620 + Math.random() * 700, duration: 0.16 + Math.random() * 0.1, hardness: 0.85, damping: 0.75, gain: 0.8 * size * level, delay: delay, destination: destination });
+    else playResonantNoise({ frequency: 700 + Math.random() * 700, resonance: 14, duration: 0.14, gain: 1.6 * size * level, attack: 0.001, delay: delay, destination: destination });
+    playNoiseBurst({ duration: 0.03, filterType: 'bandpass', frequency: 3200, gain: 0.7 * size * level, delay: delay, destination: destination });
+  }
+}
+
 // The Hollow above the ceiling, on its way round a door it cannot open. A dull, heavy thump from overhead,
 // from where it is at that moment, so that you can hear which way it is going.
 // TWEAK: `gain` is how loud each layer is. The first is the weight coming down, the second the ceiling panel giving under it.
@@ -1218,6 +1308,35 @@ function playDoorBreak(x, z) {
   for (let clatter = 0; clatter < 4; clatter++) {
     const delay = 0.55 + clatter * (0.16 + Math.random() * 0.08);
     playResonantNoise({ frequency: 240 + Math.random() * 260, resonance: 20, duration: 0.3, gain: (0.56 - clatter * 0.1) * level, attack: 0.002, delay: delay, destination: panner });
+  }
+}
+
+// A ceiling hatch forced open for the first time: the blow that breaks the catch, the cover swinging down and
+// banging on its hinge, and the hinge ringing on. Meant to be heard from a long way off: it tells you that it
+// has gone into the ceiling, or that it has just come out of it, and roughly where.
+// TWEAK: the gains are the balance between the layers. How loud the whole thing is, is SOUND_LEVELS.hatchBurst.
+function playHatchBurst(x, z) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + getHeadroomAt(x, z), z);
+  if (!panner) return;
+  const level = 1.4 * SOUND_LEVELS.hatchBurst; // 1.4: with the level at 1 the loudest moment is about four fifths of what a speaker takes
+  // The blow: a short hard smack in the range ears are best at, with a little weight under it.
+  playNoiseBurst({ duration: 0.12, filterType: 'bandpass', frequency: 680, resonance: 1.2, gain: 4.6 * level, attack: 0.002, reverbAmount: 0.7, destination: panner });
+  playNoiseBurst({ duration: 0.28, frequency: 240, gain: 0.8 * level, useBrownNoise: true, playbackRate: 0.8, reverbAmount: 0.5, destination: panner });
+  if (audio.metalStruck) {
+    // The cover is a loose plate: it rings when it is hit, and again each time it swings back against its frame.
+    playMetalStrike({ shape: 'plate', frequency: 265 + Math.random() * 50, duration: 1.4, hardness: 0.8, damping: 0.45, bend: 0.04, gain: 1.3 * level, destination: panner });
+    for (let swing = 0; swing < 3; swing++) {
+      const delay = 0.34 + swing * (0.21 + Math.random() * 0.06);
+      playMetalStrike({ shape: 'plate', frequency: 300 + Math.random() * 90, duration: 0.5, hardness: 0.75, damping: 0.55, gain: (0.6 - swing * 0.16) * level, delay: delay, destination: panner });
+      playMetalStrike({ shape: 'bar', frequency: 1050 + Math.random() * 400, duration: 0.2, hardness: 0.9, gain: (0.3 - swing * 0.07) * level, delay: delay + 0.015, destination: panner });
+    }
+    return;
+  }
+  playResonantNoise({ frequency: 330 + Math.random() * 60, resonance: 18, duration: 0.9, gain: 2.0 * level, attack: 0.002, destination: panner });
+  for (let swing = 0; swing < 3; swing++) {
+    const delay = 0.34 + swing * (0.21 + Math.random() * 0.06);
+    playResonantNoise({ frequency: 420 + Math.random() * 180, resonance: 22, duration: 0.3, gain: (1.2 - swing * 0.3) * level, attack: 0.002, delay: delay, destination: panner });
+    playNoiseBurst({ duration: 0.05, filterType: 'bandpass', frequency: 2600, gain: (0.7 - swing * 0.18) * level, delay: delay, destination: panner });
   }
 }
 
@@ -1433,6 +1552,57 @@ function setGeneratorSoundRunning(isRunning) {
   audio.generatorGain.gain.setTargetAtTime(isRunning ? 0.75 * SOUND_LEVELS.generatorRunning : 0, audio.context.currentTime, 0.3);
 }
 
+// One of the small generators is started at (x, z): three pulls of the starter, each quicker, then it catches
+// and runs. `slot` is which of them (0, 1 or 2); each keeps running from its own place until
+// stopExtraGeneratorSounds.
+function startExtraGeneratorSound(slot, x, z) {
+  if (!isAudioReady() || !audio.extraGeneratorGains[slot]) return;
+  const now = audio.context.currentTime, y = getFloorHeightAt(x, z) + 0.6;
+  const panner = audio.extraGeneratorPanners[slot], gain = audio.extraGeneratorGains[slot];
+  if (panner.positionX) { panner.positionX.value = x; panner.positionY.value = y; panner.positionZ.value = z; } else panner.setPosition(x, y, z);
+  const starter = createTemporaryPanner(x, y, z);
+  for (let pullIndex = 0; pullIndex < 3; pullIndex++) {
+    const delay = pullIndex * 0.36;
+    playNoiseBurst({ duration: 0.24, filterType: 'bandpass', frequency: 420 + pullIndex * 110, frequencyEnd: 620 + pullIndex * 140, resonance: 2, gain: 2.6 * SOUND_LEVELS.extraGeneratorStart, attack: 0.03, delay: delay, destination: starter });
+    playTone({ waveform: 'triangle', frequency: 150 + pullIndex * 30, frequencyEnd: 230 + pullIndex * 40, duration: 0.24, gain: 1.1 * SOUND_LEVELS.extraGeneratorStart, attack: 0.03, delay: delay, destination: starter });
+  }
+  // The catch: a cough, then the engine comes up.
+  playNoiseBurst({ duration: 0.35, filterType: 'bandpass', frequency: 300, frequencyEnd: 700, resonance: 1.5, gain: 3.4 * SOUND_LEVELS.extraGeneratorStart, attack: 0.01, delay: 1.1, destination: starter });
+  gain.gain.cancelScheduledValues(now);
+  gain.gain.setValueAtTime(0, now + 1.1);
+  gain.gain.linearRampToValueAtTime(0.42 * SOUND_LEVELS.extraGeneratorRunning, now + 2.0);
+}
+
+// An isolation valve is driven shut at (x, z): a motor that has not turned in years squeals up, grinds for a
+// second and a half, and the valve seats with a thud.
+function playValveSound(x, z) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 1.1, z);
+  if (!panner) return;
+  const level = SOUND_LEVELS.valve;
+  // The squeal: two narrow bands of noise sliding up, a little apart, so that they beat against each other.
+  playResonantNoise({ frequency: 420, frequencyEnd: 980, resonance: 26, duration: 1.5, gain: 1.0 * level, attack: 0.08, destination: panner });
+  playResonantNoise({ frequency: 455, frequencyEnd: 1060, resonance: 22, duration: 1.5, gain: 0.75 * level, attack: 0.12, destination: panner });
+  // The gearbox under it.
+  playNoiseBurst({ duration: 1.5, filterType: 'bandpass', frequency: 260, frequencyEnd: 330, resonance: 3, gain: 0.65 * level, attack: 0.1, destination: panner });
+  // Seated.
+  playNoiseBurst({ duration: 0.22, filterType: 'bandpass', frequency: 240, resonance: 2, gain: 1.3 * level, attack: 0.004, delay: 1.5, destination: panner });
+  playTone({ waveform: 'triangle', frequency: 170, frequencyEnd: 110, duration: 0.3, gain: 0.6 * level, attack: 0.004, delay: 1.5, destination: panner });
+}
+
+// Sets one of the small generators running or not, without the starter (used when a descent is picked up again).
+function setExtraGeneratorSoundRunning(slot, isRunning, x, z) {
+  if (!isAudioReady() || !audio.extraGeneratorGains[slot]) return;
+  if (isRunning) setPannerPosition(audio.extraGeneratorPanners[slot], x, getFloorHeightAt(x, z) + 0.6, z);
+  const now = audio.context.currentTime;
+  audio.extraGeneratorGains[slot].gain.cancelScheduledValues(now);
+  audio.extraGeneratorGains[slot].gain.setTargetAtTime(isRunning ? 0.42 * SOUND_LEVELS.extraGeneratorRunning : 0, now, 0.3);
+}
+
+function stopExtraGeneratorSounds() {
+  if (!isAudioReady()) return;
+  for (let slot = 0; slot < audio.extraGeneratorGains.length; slot++) setExtraGeneratorSoundRunning(slot, false, 0, 0);
+}
+
 function playLiftDepartSound() {
   if (!isAudioReady()) return;
   const now = audio.context.currentTime;
@@ -1461,10 +1631,12 @@ function playLiftBell() {
   }
 }
 
+// Returns whether the bell rang just now.
 function updateLiftBell(isLiftMoving, gameTime) {
-  if (!isLiftMoving || gameTime < audio.nextLiftBellTime) return;
+  if (!isLiftMoving || gameTime < audio.nextLiftBellTime) return false;
   playLiftBell();
   audio.nextLiftBellTime = gameTime + 1.6;
+  return true;
 }
 
 // Occasional sounds from elsewhere in the station. Each has a function of its own, so it can be played by itself.
@@ -1524,9 +1696,10 @@ function updateAmbientEvents(gameTime, listenerX, listenerZ, dread) {
   const choice = Math.random();
   const angle = Math.random() * TWO_PI, distance = randomBetween(6, 16);
   const eventX = listenerX + Math.cos(angle) * distance, eventZ = listenerZ + Math.sin(angle) * distance;
-  if (choice < 0.34) { playAmbientDrips(eventX, eventZ); return null; }
-  if (choice < 0.58) { playAmbientPipeGroan(eventX, eventZ); return null; }
-  if (choice < 0.8) { playAmbientMetalSettling(eventX, eventZ); return null; }
+  // What is returned is the caption for it and where it came from.
+  if (choice < 0.34) { playAmbientDrips(eventX, eventZ); return { caption: 'ambientDrips', x: eventX, z: eventZ }; }
+  if (choice < 0.58) { playAmbientPipeGroan(eventX, eventZ); return { caption: 'ambientPipe', x: eventX, z: eventZ }; }
+  if (choice < 0.8) { playAmbientMetalSettling(eventX, eventZ); return { caption: 'ambientMetal', x: eventX, z: eventZ }; }
   playAmbientShaftKnocks();
-  return '[knocking, far below]';
+  return { caption: 'ambientKnocks', x: SHAFT_POSITION.x, z: SHAFT_POSITION.z };
 }
