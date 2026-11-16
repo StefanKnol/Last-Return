@@ -15,7 +15,8 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The tests take about 25 minutes here and a slow runner adds a few. This is the limit for a run that hangs.
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
