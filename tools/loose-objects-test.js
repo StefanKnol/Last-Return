@@ -1342,6 +1342,13 @@ function installLab() {
   // The right mouse button: held, it carries; let go, it drops. And it no longer sweeps: the wheel button does.
   // (The pointer is put in place first, while the game is not yet listening to it: once the game takes mouse
   // movement as looking around, moving the pointer there would turn the view away from the object.)
+  //
+  // The test's browser does capture the mouse, and while it does, every press and release that this script
+  // sends arrives with a movement of the pointer that never happened (640 by 360 pixels: the whole way from the
+  // corner of the page). The game would take that for the view being whipped round, and on GitHub, where the
+  // browser draws frames by itself between the steps below, it did so at once: with the button still down, the
+  // thing in the beam was swung and then let go at five metres a second. So for these steps the game is told
+  // to take no mouse movement as looking around; the checks turn the view themselves where they need to.
   await page.mouse.move(640, 360);
   await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
@@ -1351,9 +1358,23 @@ function installLab() {
     for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
     p.pitch = Math.atan2(object.y - d.getPlayerEyeY(), 1.6);
     d.simulate(0.1);
-    d.input.isPointerLocked = true; // the test's browser does not capture the mouse by itself
+    d.input.isPointerLocked = true; // for where the browser does not capture the mouse by itself
+    d.input.ignoreLookUntil = performance.now() + 600000; // see above; set back below
+    d.input.lookDeltaX = 0; d.input.lookDeltaY = 0;
     d.looseState.hasShownCarryHint = false;
     d.clearMessages();
+    // Everything the browser tells the page about the mouse from here on is written down, so that a failure
+    // of the checks below says what the browser did. (On GitHub the browser draws frames by itself between
+    // the steps of this test, and anything the game is told there it acts on at once.)
+    if (!window.mouseLog) {
+      window.mouseLog = [];
+      for (const type of ['mousemove', 'mousedown', 'mouseup', 'contextmenu', 'blur', 'pointerlockchange', 'visibilitychange']) {
+        window.addEventListener(type, function (event) {
+          window.mouseLog.push(type + (type === 'mousemove' ? ' ' + (event.movementX || 0) + ',' + (event.movementY || 0) : '') + (event.button !== undefined && type !== 'mousemove' ? ' button ' + event.button : '') + ' mode ' + d.game.mode);
+        }, true);
+      }
+    }
+    window.mouseLog.length = 0;
   }, spot);
   await page.mouse.down({ button: 'right' });
   const grabbed = await inGame(() => {
@@ -1365,33 +1386,42 @@ function installLab() {
   await inGame(() => { const d = window.lastReturnDebug; d.player.pitch = 0; d.simulate(1.5); });
   const stillGrabbed = await inGame(() => window.lastReturnDebug.getHeldLooseObject() !== null);
   await page.mouse.up({ button: 'right' });
-  const letGo = await inGame(() => {
-    const d = window.lastReturnDebug;
+  const letGo = await inGame((spot) => {
+    const d = window.lastReturnDebug, p = d.player, object = d.looseObjects[0], round = window.looseLab.round;
+    const atEntry = { carrying: d.getHeldLooseObject() !== null, velocity: [round(object.velocityX), round(object.velocityY), round(object.velocityZ)],
+      yawDegrees: round(p.yaw * 180 / Math.PI), pitchDegrees: round(p.pitch * 180 / Math.PI), movedFromSpot: round(Math.hypot(p.x - spot.x, p.z - spot.z)),
+      objectFromYou: [round(object.x - p.x), round(object.y - d.getPlayerEyeY()), round(object.z - p.z)],
+      pendingLook: [d.input.lookDeltaX, d.input.lookDeltaY], grabHeld: d.input.isGrabHeld, pointerLockFlag: d.input.isPointerLocked, reallyLocked: document.pointerLockElement !== null, mode: d.game.mode };
     d.simulate(0.05);
-    const object = d.looseObjects[0];
-    return { carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityZ) };
-  });
+    return { carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityZ), objects: d.looseObjects.length, atEntry: atEntry, whatTheBrowserSaid: window.mouseLog.slice(-30) };
+  }, spot);
   check('holding the right mouse button on an object within reach takes it into the beam and keeps it there; it does not sweep',
     grabbed.buttonSeen && grabbed.carrying && grabbed.byButton && !grabbed.sweeping && stillGrabbed && grabbed.messages.some((text) => /while you hold the button/.test(text)), grabbed);
-  check('letting the button go drops it where it hangs', !letGo.carrying && letGo.speed < 0.6, letGo);
+  check('letting the button go drops it where it hangs', !letGo.carrying && letGo.speed < 0.6 && Math.abs(letGo.atEntry.yawDegrees - 90) < 0.5, letGo);
 
   // Swung and let go, it flies: there is no other throw with the mouse.
-  const flung = await inGame(() => {
-    const d = window.lastReturnDebug, p = d.player, object = d.looseObjects[0];
+  // (With an object of its own, put where the last one lay: wherever that one ended up is no concern of this check.)
+  const flung = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
+    d.input.isGrabHeld = false; d.input.lookDeltaX = 0; d.input.lookDeltaY = 0;
+    d.clearLooseObjects();
+    lab.stand(spot.x, spot.z, Math.PI / 2);
+    const object = d.createLooseObject('canister', spot.x + 1.6, 0.3, spot.z, 0);
     for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
     p.yaw = Math.atan2(object.x - p.x, -(object.z - p.z));
     p.pitch = Math.atan2(object.y - d.getPlayerEyeY(), Math.hypot(object.x - p.x, object.z - p.z));
     d.simulate(0.1);
     d.input.isGrabHeld = true;
     d.simulate(1.5);
+    const wasCarrying = d.getHeldLooseObject() === object;
     p.pitch = 0.2;
     for (let step = 0; step < 9; step++) { p.yaw += Math.PI / 18; d.simulate(1 / 30); } // a quarter turn in a third of a second
     d.simulate(0.1);
     d.input.isGrabHeld = false;
     d.simulate(1 / 30);
-    return { wasCarrying: true, carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityY, object.velocityZ) };
-  });
-  check('swung round and let go, it keeps the speed of the swing', !flung.carrying && flung.speed > 2.5, flung);
+    return { wasCarrying: wasCarrying, carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityY, object.velocityZ) };
+  }, spot);
+  check('swung round and let go, it keeps the speed of the swing', flung.wasCarrying && !flung.carrying && flung.speed > 2.5, flung);
 
   await inGame(() => { const d = window.lastReturnDebug; d.clearLooseObjects(); d.player.heat = 0; d.simulate(0.2); });
   await page.mouse.down({ button: 'right' });
@@ -1400,7 +1430,7 @@ function installLab() {
   await page.mouse.down({ button: 'middle' });
   const middle = await inGame(() => { const d = window.lastReturnDebug; d.simulate(0.1); return d.player.sweepTimeRemaining > 0; });
   await page.mouse.up({ button: 'middle' });
-  await inGame(() => { const d = window.lastReturnDebug; d.simulate(3); d.input.isPointerLocked = false; });
+  await inGame(() => { const d = window.lastReturnDebug; d.simulate(3); d.input.isPointerLocked = false; d.input.ignoreLookUntil = 0; d.input.lookDeltaX = 0; d.input.lookDeltaY = 0; });
   check('the right mouse button no longer sweeps; the wheel button does (and F still does)', !rightAlone && middle, { rightSweeps: rightAlone, middleSweeps: middle });
 
   // With something to use in front of you, E uses that and you keep what you carry.
