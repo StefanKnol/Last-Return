@@ -381,7 +381,7 @@ function useInteractable(interactable) {
       if (!flags.powerOn) {
         playDeniedSound();
         showMessage('LIFT CONTROL: no mains power. Generator 2 is in Pump Hall B.', 5, 'warning');
-      } else if (passTerminalQuests()) {
+      } else if (doQuestsHoldTheTerminal()) {
         // A quest refused the upload, or took it and is holding the lift. It has said why.
       } else if (!flags.uploadStarted) {
         startLiftCall('uploadStarted');
@@ -393,7 +393,7 @@ function useInteractable(interactable) {
       break;
     case OBJECT_GENERATOR:
       if (flags.powerOn) break;
-      if (!passMainsQuests()) break; // a quest holds up the mains (an empty tank), and has said so
+      if (!doQuestsAllowTheMains()) break; // a quest holds up the mains (an empty tank), and has said so
       startGenerator(interactable);
       break;
     case OBJECT_SPOOL_1:

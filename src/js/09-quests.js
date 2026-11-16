@@ -652,7 +652,7 @@ function useQuestObject(interactable) {
 
 // Generator 2 is about to be started. Returns whether every quest that holds up the mains lets it: one that
 // wants something brought takes it from you if you carry it, and says so if you do not.
-function passMainsQuests() {
+function doQuestsAllowTheMains() {
   for (const instance of getUnfinishedQuests('mains')) {
     const itemKey = instance.definition.requires.item;
     if (getCarriedCount(itemKey) < 1) {
@@ -673,7 +673,7 @@ function passMainsQuests() {
 
 // The lift terminal, with the mains on. Returns true if a quest has dealt with the press (by refusing the
 // upload, or by taking it and holding the lift), false if nothing stands in the way of calling the lift.
-function passTerminalQuests() {
+function doQuestsHoldTheTerminal() {
   const flags = game.flags;
   const refusing = getUnfinishedQuests('upload');
   if (refusing.length > 0) {
