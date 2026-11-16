@@ -1308,11 +1308,15 @@ function updateScanGrenade(object, dt) {
   object.burstBudget += pulsesInAll * Math.min(dt, TUNING.scanGrenadeBurstSeconds - object.burstSeconds) / TUNING.scanGrenadeBurstSeconds;
   const pulses = Math.min(4000, Math.floor(object.burstBudget));
   object.burstBudget -= pulses;
+  // How far down its light should go depends on how high it is above whatever is under it. Lying on the floor,
+  // everything steeper than a few degrees lands within a hand of it and is wasted. Held up in the beam, or in
+  // the air, nearly straight down is still a metre or more of floor away and worth lighting.
+  const clearBelow = castRayAgainstWorld(object.x, object.y + 0.03, object.z, 0, -1, 0, 30) ? rayHit.distance : 30;
+  const lowest = -clearBelow / Math.sqrt(clearBelow * clearBelow + TUNING.scanGrenadePatchMetres * TUNING.scanGrenadePatchMetres);
   looseRaySkipped = object; // its own light does not stop on its own case
   for (let pulse = 0; pulse < pulses; pulse++) {
-    // Evenly over the sphere, less the cap underneath it: a height between a little below level and straight
-    // up, and a turn round the upright. (Evenly in height is evenly over the surface of a sphere.)
-    const lowest = -Math.sin(TUNING.scanGrenadeLowestDegrees * DEGREES_TO_RADIANS);
+    // Evenly over the sphere, less the cap that would only light the patch right under it: a height between
+    // `lowest` and straight up, and a turn round the upright. (Evenly in height is evenly over a sphere.)
     const height = lowest + Math.random() * (1 - lowest), turn = Math.random() * TWO_PI, across = Math.sqrt(1 - height * height);
     if (fireScanPulse(object.x, object.y + 0.03, object.z, Math.cos(turn) * across, height, Math.sin(turn) * across, false) && rayHit.figure === hollow.figure) object.burstHitsOnHollow++;
   }
