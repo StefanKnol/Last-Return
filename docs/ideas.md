@@ -2,10 +2,12 @@
 
 - Logo and favicon
 - More screenshots in readme
+- Live game test option for people to test new features and provide feedback (github issue feedback instead of bug)
+  - in game bug reporting or feedback instead of github issue, direct in game with screenshot of current location (no menu's)?
+
 - Even better models
-- random object that make sound when walked on and warn the monster
-- Hollow can go through locked doors, though small chance, shouldn't be a thing, give alternative ways to get around (ceiling vents only for the monster? teleport with delay), also opens up player locking doors to get away
-  - if enough doors are locked in its face it starts breaking them down? (protected doors it can't break down?)
+  - player models (overdone and funny, only visible when scanning)
+
 - random work order numbers and letters
   - same for shaft number and rooms, allowing the same room multiple times with different indicator?
 - random 'locations' to go along with work orders (not just Kessel-9 pumping annex)
@@ -61,3 +63,6 @@
       - the Hollow AI; no line-of-sight, but sound and beam detection etc, as is.
       - Could add more growling and crawling across walls and ceilings?~~
 ~~- less long-lived scanner dots on mobile things (doors already seem to remove the dots, figures don't)~~
+~~- random object that make sound when walked on and warn the monster~~
+~~- Hollow can go through locked doors, though small chance, shouldn't be a thing, give alternative ways to get around (ceiling vents only for the monster? teleport with delay), also opens up player locking doors to get away~~
+  ~~- if enough doors are locked in its face it starts breaking them down? (protected doors it can't break down?)~~
