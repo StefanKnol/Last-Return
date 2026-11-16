@@ -818,6 +818,21 @@ function installLab() {
     result.beforeTheFuseIsOut = { spent: object.isSpent, bursting: object.burstSeconds > 0 };
     d.simulate(0.5 + d.tuning.scanGrenadeBurstSeconds + 0.3);
     result.afterTheFuse = { spent: object.isSpent, stillInTheBeam: d.getHeldLooseObject() === object, pointsAdded: d.pointCloud.totalReturns - pointsBefore };
+    // Lying on the floor, its light goes on the room and not into the floor it lies on.
+    d.clearLooseObjects();
+    object = d.createLooseObject('scanGrenade', spot.x + 0.5, 0.3, spot.z, 0);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    const landedBefore = d.pointCloud.totalReturns;
+    object.armedTime = d.game.time; object.goesOffTime = d.game.time;
+    d.simulate(d.tuning.scanGrenadeBurstSeconds + 0.2);
+    const landed = d.pointCloud.totalReturns - landedBefore, floats = d.pointCloud.floatView;
+    let underIt = 0, onTheFloor = 0, furthest = 0;
+    for (let index = d.pointCloud.storedCount - landed; index < d.pointCloud.storedCount; index++) {
+      const away = Math.hypot(floats[index * 5] - object.x, floats[index * 5 + 2] - object.z);
+      if (floats[index * 5 + 1] < 0.02) { onTheFloor++; if (away < 0.3) underIt++; }
+      furthest = Math.max(furthest, away);
+    }
+    result.whereItsLightGoes = { pulses: landed, shareUnderIt: lab.round(underIt / landed), shareOnTheFloor: lab.round(onTheFloor / landed), furthestMetres: lab.round(furthest) };
     // An enraged Hollow is not stunned by it.
     d.clearLooseObjects();
     object = d.createLooseObject('scanGrenade', spot.x + 0.5, 0.3, spot.z, 0);
@@ -833,6 +848,8 @@ function installLab() {
   }, spot);
   check('armed and never thrown, it goes off in the beam when its fuse runs out, and not before',
     !grenadeEdges.beforeTheFuseIsOut.spent && !grenadeEdges.beforeTheFuseIsOut.bursting && grenadeEdges.afterTheFuse.spent && grenadeEdges.afterTheFuse.stillInTheBeam && grenadeEdges.afterTheFuse.pointsAdded > 8000, grenadeEdges);
+  check('lying on the floor, a grenade puts its light on the room: next to none of it on the patch of floor it lies on, some of it on the floor round about, and it reaches the walls',
+    grenadeEdges.whereItsLightGoes.shareUnderIt < 0.05 && grenadeEdges.whereItsLightGoes.shareOnTheFloor > 0.08 && grenadeEdges.whereItsLightGoes.shareOnTheFloor < 0.3 && grenadeEdges.whereItsLightGoes.furthestMetres > 3, grenadeEdges.whereItsLightGoes);
   check('an enraged Hollow is lit by it and not stunned', grenadeEdges.enraged.hits >= 25 && grenadeEdges.enraged.stunSeconds === 0, grenadeEdges.enraged);
 
   // --- the Hollow goes after what it kicks ---

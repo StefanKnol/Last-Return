@@ -1310,8 +1310,10 @@ function updateScanGrenade(object, dt) {
   object.burstBudget -= pulses;
   looseRaySkipped = object; // its own light does not stop on its own case
   for (let pulse = 0; pulse < pulses; pulse++) {
-    // Evenly over the whole sphere: a height between pole and pole, and a turn round the upright.
-    const height = Math.random() * 2 - 1, turn = Math.random() * TWO_PI, across = Math.sqrt(1 - height * height);
+    // Evenly over the sphere, less the cap underneath it: a height between a little below level and straight
+    // up, and a turn round the upright. (Evenly in height is evenly over the surface of a sphere.)
+    const lowest = -Math.sin(TUNING.scanGrenadeLowestDegrees * DEGREES_TO_RADIANS);
+    const height = lowest + Math.random() * (1 - lowest), turn = Math.random() * TWO_PI, across = Math.sqrt(1 - height * height);
     if (fireScanPulse(object.x, object.y + 0.03, object.z, Math.cos(turn) * across, height, Math.sin(turn) * across, false) && rayHit.figure === hollow.figure) object.burstHitsOnHollow++;
   }
   looseRaySkipped = null;

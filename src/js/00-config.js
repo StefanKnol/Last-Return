@@ -180,7 +180,8 @@ const TUNING = {
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
-  scanGrenadeSweeps: 2.5,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000)
+  scanGrenadeSweeps: 1.6,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000). This was 2.5 while a third of them went into the floor under it; 1.6 puts as many on the room as 2.5 did then.
+  scanGrenadeLowestDegrees: 12,     // its light goes no lower than this many degrees below level. Lower than that it only lights the patch of floor it lies on (measured: 35 of every 100 pulses landed within a hand of it).
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned
   scanGrenadeStunSeconds: 3.5,      // how long the Hollow stands stunned. An enraged Hollow is not stunned.
   noiseRadiusScanGrenade: 20,       // going off is loud. The Hollow comes to where it went off, not to you.
