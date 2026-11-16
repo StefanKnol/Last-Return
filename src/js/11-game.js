@@ -916,7 +916,7 @@ function startApplication() {
     getHollowPartCount: function () { return hollowPartCount; },
     getHollowStepsTo: function (x, z) {
       // How far the Hollow has to go from where it is to (x, z), in steps, crawlspace included.
-      const field = new Int16Array(TILE_COUNT);
+      const field = borrowTileField('hollowStepsTo');
       computeHollowDistanceField(field, findNearestWalkableTileIndex(x, z), true);
       return field[findNearestWalkableTileIndex(hollow.figure.x, hollow.figure.z)];
     },

@@ -633,7 +633,7 @@ function auditHollowRoutes() {
     if (hatchesInPart[partNumber] === 0) problems.push('part ' + partNumber + ' of the station has no hatch: the Hollow could never get in or out of it');
   }
   const startIndex = findNearestWalkableTileIndex(HOLLOW_SPAWN_POSITION.x, HOLLOW_SPAWN_POSITION.z);
-  const field = new Int16Array(TILE_COUNT);
+  const field = borrowTileField('auditHollowRoutes');
   computeHollowDistanceField(field, startIndex, true);
   let unreachable = 0, partsReachedOnFoot = 0;
   for (let index = 0; index < TILE_COUNT; index++) {
