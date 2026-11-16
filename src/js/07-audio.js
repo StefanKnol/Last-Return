@@ -665,9 +665,23 @@ function updateAudioListener(x, y, z, yaw) {
   }
 }
 
+// Every short sound is built from the six functions below, and each asks here first.
+// TWEAK: MAXIMUM_SHORT_SOUNDS is how many pieces of sound may be started within any four seconds. One more
+// than that is not made. A single knock is three to five pieces, so in play this takes well over a hundred
+// things hitting something within four seconds. Like MAXIMUM_PLACED_SOUNDS further down, it is there for
+// when time is made to pass faster than the clock: sounds that cannot end must not be allowed to pile up.
+const MAXIMUM_SHORT_SOUNDS = 600;
+let shortSoundCount = 0;
+function claimShortSound() {
+  if (!isAudioReady() || shortSoundCount >= MAXIMUM_SHORT_SOUNDS) return false;
+  shortSoundCount++;
+  window.setTimeout(function () { shortSoundCount--; }, 4000);
+  return true;
+}
+
 // One filtered burst of noise. `destination` defaults to the dry master output.
 function playNoiseBurst(options) {
-  if (!isAudioReady()) return;
+  if (!claimShortSound()) return;
   const context = audio.context;
   const now = context.currentTime + (options.delay || 0);
   const source = context.createBufferSource();
@@ -694,7 +708,7 @@ function playNoiseBurst(options) {
 }
 
 function playTone(options) {
-  if (!isAudioReady()) return;
+  if (!claimShortSound()) return;
   const context = audio.context;
   const now = context.currentTime + (options.delay || 0);
   const oscillator = context.createOscillator();
@@ -719,7 +733,7 @@ function playTone(options) {
 // sounds like wind across a pipe or a bow on metal instead of a synthesiser. Most tonal sounds use this.
 // `resonance` is how narrow the filters are: 10 is airy, 40 is nearly a pure whistle.
 function playResonantNoise(options) {
-  if (!isAudioReady()) return;
+  if (!claimShortSound()) return;
   const context = audio.context;
   const now = context.currentTime + (options.delay || 0);
   const resonance = options.resonance || 18;
@@ -779,7 +793,7 @@ function createThroatWave(context, roughness) {
 //   formants          one line per resonance: [Hz with the mouth shut, Hz with it open, sharpness, loudness].
 //                     The mouth opens over the first third and closes again. Lower numbers are a larger animal.
 function playThroatVoice(options) {
-  if (!isAudioReady()) return;
+  if (!claimShortSound()) return;
   const context = audio.context;
   const now = context.currentTime + (options.delay || 0);
   const duration = options.duration;
@@ -863,7 +877,7 @@ const METAL_SHAPES = {
 //   damping     how much sooner the high overtones die than the low ones. 0: they all ring on, like a bell. 1: only a hum is left (default 0.7)
 //   bend        how far the pitch sags after the hit, as thin sheet metal does when it buckles. 0.04 is 4 percent (default 0)
 function playMetalStrike(options) {
-  if (!isAudioReady()) return;
+  if (!claimShortSound()) return;
   const context = audio.context;
   const now = context.currentTime + (options.delay || 0);
   const ratios = METAL_SHAPES[options.shape || 'bar'];
@@ -912,7 +926,7 @@ function playMetalStrike(options) {
 //   ring                      how long the lowest one rings, in seconds. Higher ones are shorter (default 0.06)
 //   rise                      how far each note slides up. 0.5 is half as high again: the "bloop" (default 0.5)
 function playWaterBubbles(options) {
-  if (!isAudioReady()) return;
+  if (!claimShortSound()) return;
   const context = audio.context;
   const now = context.currentTime + (options.delay || 0);
   const count = options.count || 1;
@@ -946,10 +960,23 @@ function playWaterBubbles(options) {
   }
 }
 
+// A place in the station for one short sound to come from. It is let go of six seconds later, with everything
+// that was played through it.
+// TWEAK: MAXIMUM_PLACED_SOUNDS is how many of these there can be at one time. One more than that is simply
+// not made: the sound that asked for it stays silent. In play that takes a heap of things crashing down all
+// at once, and nobody misses the sixty-fifth knock. It matters where time is made to pass faster than the
+// clock (the test suites play an hour of chases in a few seconds): there nothing was ever let go of, and
+// thousands of sounds that could not end filled gigabytes of memory.
+const MAXIMUM_PLACED_SOUNDS = 64;
+let placedSoundCount = 0;
 function createTemporaryPanner(x, y, z) {
-  if (!isAudioReady()) return null;
+  if (!isAudioReady() || placedSoundCount >= MAXIMUM_PLACED_SOUNDS) return null;
   const panner = createPannerNode(x, y, z, 2.5, 1.2);
-  window.setTimeout(function () { try { panner.disconnect(); } catch (error) { /* already released */ } }, 6000);
+  placedSoundCount++;
+  window.setTimeout(function () {
+    placedSoundCount--;
+    try { panner.disconnect(); } catch (error) { /* already released */ }
+  }, 6000);
   return panner;
 }
 
