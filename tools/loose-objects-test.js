@@ -554,15 +554,21 @@ function installLab() {
     for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
     d.player.pitch = Math.atan2(object.y - d.getPlayerEyeY(), 1); // look at it
     d.simulate(0.1);
+    // The hint about the keys is given once a descent, and this descent has had it. Make it due again.
+    d.looseState.hasShownCarryHint = false;
+    d.clearMessages();
   }, spot);
   await drawFrames(page, 3);
   const beforePickUp = await inGame(() => ({ prompt: document.getElementById('hud-prompt').textContent, promptHidden: document.getElementById('hud-prompt').hidden,
     chipHidden: document.getElementById('chip-carrying').hidden }));
   await page.keyboard.press('KeyE');
-  await inGame(() => window.lastReturnDebug.simulate(0.5));
+  // A message stays for a few seconds of the game's own clock, which the browser may run on by itself while
+  // this test waits for it. So what is on screen is read in the same breath as the thing that puts it there.
+  const pickUpMessages = await inGame(() => { window.lastReturnDebug.simulate(0.5); return window.looseLab.messages(); });
   await drawFrames(page, 8);
   const afterPickUp = await inGame(() => ({ carrying: window.lastReturnDebug.getHeldLooseObject() !== null, chip: document.getElementById('chip-carrying').textContent,
-    chipHidden: document.getElementById('chip-carrying').hidden, messages: window.looseLab.messages() }));
+    chipHidden: document.getElementById('chip-carrying').hidden }));
+  afterPickUp.messages = pickUpMessages;
   check('looking at an object within reach offers to pick it up, and E does', !beforePickUp.promptHidden && /Pick up the gas canister/.test(beforePickUp.prompt) && beforePickUp.chipHidden && afterPickUp.carrying, [beforePickUp, afterPickUp.carrying]);
   check('the screen says what you carry, and the first time, which key lets go of it',
     !afterPickUp.chipHidden && afterPickUp.chip === 'CARRYING: GAS CANISTER' && afterPickUp.messages.some((text) => /Q lets go/.test(text)), afterPickUp);
@@ -602,12 +608,11 @@ function installLab() {
     for (let step = 0; step < 150 && !other.isAsleep; step++) d.simulate(1 / 30);
     d.player.pitch = Math.atan2(other.y - d.getPlayerEyeY(), 1.1);
     d.simulate(0.1);
+    d.clearMessages();
     return { lookingAtIt: d.player.focusedLooseObject === other };
   }, spot);
   await page.keyboard.press('KeyE');
-  await inGame(() => window.lastReturnDebug.simulate(0.2));
-  await drawFrames(page, 3);
-  const handsFullAfter = await inGame(() => ({ carrying: window.lastReturnDebug.getHeldLooseObject().kindKey, messages: window.looseLab.messages() }));
+  const handsFullAfter = await inGame(() => { const d = window.lastReturnDebug; d.simulate(0.2); return { carrying: d.getHeldLooseObject().kindKey, messages: window.looseLab.messages() }; });
   check('with something in your hands already, E on another object says your hands are full', handsFull.lookingAtIt && handsFullAfter.carrying === 'jar' && handsFullAfter.messages.some((text) => /hands are full/.test(text)), handsFullAfter);
 
   check('no script errors were reported', problems.length === 0, problems);
@@ -622,10 +627,11 @@ function installLab() {
     lab.reset();
     return { dropHidden: document.getElementById('touch-drop').hidden };
   });
-  await phone.page.evaluate(() => {
+  const phoneHint = await phone.page.evaluate(() => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
     lab.stand(p.x, p.z, p.yaw);
     lab.carry('canister');
+    return lab.messages();
   });
   await drawFrames(phone.page, 8);
   const phoneCarrying = await phone.page.evaluate(() => {
@@ -635,11 +641,11 @@ function installLab() {
       return !(other.right <= box.left || other.left >= box.right || other.bottom <= box.top || other.top >= box.bottom);
     });
     return { dropHidden: button.hidden, box: [Math.round(box.left), Math.round(box.top), Math.round(box.right), Math.round(box.bottom)], overlaps: overlaps,
-      onScreen: box.left >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight, messages: window.looseLab.messages() };
+      onScreen: box.left >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight };
   });
   check('on a phone the DROP button is only there while you carry something, on screen and clear of the other buttons, the map, the messages and the aiming ring',
     phoneBefore.dropHidden && !phoneCarrying.dropHidden && phoneCarrying.onScreen && phoneCarrying.overlaps.length === 0, phoneCarrying);
-  check('and the hint names the button, not a key', phoneCarrying.messages.some((text) => /DROP lets go/.test(text)), phoneCarrying.messages);
+  check('and the hint names the button, not a key', phoneHint.some((text) => /DROP lets go/.test(text)), phoneHint);
   await phone.page.tap('#touch-drop');
   const phoneDropped = await phone.page.evaluate(() => { const d = window.lastReturnDebug; d.simulate(0.1); return { carrying: d.getHeldLooseObject() !== null }; });
   check('a tap on DROP lets go of it', !phoneDropped.carrying, phoneDropped);
