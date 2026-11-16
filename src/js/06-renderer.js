@@ -681,6 +681,74 @@ function writeBoxPropMatrix(out, prop) {
   return out;
 }
 
+// A box that is part of a loose object: the object's rotation and position, then the part's own place and size.
+function writeLooseBoxMatrix(out, object, part) {
+  const matrix = object.matrix;
+  out[0] = matrix[0] * part.halfX; out[1] = matrix[3] * part.halfX; out[2] = matrix[6] * part.halfX; out[3] = 0;
+  out[4] = matrix[1] * part.halfY; out[5] = matrix[4] * part.halfY; out[6] = matrix[7] * part.halfY; out[7] = 0;
+  out[8] = matrix[2] * part.halfZ; out[9] = matrix[5] * part.halfZ; out[10] = matrix[8] * part.halfZ; out[11] = 0;
+  out[12] = object.x + matrix[0] * part.centerX + matrix[1] * part.centerY + matrix[2] * part.centerZ;
+  out[13] = object.y + matrix[3] * part.centerX + matrix[4] * part.centerY + matrix[5] * part.centerZ;
+  out[14] = object.z + matrix[6] * part.centerX + matrix[7] * part.centerY + matrix[8] * part.centerZ;
+  out[15] = 1;
+  return out;
+}
+
+// Sends the matrix in `renderer.modelMatrix` to whichever of the two occluder programs is in use, and draws.
+function drawLooseObjectShape(isStationLit, vertexArray, vertexCount) {
+  const gl = renderer.gl;
+  if (isStationLit) {
+    gl.uniformMatrix4fv(renderer.debugWorldUniforms.uModel, false, renderer.modelMatrix);
+  } else {
+    multiplyMatrices(renderer.scratchMatrix, renderer.viewProjectionMatrix, renderer.modelMatrix);
+    gl.uniformMatrix4fv(renderer.solidUniforms.uMatrix, false, renderer.scratchMatrix);
+  }
+  gl.bindVertexArray(vertexArray);
+  gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+}
+
+// Loose objects hide the points behind them, like everything else that is solid. They are never seen
+// themselves: what you see of one is the points your scanner leaves on it, and the hole it makes in the rest.
+// (With "Light the station" on in debug mode they are drawn, in the colour of things you can pick up.)
+function drawLooseObjectOccluders(camera, isStationLit) {
+  if (looseObjects.length === 0) return;
+  const gl = renderer.gl;
+  if (isStationLit) gl.uniform3f(renderer.debugWorldUniforms.uColor, 0.9, 0.6, 0.12);
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    const deltaX = object.x - camera.x, deltaZ = object.z - camera.z;
+    if (deltaX * deltaX + deltaZ * deltaZ > 60 * 60) continue; // TWEAK: further than 60 m away they are not worth drawing
+    const matrix = object.matrix, parts = object.prepared.parts;
+    for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+      const part = parts[partIndex];
+      if (part.shape === 'box') {
+        writeLooseBoxMatrix(renderer.modelMatrix, object, part);
+        drawLooseObjectShape(isStationLit, renderer.unitCubeVertexArray, 36);
+      } else if (part.shape === 'ball') {
+        writeTranslationScaleMatrix(renderer.modelMatrix,
+          object.x + matrix[0] * part.centerX + matrix[1] * part.centerY + matrix[2] * part.centerZ,
+          object.y + matrix[3] * part.centerX + matrix[4] * part.centerY + matrix[5] * part.centerZ,
+          object.z + matrix[6] * part.centerX + matrix[7] * part.centerY + matrix[8] * part.centerZ,
+          part.radius, part.radius, part.radius);
+        drawLooseObjectShape(isStationLit, renderer.debugSphereVertexArray, renderer.debugSphereVertexCount);
+      } else {
+        const fromX = object.x + matrix[0] * part.fromX + matrix[1] * part.fromY + matrix[2] * part.fromZ;
+        const fromY = object.y + matrix[3] * part.fromX + matrix[4] * part.fromY + matrix[5] * part.fromZ;
+        const fromZ = object.z + matrix[6] * part.fromX + matrix[7] * part.fromY + matrix[8] * part.fromZ;
+        const toX = object.x + matrix[0] * part.toX + matrix[1] * part.toY + matrix[2] * part.toZ;
+        const toY = object.y + matrix[3] * part.toX + matrix[4] * part.toY + matrix[5] * part.toZ;
+        const toZ = object.z + matrix[6] * part.toX + matrix[7] * part.toY + matrix[8] * part.toZ;
+        writeSegmentMatrix(renderer.modelMatrix, fromX, fromY, fromZ, toX, toY, toZ, part.radius);
+        drawLooseObjectShape(isStationLit, renderer.debugCylinderVertexArray, renderer.debugCylinderVertexCount);
+        writeTranslationScaleMatrix(renderer.modelMatrix, fromX, fromY, fromZ, part.radius, part.radius, part.radius);
+        drawLooseObjectShape(isStationLit, renderer.debugSphereVertexArray, renderer.debugSphereVertexCount);
+        writeTranslationScaleMatrix(renderer.modelMatrix, toX, toY, toZ, part.radius, part.radius, part.radius);
+        drawLooseObjectShape(isStationLit, renderer.debugSphereVertexArray, renderer.debugSphereVertexCount);
+      }
+    }
+  }
+}
+
 function writeViewmodelMatrix(out, x, y, z, yaw, pitch) {
   const cosineYaw = Math.cos(yaw), sineYaw = Math.sin(yaw), cosinePitch = Math.cos(pitch), sinePitch = Math.sin(pitch);
   out[0] = cosineYaw; out[1] = 0; out[2] = -sineYaw; out[3] = 0;
@@ -878,6 +946,7 @@ function renderFrame(camera, frameState) {
     }
     gl.drawArrays(gl.TRIANGLES, 0, 36);
   }
+  drawLooseObjectOccluders(camera, isStationLit);
   gl.disable(gl.POLYGON_OFFSET_FILL);
   gl.colorMask(true, true, true, true);
 

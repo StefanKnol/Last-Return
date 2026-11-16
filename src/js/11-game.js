@@ -139,6 +139,7 @@ function resetWorldState() {
   game.hasShownVentHint = false;
   game.hasShownNoisyFloorHint = false;
   noisyFloorCounts.byPlayer = 0; noisyFloorCounts.byPlayerCrouched = 0; noisyFloorCounts.byHollow = 0;
+  resetLooseObjectsForNewRun();
   game.deathSequence = null;
   for (const interactable of interactables) {
     interactable.isAvailable = true;
@@ -539,6 +540,7 @@ function retryFromCheckpoint() {
   player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
   player.sweepTimeRemaining = 0;
   input.keysDown.clear();
+  releaseHeldLooseObject(0); // whatever you were carrying lies where you fell
   game.interference = 0; game.danger = 0; game.fade = 0;
   game.deathSequence = null;
   if (hollow.isActive) {
@@ -651,6 +653,7 @@ function updatePlaying(dt) {
   updatePlayerMovement(dt);
   const bobHeight = Math.sin(player.bobPhase) * 0.028;
   const eyeY = getPlayerEyeY() + bobHeight;
+  updateLooseObjects(dt, player.x, getPlayerEyeY(), player.z); // before the scanner: what you carry is in its way
   updateScanner(dt, player.x, eyeY, player.z);
   updateInteractionFocus(player.x, eyeY, player.z);
   updateDoors(dt);
@@ -939,6 +942,15 @@ function startApplication() {
     },
     awakenStills: awakenStills,
     emitNoise: emitNoise,
+    looseObjects: looseObjects, looseObjectKinds: LOOSE_OBJECT_KINDS, looseState: looseState,
+    input: input, debugHooks: debugHooks, findLooseObjectInFocus: findLooseObjectInFocus, getThrowWindUp: getThrowWindUp,
+    setLooseObjectOrientation: setLooseObjectOrientation, getLooseObjectPointLifeCode: getLooseObjectPointLifeCode,
+    isSpaceOpenAt: function (x, y, z) { return isLooseSpaceOpenAt(Math.floor(x), Math.floor(z), y); },
+    worldProps: worldProps, getTileFlagsAt: getTileFlagsAtPosition, tileFlagPit: TILE_FLAG_PIT, getPlayerEyeY: getPlayerEyeY,
+    createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
+    pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
+    wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
+    castScannerRay: castScannerRay, rayHit: rayHit, scannerBasis: scannerBasis, computeScannerBasis: computeScannerBasis,
     setScanHeld: function (isHeld) { input.isScanHeld = isHeld; },
     addScanPoint: addScanPoint,
     setScannerSpread: setScannerSpread,

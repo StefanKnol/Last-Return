@@ -148,6 +148,48 @@ const TUNING = {
   captionHeartbeatPressure: 0.55,   // how hard you are pressed (0 to 1) before your heartbeat is put into words
   captionShriekLevel: 0.3,          // how loud its shriek in the beam (0 to 1) before that is put into words
 
+  // ---- Loose objects (see 08-loose-objects.js): things you carry, drop and throw ----
+  // How they fall and come to rest.
+  looseGravity: 9.81,               // metres per second, per second
+  looseStepSeconds: 1 / 120,        // the world of loose objects is worked out this often. Coarser is cheaper and lets fast things slip into walls.
+  looseBounceFromSpeed: 1.2,        // a hit slower than this (m/s) does not bounce at all, so things settle instead of chattering
+  looseAirDrag: 0.08,               // how much speed is lost to the air each second (0.08 = 8 percent)
+  looseRollingDrag: 2.2,            // how quickly something rolling or rocking on a surface loses its spin. Higher stops a rolling canister sooner.
+  looseWakeFromSpeed: 0.6,          // something at rest that is hit slower than this (m/s) by another object stays as it is, like part of the floor
+  looseRestSpeed: 0.05,             // slower than this (m/s) ...
+  looseRestSpin: 0.35,              // ... and turning slower than this (radians per second) ...
+  looseRestSeconds: 0.4,            // ... for this long, while touching something: it is at rest, and left alone until something touches it
+  looseImprintSeconds: 0.5,         // how long points scanned onto a moving or carried object stay. (On one at rest they stay for good.)
+  // Carrying.
+  loosePickUpReach: 1.7,            // how close you must be to pick one up
+  looseHoldFollowRate: 16,          // how eagerly it closes the gap to your hands. Lower is a looser, swingier carry.
+  looseHoldResponseRate: 26,        // how quickly it gets up to speed. Lower is heavier-feeling.
+  looseHoldLagPerKilogram: 0.06,    // how much each kilogram takes off both of those. 0 = a crate follows like a jar.
+  looseHoldFastestSpeed: 7,         // it never chases your hands faster than this (m/s), however far behind it is
+  looseHoldPitchShareDown: 1,       // how much of your looking down it follows (1 = all of it): it goes down with your look ...
+  looseHoldReachDown: 0.35,         // ... and your arms reach this much further (metres) when you look straight down. From a crouch that puts it on the floor.
+  looseHoldPitchShareUp: 0.25,      // how much of your looking up it follows. Low, so that looking up sees over what you carry.
+  looseHoldSagPerKilogram: 0.003,   // metres lower in your hands per kilogram
+  looseHoldStopDistance: 0.3,       // when it is against something and this far behind your hands, it starts to hold you back ...
+  looseHoldStopSpeed: 3,            // ... by up to this many metres a second: enough to stop a walk (2.5), not a run (4.6)
+  looseHoldBreakDistance: 0.75,     // further than this from your hands ...
+  looseHoldBreakSeconds: 0.25,      // ... for this long, and it is pulled out of them
+  carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
+  // Throwing.
+  looseThrowTapSeconds: 0.22,       // letting the drop key go sooner than this only lets go of the object
+  looseThrowChargeSeconds: 0.9,     // holding it this long gives the hardest throw
+  looseThrowSpeed: 11,              // metres per second for a full throw of something that weighs nothing ...
+  looseThrowLossPerKilogram: 0.11,  // ... and what each kilogram takes off it: a 3 kg canister leaves at 8.3 m/s, an 18 kg motor at 3.7
+  looseThrowLift: 1.6,              // metres per second upwards added to a full throw
+  looseThrowSpin: 5,                // how fast it tumbles as it leaves your hands (radians per second)
+  // Knocks. How hard an object hits something decides what is heard.
+  looseKnockFaintestSpeed: 0.35,    // slower than this (m/s) makes no sound at all
+  looseKnockQuietSpeed: 1.5,        // slower than this is a tap that you hear and the Hollow does not. Crouch-walking (1.3 m/s) into a wall is under it; walking (2.5, less with something heavy) is over.
+  looseKnockLoudSpeed: 5.5,         // at this speed and above it is as loud as it gets. A drop from your hands lands at about 4.5.
+  looseKnockGapSeconds: 0.12,       // one object is not heard twice within this time, so a rattle is a few knocks and not fifty
+  noiseRadiusKnockSoft: 6,          // how far the softest knock the Hollow can hear carries, for an object of middling weight ...
+  noiseRadiusKnockHard: 22,         // ... and the hardest. Light things carry 0.6 times as far, the heaviest 1.5 times.
+
   // ---- Noisy things on the floor (see 03-noisy-floor.js): broken glass, a loose plate, empty cans ----
   noiseRadiusNoisyFloorWalk: 10,    // walking over one. A plain walking step carries 4.
   noiseRadiusNoisyFloorSprint: 19,  // running over one. A plain sprinting step carries 14. Crouched, they make no noise at all.
@@ -492,6 +534,10 @@ const CAPTIONS = {
   ownGlass: { text: '[glass crunches under your boots]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   ownPlate: { text: '[a floor plate clanks under you]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   ownCans: { text: '[cans scatter from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  ownObjectKnock: { text: '[it knocks against something]', level: 'sound', withinMetres: 0, seconds: 2, slot: 'ownHands', rank: 0 },
+  ownObjectCrash: { text: '[it hits hard. That carried]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownHands', rank: 1 },
+  objectKnock: { text: '[something is knocked over]', level: 'sound', withinMetres: 20, seconds: 2.5, slot: 'objects', rank: 0 },
+  objectCrash: { text: '[something is sent clattering]', level: 'sound', withinMetres: 28, seconds: 3, slot: 'objects', rank: 1 },
   heartbeat: { text: '[your heart is pounding]', level: 'sound', withinMetres: 0, seconds: 1.5 }
 };
 

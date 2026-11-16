@@ -14,6 +14,8 @@ const input = {
   touchScanHeld: false,
   touchSprint: false,
   touchCrouch: false,
+  touchDropHeld: false, // the DROP button, which is only there while you carry something
+  dropPressed: false,   // Q or DROP has been pressed since the game last looked
   moveStickX: 0,
   moveStickZ: 0,
   lookDeltaX: 0,
@@ -48,6 +50,7 @@ const player = {
   scannerActivity: 0,
   centerRange: -1,
   focusedInteractable: null,
+  focusedLooseObject: null, // something that can be picked up, when that is what you are looking at
   isPainting: false
 };
 
@@ -126,6 +129,7 @@ function resetPlayerToStart() {
   player.eyeHeight = TUNING.eyeHeightStanding;
   player.floorY = getFloorHeightAt(player.x, player.z);
   player.focusedInteractable = null;
+  player.focusedLooseObject = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +172,7 @@ function initializeInput() {
     if (game.mode === 'playing') {
       if (code === 'KeyE') input.wantsInteract = true;
       else if (code === 'KeyF') input.wantsSweep = true;
+      else if (code === 'KeyQ') input.dropPressed = true; // lets go of what you carry, or winds up a throw (08-loose-objects.js)
       else if (code === 'Tab' || code === 'KeyM') toggleMapOverlay();
       else if (code === 'Digit1') setScannerSpread(5);
       else if (code === 'Digit2') setScannerSpread(TUNING.scannerSpreadDefaultDegrees);
@@ -348,6 +353,12 @@ function initializeTouchControls() {
     if (input.touchCrouch) { input.touchSprint = false; document.getElementById('touch-run').classList.remove('is-held'); }
     element.classList.toggle('is-held', input.touchCrouch);
   });
+  // DROP: a tap lets go of what you carry, holding it winds up a throw. The game reads how long it is held.
+  const dropButton = document.getElementById('touch-drop');
+  dropButton.addEventListener('touchstart', function (event) { event.preventDefault(); input.touchDropHeld = true; input.dropPressed = true; dropButton.classList.add('is-held'); }, { passive: false });
+  const releaseDrop = function () { input.touchDropHeld = false; dropButton.classList.remove('is-held'); };
+  dropButton.addEventListener('touchend', releaseDrop);
+  dropButton.addEventListener('touchcancel', releaseDrop);
   bindTapButton('touch-spread', function () {
     const next = player.spreadDegrees < 8 ? TUNING.scannerSpreadDefaultDegrees : (player.spreadDegrees < 18 ? 24 : 5);
     setScannerSpread(next);
@@ -385,7 +396,7 @@ function updatePlayerMovement(dt) {
   const hasNoRoomToStand = getHeadroomAt(player.x, player.z) < 1.75;
   player.isCrouching = keys.has('KeyC') || input.touchCrouch || hasNoRoomToStand;
   player.isInVent = isInVent;
-  const wantsSprint = (keys.has('ShiftLeft') || keys.has('ShiftRight') || input.touchSprint) && !player.isCrouching;
+  const wantsSprint = (keys.has('ShiftLeft') || keys.has('ShiftRight') || input.touchSprint) && !player.isCrouching && canSprintWhileCarrying();
   player.isSprinting = wantsSprint && hasMoveInput && forwardInput > 0.2 && !player.isStaminaLocked && player.sweepTimeRemaining <= 0;
 
   if (player.isSprinting) {
@@ -406,6 +417,7 @@ function updatePlayerMovement(dt) {
   const flags = getTileFlagsAtPosition(player.x, player.z);
   const isInWater = (flags & TILE_FLAG_WATER) !== 0;
   if (isInWater) speed *= TUNING.waterSpeedFactor;
+  speed *= getCarrySpeedFactor(); // something in your hands slows you by its weight
 
   const forwardX = Math.sin(player.yaw), forwardZ = -Math.cos(player.yaw);
   const rightX = Math.cos(player.yaw), rightZ = Math.sin(player.yaw);
@@ -417,7 +429,7 @@ function updatePlayerMovement(dt) {
 
   const previousX = player.x, previousZ = player.z;
   const resolved = resolveBodyCollision(player.x + player.velocityX * dt, player.z + player.velocityZ * dt,
-    TUNING.playerRadius, player.isCrouching ? 1.0 : 1.7, getFloorHeightAt(player.x, player.z));
+    TUNING.playerRadius, player.isCrouching ? (canCrawlWhileCarrying() ? 1.0 : 1.2) : 1.7, getFloorHeightAt(player.x, player.z));
   player.x = resolved.x; player.z = resolved.z;
   // Follow the floor. Stairs are taken smoothly; anything bigger (a teleport, a checkpoint) lands at once.
   // TWEAK: 2.5 = how fast the view rises and falls on stairs, in metres per second. Lower feels floatier.
@@ -465,6 +477,11 @@ function updatePlayerMovement(dt) {
     game.hasShownVentHint = true;
     showMessage(input.isTouchDevice ? 'A vent. Hold CROUCH to crawl in. It is not quiet in there.' : 'A vent. Hold C to crawl in. It is not quiet in there.', 6, 'info');
   }
+  // Crouched at a vent with both arms full: say why you are not going in.
+  if (!canCrawlWhileCarrying() && player.isCrouching && hasMoveInput && !isInVent &&
+      (getTileFlagsAtPosition(player.x + forwardX * 0.9, player.z + forwardZ * 0.9) & TILE_FLAG_VENT) !== 0) {
+    showMessage('You cannot crawl with the ' + getHeldLooseObject().kind.label + ' in your arms.', 3, 'info');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +523,7 @@ function fireScannerPulse(originX, originY, originZ, horizontalTangent, vertical
     figure.lastScannedTime = game.time;
     lifeCode = convertSecondsToPointLifeCode(TUNING[figure.imprintTuningKey]);
   }
+  if (rayHit.looseObject !== null) lifeCode = getLooseObjectPointLifeCode(rayHit.looseObject);
   addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode);
   if (rayHit.objectId !== 0) markInteractableDiscovered(rayHit.objectId);
   if (drawBeam) addBeamLine(rayHit.x, rayHit.y, rayHit.z, 0.1 + Math.random() * 0.12);
@@ -611,9 +629,18 @@ function updateInteractionFocus(eyeX, eyeY, eyeZ) {
     const score = distance < 0.7 ? 1 : alignment;
     if (score > bestScore) { bestScore = score; best = interactable; }
   }
+  // Something loose that can be picked up wins when it is the better lined up of the two.
+  const looseObject = findLooseObjectInFocus(eyeX, eyeY, eyeZ, best ? bestScore : 0.9);
+  if (looseObject) best = null;
   player.focusedInteractable = best;
+  player.focusedLooseObject = looseObject;
   if (input.wantsInteract) {
     input.wantsInteract = false;
-    if (best) useInteractable(best);
+    if (looseObject) {
+      if (getHeldLooseObject()) showMessage('Your hands are full.', 2, 'info');
+      else pickUpLooseObject(looseObject);
+    } else if (best) {
+      useInteractable(best);
+    }
   }
 }

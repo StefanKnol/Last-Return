@@ -275,6 +275,7 @@ function resetWorldForNewLevel() {
   tileIsWalkable.fill(0);
   tilePropLists.fill(null); tileSignLists.fill(null);
   worldProps.length = 0; dynamicBoxProps.length = 0; doors.length = 0; interactables.length = 0;
+  clearLooseObjects();
   roamingWaypoints.length = 0;
   clearHollowHatches();
   clearNoisyFloor();
