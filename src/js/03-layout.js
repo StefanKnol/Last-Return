@@ -111,7 +111,7 @@ function addCrewBadge(objectId, x, z, yaw) {
   addBoxBetween(x - 0.28, 0, z - 0.28, x + 0.28, 0.34, z + 0.28);
   addSphereProp(x, 0.34 + 0.07, z, 0.15, { blocksMovement: false });                                                    // the hat
   addCylinderProp(AXIS_Y, x, 0.34 + 0.02, z, 0.19, 0.012, { blocksMovement: false });                                  // its brim
-  const badge = addBoxProp(x + Math.cos(yaw) * 0.2, 0.34 + 0.03, z + Math.sin(yaw) * 0.2, 0.045, 0.006, 0.03,
+  const badge = addBoxProp(x + Math.cos(yaw) * 0.2, 0.34 + 0.03, z + Math.sin(yaw) * 0.2, 0.07, 0.008, 0.045,
     { yaw: yaw, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
   const clip = addBoxProp(x + Math.cos(yaw) * 0.16, 0.34 + 0.045, z + Math.sin(yaw) * 0.16, 0.012, 0.012, 0.012,
     { yaw: yaw, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });

@@ -877,6 +877,7 @@ function startApplication() {
     // Quests (09-quests.js): the descriptions, this station's, and the questions the game asks of them.
     quests: QUESTS, questPools: QUEST_POOLS, questItems: QUEST_ITEMS, findQuest: findQuest, isQuestUnfinished: isQuestUnfinished, getUnfinishedQuests: getUnfinishedQuests,
     getQuestChips: getQuestChips, fireGameEvent: fireGameEvent, dispatchCues: DISPATCH_CUES,
+    radioText: function (key) { return RADIO_MESSAGES[key]; }, clearMessages: clearMessages,
     // Does a quest the way a player would, thing by thing (fetching what a machine needs first), wherever the player stands.
     doQuest: function (key) {
       const instance = findQuest(key);

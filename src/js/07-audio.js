@@ -1580,13 +1580,13 @@ function playValveSound(x, z) {
   if (!panner) return;
   const level = SOUND_LEVELS.valve;
   // The squeal: two narrow bands of noise sliding up, a little apart, so that they beat against each other.
-  playResonantNoise({ frequency: 420, frequencyEnd: 980, resonance: 26, duration: 1.5, gain: 2.6 * level, attack: 0.08, destination: panner });
-  playResonantNoise({ frequency: 455, frequencyEnd: 1060, resonance: 22, duration: 1.5, gain: 1.9 * level, attack: 0.12, destination: panner });
+  playResonantNoise({ frequency: 420, frequencyEnd: 980, resonance: 26, duration: 1.5, gain: 1.0 * level, attack: 0.08, destination: panner });
+  playResonantNoise({ frequency: 455, frequencyEnd: 1060, resonance: 22, duration: 1.5, gain: 0.75 * level, attack: 0.12, destination: panner });
   // The gearbox under it.
-  playNoiseBurst({ duration: 1.5, filterType: 'bandpass', frequency: 260, frequencyEnd: 330, resonance: 3, gain: 1.6 * level, attack: 0.1, destination: panner });
+  playNoiseBurst({ duration: 1.5, filterType: 'bandpass', frequency: 260, frequencyEnd: 330, resonance: 3, gain: 0.65 * level, attack: 0.1, destination: panner });
   // Seated.
-  playNoiseBurst({ duration: 0.22, filterType: 'bandpass', frequency: 240, resonance: 2, gain: 3.2 * level, attack: 0.004, delay: 1.5, destination: panner });
-  playTone({ waveform: 'triangle', frequency: 170, frequencyEnd: 110, duration: 0.3, gain: 1.4 * level, attack: 0.004, delay: 1.5, destination: panner });
+  playNoiseBurst({ duration: 0.22, filterType: 'bandpass', frequency: 240, resonance: 2, gain: 1.3 * level, attack: 0.004, delay: 1.5, destination: panner });
+  playTone({ waveform: 'triangle', frequency: 170, frequencyEnd: 110, duration: 0.3, gain: 0.6 * level, attack: 0.004, delay: 1.5, destination: panner });
 }
 
 // Sets one of the small generators running or not, without the starter (used when a descent is picked up again).
