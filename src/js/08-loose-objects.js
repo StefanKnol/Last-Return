@@ -215,6 +215,57 @@ function prepareLooseObjectKind(kindKey) {
 }
 
 // ---------------------------------------------------------------------------
+// Where they are, tile by tile
+//
+// A station can have hundreds of loose things lying about. A scanner pulse must not have to ask every one of
+// them whether it is in the way, nor a rolling can ask every other object whether they touch. So each object
+// is noted in the floor tiles it is near, the way the furniture is, and a pulse asks only the tiles it crosses.
+// (Measured with 600 objects in a massive station before this: scanning cost fifteen times what it does with none.)
+// ---------------------------------------------------------------------------
+
+const tileLooseLists = new Array(TILE_COUNT).fill(null);
+const LOOSE_TILE_MARGIN = 0.5;   // an object is noted in every tile within this of its outermost part ...
+const LOOSE_TILE_SLACK = 0.2;    // ... and noted afresh once it has moved this far, so the margin never runs out
+const LOOSE_FEW = 6;             // with this few objects in the station it is quicker simply to ask them all
+let looseStampCounter = 1;
+
+function noteLooseObjectInTiles(object) {
+  const reach = Math.max(object.prepared.partsRadius, object.prepared.boundsRadius) + LOOSE_TILE_MARGIN;
+  object.notedX = object.x; object.notedZ = object.z;
+  object.tileFirstX = Math.max(0, Math.floor(object.x - reach)); object.tileLastX = Math.min(GRID_WIDTH - 1, Math.floor(object.x + reach));
+  object.tileFirstZ = Math.max(0, Math.floor(object.z - reach)); object.tileLastZ = Math.min(GRID_DEPTH - 1, Math.floor(object.z + reach));
+  for (let tileZ = object.tileFirstZ; tileZ <= object.tileLastZ; tileZ++) {
+    for (let tileX = object.tileFirstX; tileX <= object.tileLastX; tileX++) {
+      const index = tileZ * GRID_WIDTH + tileX;
+      if (tileLooseLists[index] === null) tileLooseLists[index] = [];
+      tileLooseLists[index].push(object);
+    }
+  }
+  object.isNotedInTiles = true;
+}
+
+function forgetLooseObjectInTiles(object) {
+  if (!object.isNotedInTiles) return;
+  for (let tileZ = object.tileFirstZ; tileZ <= object.tileLastZ; tileZ++) {
+    for (let tileX = object.tileFirstX; tileX <= object.tileLastX; tileX++) {
+      const index = tileZ * GRID_WIDTH + tileX, list = tileLooseLists[index];
+      if (list === null) continue;
+      const at = list.indexOf(object);
+      if (at >= 0) { list[at] = list[list.length - 1]; list.pop(); }
+      if (list.length === 0) tileLooseLists[index] = null;
+    }
+  }
+  object.isNotedInTiles = false;
+}
+
+// Call when an object may have moved. Does nothing until it has moved far enough to matter.
+function refreshLooseObjectTiles(object) {
+  if (object.isNotedInTiles && Math.abs(object.x - object.notedX) < LOOSE_TILE_SLACK && Math.abs(object.z - object.notedZ) < LOOSE_TILE_SLACK) return;
+  forgetLooseObjectInTiles(object);
+  noteLooseObjectInTiles(object);
+}
+
+// ---------------------------------------------------------------------------
 // Making, removing, waking
 // ---------------------------------------------------------------------------
 
@@ -273,10 +324,12 @@ function createLooseObject(kindKey, x, y, z, yaw) {
   };
   setLooseObjectYaw(object, yaw || 0);
   looseObjects.push(object);
+  noteLooseObjectInTiles(object);
   return object;
 }
 
 function clearLooseObjects() {
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) forgetLooseObjectInTiles(looseObjects[objectIndex]);
   looseObjects.length = 0;
   looseState.held = null;
   looseState.accumulator = 0;
@@ -302,6 +355,7 @@ function removeLooseObject(object) {
   if (looseState.held === object) looseState.held = null;
   object.isRemoved = true;
   object.isHeld = false;
+  forgetLooseObjectInTiles(object);
   const index = looseObjects.indexOf(object);
   if (index >= 0) looseObjects.splice(index, 1);
 }
@@ -452,10 +506,43 @@ let looseRaySkipped = null;
 function findLooseObjectOnRay(originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {
   let best = null;
   looseRayDistance = nearerThan;
-  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-    if (looseObjects[objectIndex] === looseRaySkipped) continue;
-    const distance = intersectRayWithLooseObject(looseObjects[objectIndex], originX, originY, originZ, directionX, directionY, directionZ, looseRayDistance);
-    if (distance > 0) { looseRayDistance = distance; best = looseObjects[objectIndex]; }
+  if (looseObjects.length <= LOOSE_FEW) {
+    for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+      if (looseObjects[objectIndex] === looseRaySkipped) continue;
+      const distance = intersectRayWithLooseObject(looseObjects[objectIndex], originX, originY, originZ, directionX, directionY, directionZ, looseRayDistance);
+      if (distance > 0) { looseRayDistance = distance; best = looseObjects[objectIndex]; }
+    }
+    return best;
+  }
+  // Tile by tile along the ray, on the plan, asking only the objects noted in each tile it crosses. It stops
+  // as soon as the tiles ahead are all further off than the nearest object found (or than `nearerThan`).
+  let tileX = Math.floor(originX), tileZ = Math.floor(originZ);
+  const stamp = ++looseStampCounter;
+  const stepX = directionX > 0 ? 1 : -1, stepZ = directionZ > 0 ? 1 : -1;
+  const deltaX = directionX !== 0 ? Math.abs(1 / directionX) : Infinity;
+  const deltaZ = directionZ !== 0 ? Math.abs(1 / directionZ) : Infinity;
+  let nextCrossingX = directionX > 0 ? (tileX + 1 - originX) / directionX : (directionX < 0 ? (tileX - originX) / directionX : Infinity);
+  let nextCrossingZ = directionZ > 0 ? (tileZ + 1 - originZ) / directionZ : (directionZ < 0 ? (tileZ - originZ) / directionZ : Infinity);
+  for (let iteration = 0; iteration < 200; iteration++) {
+    if (tileX < 0 || tileZ < 0 || tileX >= GRID_WIDTH || tileZ >= GRID_DEPTH) break;
+    const list = tileLooseLists[tileZ * GRID_WIDTH + tileX];
+    if (list !== null) {
+      for (let listIndex = 0; listIndex < list.length; listIndex++) {
+        const object = list[listIndex];
+        if (object.rayStamp === stamp) continue;
+        object.rayStamp = stamp;
+        if (object === looseRaySkipped) continue;
+        const distance = intersectRayWithLooseObject(object, originX, originY, originZ, directionX, directionY, directionZ, looseRayDistance);
+        if (distance > 0) { looseRayDistance = distance; best = object; }
+      }
+    }
+    if (nextCrossingX < nextCrossingZ) {
+      if (nextCrossingX >= looseRayDistance) break;
+      tileX += stepX; nextCrossingX += deltaX;
+    } else {
+      if (nextCrossingZ >= looseRayDistance) break;
+      tileZ += stepZ; nextCrossingZ += deltaZ;
+    }
   }
   return best;
 }
@@ -654,9 +741,11 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
     }
   }
 
-  // Other loose objects.
-  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-    const other = looseObjects[objectIndex];
+  // Other loose objects: those noted in the tile this ball is in. (Anything near enough to touch it is noted there.)
+  const ballTileX = Math.floor(positionX), ballTileZ = Math.floor(positionZ);
+  const neighbours = ballTileX >= 0 && ballTileZ >= 0 && ballTileX < GRID_WIDTH && ballTileZ < GRID_DEPTH ? tileLooseLists[ballTileZ * GRID_WIDTH + ballTileX] : null;
+  for (let objectIndex = 0; neighbours !== null && objectIndex < neighbours.length; objectIndex++) {
+    const other = neighbours[objectIndex];
     if (other === object) continue;
     const offsetX = positionX - other.x, offsetY = positionY - other.y, offsetZ = positionZ - other.z;
     const reach = radius + other.prepared.boundsRadius;
@@ -977,6 +1066,7 @@ function stepLooseObjects(stepSeconds) {
       if (object.isHeld) driveHeldLooseObject(object, seconds);
       else object.velocityY -= TUNING.looseGravity * seconds;
       integrateLooseObject(object, seconds);
+      refreshLooseObjectTiles(object);
       object.moveEast = 0; object.moveWest = 0; object.moveUp = 0; object.moveDown = 0; object.moveSouth = 0; object.moveNorth = 0;
     }
     looseTouchCount = 0;
