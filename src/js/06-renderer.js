@@ -117,10 +117,16 @@ void main() {
   if (uPalette == 1) {
     rangeColor = mix(vec3(1.0, 0.8, 0.45), vec3(0.75, 0.3, 0.05), range);
   } else if (uPalette == 2) {
-  // Scanner Sombre style: red right next to you, fading through yellow/green to blue at 26 m and beyond.
-    rangeColor = mix(vec3(1.0, 0.15, 0.1), vec3(1.0, 0.85, 0.1), smoothstep(0.0, 0.33, range));
-    rangeColor = mix(rangeColor, vec3(0.15, 0.85, 0.3), smoothstep(0.33, 0.66, range));
-    rangeColor = mix(rangeColor, vec3(0.15, 0.35, 1.0), smoothstep(0.66, 1.0, range));
+    // Scanner Sombre style, a full saturated spectrum: pure red out to about 1.5 m, then orange (5 m),
+    // yellow (9 m), green (14 m), cyan (19 m), and blue at 26 m and beyond.
+    rangeColor = mix(vec3(1.0, 0.02, 0.05), vec3(1.0, 0.42, 0.0), smoothstep(0.06, 0.2, range));
+    rangeColor = mix(rangeColor, vec3(1.0, 0.92, 0.0), smoothstep(0.2, 0.36, range));
+    rangeColor = mix(rangeColor, vec3(0.05, 1.0, 0.2), smoothstep(0.36, 0.54, range));
+    rangeColor = mix(rangeColor, vec3(0.0, 0.85, 1.0), smoothstep(0.54, 0.74, range));
+    rangeColor = mix(rangeColor, vec3(0.16, 0.22, 1.0), smoothstep(0.74, 1.0, range));
+    // TWEAK: how much brighter than the other palettes. Red is a dark colour to the eye and sits where points are
+    // dimmed most, so it gets the first number; from yellow outward it is the second.
+    rangeColor *= mix(1.7, 1.25, smoothstep(0.0, 0.36, range));
   } else if (uPalette == 3) {
     float heightBand = clamp(position.y / 4.0, 0.0, 1.0);
     rangeColor = mix(vec3(0.2, 0.35, 1.0), vec3(0.2, 1.0, 0.55), smoothstep(0.0, 0.45, heightBand));
@@ -134,10 +140,12 @@ void main() {
   vec3 color = rangeColor;
   vec3 lockedColor = vec3(1.0, 0.22, 0.1);
   vec3 openColor = vec3(0.25, 1.0, 0.55);
+  // The vivid palette keeps its hues: there, surfaces are told apart by brightness more than by a tint.
+  float tint = uPalette == 2 ? 0.45 : 1.0;
   if (surfaceClass == 0) color *= 0.72;
-  else if (surfaceClass == 2) color *= vec3(0.55, 0.5, 0.78);
-  else if (surfaceClass == 3 || surfaceClass == 11) color = mix(color, vec3(0.96, 0.88, 0.72), 0.5);
-  else if (surfaceClass == 13) color = mix(color, vec3(0.55, 0.9, 0.82), 0.45);
+  else if (surfaceClass == 2) color *= mix(vec3(0.62), vec3(0.55, 0.5, 0.78), tint);
+  else if (surfaceClass == 3 || surfaceClass == 11) color = mix(color, vec3(0.96, 0.88, 0.72), 0.5 * tint);
+  else if (surfaceClass == 13) color = mix(color, vec3(0.55, 0.9, 0.82), 0.45 * tint);
   else if (surfaceClass == 4) color = openColor;
   else if (surfaceClass == 5) color = mix(lockedColor, openColor, uPowerOn);
   // uHasKeycard carries the number of the best keycard held (0 for none): a door shows green once it would open.
