@@ -90,10 +90,10 @@ const QUALITY_PRESETS = {
   // raysPerSecond: pulses fired per second while painting. Higher fills surfaces in faster.
   // sweepRays:     pulses fired by one full sweep.
   // renderScale:   1.0 draws at full screen resolution, 0.75 draws smaller and stretches (faster, softer).
-  low: { key: 'low', maximumPoints: 250000, raysPerSecond: 6000, sweepRays: 20000, renderScale: 0.75 },
-  medium: { key: 'medium', maximumPoints: 500000, raysPerSecond: 6000, sweepRays: 20000, renderScale: 0.8 },
-  high: { key: 'high', maximumPoints: 1000000, raysPerSecond: 6000, sweepRays: 20000, renderScale: 1.0 },
-  ultra: { key: 'ultra', maximumPoints: 2000000, raysPerSecond: 6000, sweepRays: 20000, renderScale: 1.0 },
+  low: { key: 'low', maximumPoints: 500000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 0.75 },
+  medium: { key: 'medium', maximumPoints: 1000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 0.8 },
+  high: { key: 'high', maximumPoints: 2000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 1.0 },
+  ultra: { key: 'ultra', maximumPoints: 3000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 1.0 },
 };
 
 const TUNING = {
