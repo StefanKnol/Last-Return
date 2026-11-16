@@ -14,7 +14,8 @@ const input = {
   touchScanHeld: false,
   touchSprint: false,
   touchCrouch: false,
-  touchUseHeld: false,  // a finger is on USE: with something in your hands, holding it winds up a throw
+  touchUseHeld: false,  // a finger is on USE: with something in the beam, holding it winds up a throw
+  isGrabHeld: false,    // the right mouse button is down: it carries what you are looking at for as long as it is
   moveStickX: 0,
   moveStickZ: 0,
   lookDeltaX: 0,
@@ -190,6 +191,7 @@ function initializeInput() {
     input.keysDown.clear();
     input.isScanHeld = false;
     input.isLookDragging = false;
+    input.isGrabHeld = false;
   });
 
   canvas.addEventListener('mousedown', function (event) {
@@ -198,13 +200,18 @@ function initializeInput() {
       if (!input.isPointerLocked && !input.useDragLook) requestPointerLockOnCanvas();
       input.isScanHeld = true;
     } else if (event.button === 2) {
-      if (input.isPointerLocked) input.wantsSweep = true;
+      // Held, the right button carries what you are looking at (08-loose-objects.js). Where the browser will
+      // not capture the mouse it is the button you drag to look around with, as before.
+      if (input.isPointerLocked) input.isGrabHeld = true;
       else input.isLookDragging = true;
+    } else if (event.button === 1) {
+      event.preventDefault(); // the wheel button: a full sweep (and not the browser's scrolling)
+      if (input.isPointerLocked) input.wantsSweep = true;
     }
   });
   window.addEventListener('mouseup', function (event) {
     if (event.button === 0) input.isScanHeld = false;
-    if (event.button === 2) input.isLookDragging = false;
+    if (event.button === 2) { input.isLookDragging = false; input.isGrabHeld = false; }
   });
   window.addEventListener('mousemove', function (event) {
     if (game.mode !== 'playing') return;
@@ -230,6 +237,7 @@ function initializeInput() {
     }
     if (!input.isPointerLocked) {
       input.isScanHeld = false;
+      input.isGrabHeld = false;
       // Losing the mouse normally means the player pressed Escape. With the debug panel up it means they want the cursor.
       if (game.mode === 'playing' && !input.useDragLook && !input.isTouchDevice && !debugState.isPanelOpen) pauseGame();
     }
@@ -416,7 +424,7 @@ function updatePlayerMovement(dt) {
   const flags = getTileFlagsAtPosition(player.x, player.z);
   const isInWater = (flags & TILE_FLAG_WATER) !== 0;
   if (isInWater) speed *= TUNING.waterSpeedFactor;
-  speed *= getCarrySpeedFactor(); // something in your hands slows you by its weight
+  speed *= getCarrySpeedFactor(); // something in the beam slows you by its weight
 
   const forwardX = Math.sin(player.yaw), forwardZ = -Math.cos(player.yaw);
   const rightX = Math.cos(player.yaw), rightZ = Math.sin(player.yaw);
@@ -479,7 +487,7 @@ function updatePlayerMovement(dt) {
   // Crouched at a vent with both arms full: say why you are not going in.
   if (!canCrawlWhileCarrying() && player.isCrouching && hasMoveInput && !isInVent &&
       (getTileFlagsAtPosition(player.x + forwardX * 0.9, player.z + forwardZ * 0.9) & TILE_FLAG_VENT) !== 0) {
-    showMessage('You cannot crawl with the ' + getHeldLooseObject().kind.label + ' in your arms.', 3, 'info');
+    showMessage('The ' + getHeldLooseObject().kind.label + ' will not go in there with you.', 3, 'info');
   }
 }
 
@@ -635,12 +643,12 @@ function updateInteractionFocus(eyeX, eyeY, eyeZ) {
   if (looseObject) best = null;
   player.focusedInteractable = best;
   player.focusedLooseObject = looseObject;
-  // E (USE on a phone) does whatever you are looking at: uses it, or picks it up. With something in your hands
+  // E (USE on a phone) does whatever you are looking at: uses it, or picks it up. With something in the beam
   // and nothing to use in front of you, it lets go of what you carry.
   if (input.wantsInteract) {
     input.wantsInteract = false;
     if (looseObject) {
-      if (getHeldLooseObject()) showMessage('Your hands are full.', 2, 'info');
+      if (getHeldLooseObject()) showMessage('The beam is already holding something.', 2, 'info');
       else pickUpLooseObject(looseObject);
     } else if (best) {
       useInteractable(best);

@@ -762,7 +762,7 @@ function updateHud(realDt) {
       prompt.textContent = 'THROW  ' + '\u25AE'.repeat(filled) + '\u25AF'.repeat(8 - filled);
     } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject) {
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E]  ') + 'Pick up the ' + focusedLooseObject.kind.label;
+      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + focusedLooseObject.kind.label;
     } else if (game.mode === 'playing' && focused) {
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E]  ') + focused.prompt;

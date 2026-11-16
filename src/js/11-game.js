@@ -944,7 +944,7 @@ function startApplication() {
     emitNoise: emitNoise,
     looseObjects: looseObjects, looseObjectKinds: LOOSE_OBJECT_KINDS, looseState: looseState,
     input: input, debugHooks: debugHooks, findLooseObjectInFocus: findLooseObjectInFocus, getThrowWindUp: getThrowWindUp,
-    isLooseObjectSeen: isLooseObjectSeen, noteLooseObjectScanned: noteLooseObjectScanned, getLooseShoveResistance: getLooseShoveResistance,
+    noteLooseObjectScanned: noteLooseObjectScanned, getLooseShoveResistance: getLooseShoveResistance,
     setLooseObjectOrientation: setLooseObjectOrientation, getLooseObjectPointLifeCode: getLooseObjectPointLifeCode,
     isSpaceOpenAt: function (x, y, z) { return isLooseSpaceOpenAt(Math.floor(x), Math.floor(z), y); },
     worldProps: worldProps, getTileFlagsAt: getTileFlagsAtPosition, tileFlagPit: TILE_FLAG_PIT, getPlayerEyeY: getPlayerEyeY,

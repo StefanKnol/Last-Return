@@ -161,19 +161,17 @@ const TUNING = {
   looseRestSeconds: 0.4,            // ... for this long, while touching something: it is at rest, and left alone until something touches it
   looseImprintSeconds: 0.5,         // how long points scanned onto a moving or carried object stay. (On one at rest they stay for good.)
   // Carrying.
-  loosePickUpReach: 1.7,            // how close you must be to pick one up
-  looseHoldFollowRate: 16,          // how eagerly it closes the gap to your hands. Lower is a looser, swingier carry.
-  looseHoldResponseRate: 26,        // how quickly it gets up to speed. Lower is heavier-feeling.
+  looseBeamReach: 2.6,              // how far away the scanner's beam can take hold of one
+  looseHoldDistance: 0.7,           // how far out from the scanner's lens it hangs, on top of its own size (a crate is 0.4 from middle to corner). The lens is 0.55 in front of your eyes.
+  looseHoldFollowRate: 9,           // how eagerly it closes the gap to where the beam wants it. Lower is a looser, swingier carry.
+  looseHoldResponseRate: 14,        // how quickly it gets up to speed. Lower is heavier-feeling.
   looseHoldLagPerKilogram: 0.06,    // how much each kilogram takes off both of those. 0 = a crate follows like a jar.
   looseHoldFastestSpeed: 7,         // it never chases your hands faster than this (m/s), however far behind it is
-  looseHoldPitchShareDown: 1,       // how much of your looking down it follows (1 = all of it): it goes down with your look ...
-  looseHoldReachDown: 0.35,         // ... and your arms reach this much further (metres) when you look straight down. From a crouch that puts it on the floor.
-  looseHoldPitchShareUp: 0.25,      // how much of your looking up it follows. Low, so that looking up sees over what you carry.
-  looseHoldSagPerKilogram: 0.003,   // metres lower in your hands per kilogram
-  looseHoldStopDistance: 0.3,       // when it is against something and this far behind your hands, it starts to hold you back ...
+  looseHoldSagPerKilogram: 0.002,   // metres it hangs below the line the scanner points along, per kilogram
+  looseHoldStopDistance: 0.35,      // when it is against something and this far behind where the beam wants it, it starts to hold you back ...
   looseHoldStopSpeed: 3,            // ... by up to this many metres a second: enough to stop a walk (2.5), not a run (4.6)
-  looseHoldBreakDistance: 0.75,     // caught on something and further than this from your hands ...
-  looseHoldBreakSeconds: 0.25,      // ... for this long, and it is pulled out of them. (Not caught on anything, it has to be two and a half times as far.)
+  looseHoldBreakDistance: 0.9,      // caught on something and further than this from where the beam wants it ...
+  looseHoldBreakSeconds: 0.25,      // ... for this long, and the beam loses it. (Not caught on anything, it has to be two and a half times as far.)
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
   // Walking into one that lies on the floor.
   looseShoveFreeMass: 2,            // lighter than this (kg) you kick along without it slowing you

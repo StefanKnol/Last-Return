@@ -2,12 +2,13 @@
 // Loose objects: things you can pick up, carry, set down and throw.
 //
 // Each one is a small rigid body. It falls, bounces, tumbles, rolls and comes to rest on the floor, on a
-// shelf or on another object. Carried, it hangs in front of you on a spring: it lags behind when you turn,
-// stops against a door frame, and is pulled out of your hands when it is left too far behind.
+// shelf or on another object. You do not carry one in your hands: the scanner holds it, in a beam, out in
+// front of you where you are looking. It hangs there on a spring: it swings wide when you turn, stops against
+// a door frame, and is lost when it is caught on something and left too far behind.
 //
 // What that does to the game:
-//   - A scanner pulse stops on an object like on anything else, so what you carry is in the way of the scanner.
-//   - The object hides the points behind it, as a wall does.
+//   - What you carry is in front of the scanner, in the middle of its beam: pulses stop on it.
+//   - It is never drawn. What you see of it is the points your scanner leaves on it.
 //   - Every knock is heard, by you and by the Hollow, by how hard it was. Slow is silent.
 //
 // This is not a general physics engine, and is not meant to become one. There is one kind of contact (a small
@@ -20,53 +21,46 @@
 
 // TWEAK: the objects.
 //   label      what it is called on screen ("Pick up the gas canister")
-//   mass       kilograms. Heavier lags further behind your hands, slows you more, throws shorter, knocks louder.
+//   mass       kilograms. Heavier swings wider behind the beam, slows you more, throws shorter, knocks louder.
 //   material   what it sounds like when it hits something: 'metal', 'glass' or 'case' (a dull box)
-//   hands      1 or 2. With 2 you cannot run.
+//   bulky      true for something you cannot run with, or take into a vent
 //   bounce     0 to 1: how much of its speed it keeps when it bounces. A glass jar 0.2, a steel pipe 0.35.
 //   grip       0 to 1: how much it resists sliding. Low slides like a puck, high stops and tips over.
-//   parts      its shape, in metres, as it is carried: x to your right, y up, z towards you (so -z points ahead).
+//   parts      its shape, in metres, as it hangs in the beam: x to your right, y up, z towards you (so -z points ahead).
 //              { shape: 'box', center: [x, y, z], half: [x, y, z] }
 //              { shape: 'ball', center: [x, y, z], radius: r }
 //              { shape: 'capsule', from: [x, y, z], to: [x, y, z], radius: r }   a rod with round ends
-//   hold       where it hangs while carried, from your eyes: metres to the right, down and ahead.
-//              The scanner is in your right hand: its lens is about 0.28 to the right, 0.21 down and 0.55 ahead.
-//              Something held to the left of that (everything one-handed) is never in the beam's way. Something
-//              held in front of it (the two-handed things) is, by as much as it rises above the lens.
+// Where it hangs is the same for all of them: straight out from the scanner's lens, `looseHoldDistance` (in
+// 00-config.js) beyond its own size. How much of the beam it takes follows from how big it is.
 const LOOSE_OBJECT_KINDS = {
   canister: {
-    label: 'gas canister', mass: 3, material: 'metal', hands: 1, bounce: 0.3, grip: 0.5,
-    parts: [{ shape: 'capsule', from: [0, -0.13, 0], to: [0, 0.13, 0], radius: 0.07 }],
-    hold: { right: -0.28, down: 0.3, forward: 0.5 }
+    label: 'gas canister', mass: 3, material: 'metal', bulky: false, bounce: 0.3, grip: 0.5,
+    parts: [{ shape: 'capsule', from: [0, -0.13, 0], to: [0, 0.13, 0], radius: 0.07 }]
   },
   jar: {
-    label: 'sample jar', mass: 0.8, material: 'glass', hands: 1, bounce: 0.2, grip: 0.45,
-    parts: [{ shape: 'capsule', from: [0, -0.05, 0], to: [0, 0.05, 0], radius: 0.06 }],
-    hold: { right: -0.26, down: 0.28, forward: 0.45 }
+    label: 'sample jar', mass: 0.8, material: 'glass', bulky: false, bounce: 0.2, grip: 0.45,
+    parts: [{ shape: 'capsule', from: [0, -0.05, 0], to: [0, 0.05, 0], radius: 0.06 }]
   },
   toolCase: {
-    label: 'tool case', mass: 6, material: 'case', hands: 1, bounce: 0.15, grip: 0.6,
-    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.21, 0.08, 0.15] }],
-    hold: { right: -0.3, down: 0.4, forward: 0.42 }
+    label: 'tool case', mass: 6, material: 'case', bulky: false, bounce: 0.15, grip: 0.6,
+    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.21, 0.15, 0.08] }]
   },
+  // The pipe hangs across the beam, not along it: 1.2 m of it, and a doorway is a metre wide.
   pipe: {
-    label: 'length of pipe', mass: 4, material: 'metal', hands: 1, bounce: 0.35, grip: 0.4,
-    parts: [{ shape: 'capsule', from: [0, 0, -0.6], to: [0, 0, 0.6], radius: 0.03 }],
-    hold: { right: -0.32, down: 0.3, forward: 0.75 }
+    label: 'length of pipe', mass: 4, material: 'metal', bulky: false, bounce: 0.35, grip: 0.4,
+    parts: [{ shape: 'capsule', from: [-0.6, 0, 0], to: [0.6, 0, 0], radius: 0.03 }]
   },
   crate: {
-    label: 'crate', mass: 12, material: 'case', hands: 2, bounce: 0.12, grip: 0.7,
-    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.25, 0.22, 0.22] }],
-    hold: { right: 0.05, down: 0.4, forward: 0.87 }
+    label: 'crate', mass: 12, material: 'case', bulky: true, bounce: 0.12, grip: 0.7,
+    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.25, 0.22, 0.22] }]
   },
   pumpMotor: {
-    label: 'pump motor', mass: 18, material: 'metal', hands: 2, bounce: 0.1, grip: 0.65,
+    label: 'pump motor', mass: 18, material: 'metal', bulky: true, bounce: 0.1, grip: 0.65,
     parts: [
       { shape: 'capsule', from: [-0.12, 0, 0], to: [0.12, 0, 0], radius: 0.13 },
       { shape: 'capsule', from: [0.12, 0, 0], to: [0.3, 0, 0], radius: 0.035 },
       { shape: 'box', center: [-0.02, -0.14, 0], half: [0.16, 0.025, 0.13] }
-    ],
-    hold: { right: 0.1, down: 0.29, forward: 0.8 }
+    ]
   }
 };
 
@@ -79,10 +73,11 @@ const looseObjects = [];
 const looseState = {
   accumulator: 0,
   nextId: 1,
-  held: null,              // the object in your hands, or null
+  held: null,              // the object in the beam, or null
+  isHeldByButton: false,   // it is carried for as long as the right mouse button is down (and not by a press of E, which stays until E again)
   holdTargetX: 0, holdTargetY: 0, holdTargetZ: 0,
-  holdBreakTimer: 0,       // how long the carried object has been too far from your hands
-  isLettingGo: false,      // E went down with something in your hands and nothing to use: this press lets go or throws
+  holdBreakTimer: 0,       // how long the carried object has been too far from where the beam wants it
+  isLettingGo: false,      // E went down with something in the beam and nothing to use: this press lets go or throws
   lettingGoSeconds: 0,     // ... and has been held this long. A tap lets go, a hold winds up a throw.
   hasShownCarryHint: false,
   hasShownKnockHint: false,
@@ -252,7 +247,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // The hardest knock since the last frame, for the sound and the noise.
     knockSpeed: 0, knockX: 0, knockY: 0, knockZ: 0, knockIsOwn: false,
     lastKnockTime: -10,
-    lastHandledTime: -10,               // when you last had it in your hands: a knock soon after is your doing
+    lastHandledTime: -10,               // when you last had it in the beam: a knock soon after is your doing
     lastScannedTime: -10,               // when a pulse last landed on it
     hasRestPoints: false,               // it was scanned where it lies, and those points are still on it
     isRemoved: false
@@ -334,10 +329,6 @@ function noteLooseObjectScanned(object) {
   if (object.isAsleep) object.hasRestPoints = true;
 }
 
-// Does the object have points on it right now? Only then is it drawn as something solid that hides what is behind it.
-function isLooseObjectSeen(object) {
-  return object.hasRestPoints || game.time - object.lastScannedTime < TUNING.looseImprintSeconds;
-}
 
 // Wakes an object at rest, and with it whatever lies against it or on top of it: take the bottom crate away
 // and the one above must fall.
@@ -346,10 +337,9 @@ function wakeLooseObject(object) {
   object.isAsleep = false;
   object.restSeconds = 0;
   if (object.hasRestPoints) {
-    // Its points stay behind where it lay, and go over the next moment. It is seen for as long as they are.
+    // Its points stay behind where it lay, and go over the next moment.
     changePointsOnLooseObject(object, TUNING.looseImprintSeconds);
     object.hasRestPoints = false;
-    object.lastScannedTime = game.time;
   }
   wakeLooseObjectsTouching(object);
 }
@@ -695,7 +685,7 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
     }
   }
 
-  // You and the Hollow. What you are carrying passes through you: it is in your hands.
+  // You and the Hollow. What you are carrying passes through you: the beam has it.
   if (!object.isHeld && game.mode === 'playing') {
     addLooseContactWithWalker(true, getLooseShoveResistance(object.kind.mass), player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + (player.isCrouching ? 1.0 : 1.7),
       looseState.playerStrideX, looseState.playerStrideZ, positionX, positionY, positionZ, radius);
@@ -791,7 +781,7 @@ function gatherLooseTouches(object) {
         touch.otherArmX = pointX - other.x; touch.otherArmY = pointY - other.y; touch.otherArmZ = pointZ - other.z;
       }
       // How fast it came in. This is measured from how it was moving before this piece of the step began: your
-      // hands pressing a carried object against a wall, and gravity pressing one into the floor, are pushes and
+      // beam pressing a carried object against a wall, and gravity pressing one into the floor, are pushes and
       // not hits, and must neither bounce nor be heard.
       let cameInX = object.beforeVelocityX + object.beforeSpinY * touch.armZ - object.beforeSpinZ * touch.armY - touch.velocityX;
       let cameInY = object.beforeVelocityY + object.beforeSpinZ * touch.armX - object.beforeSpinX * touch.armZ;
@@ -810,12 +800,12 @@ function gatherLooseTouches(object) {
       }
       if (other) touch.resistance += getLoosePushResistance(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, normalX, normalY, normalZ);
       // How fast it should be leaving once this is settled: not at all, or bouncing off if it came in fast.
-      // In your hands it never bounces: your arms take that up.
+      // In the beam it never bounces: the beam takes that up.
       touch.wantedSpeed = !touch.isSoft && !object.isHeld && closingSpeed > TUNING.looseBounceFromSpeed ? closingSpeed * object.kind.bounce : 0;
       if (closingSpeed > object.knockSpeed) {
         object.knockSpeed = closingSpeed;
         object.knockX = pointX; object.knockY = pointY; object.knockZ = pointZ;
-        // A knock is yours when it is in your hands, when you have just let go of it, or when you walked into it.
+        // A knock is yours when it is in the beam, when you have just let go of it, or when you walked into it.
         object.knockIsOwn = object.isHeld || game.time - object.lastHandledTime < 4 || touch.isPlayer;
       }
     }
@@ -879,10 +869,10 @@ function settleLooseTouches(object) {
 // One step of one object
 // ---------------------------------------------------------------------------
 
-// Pulls the carried object towards your hands, and turns it to face the way you face.
+// Pulls the carried object towards where the beam wants it, and turns it to face the way you face.
 function driveHeldLooseObject(object, stepSeconds) {
   const kind = object.kind;
-  // TWEAK: these two lines are how carrying feels. `follow` is how fast it wants to close the gap to your hands
+  // TWEAK: these two lines are how carrying feels. `follow` is how fast it wants to close the gap to that place
   // (per second); `response` how quickly it gets up to that speed. A heavy object is slower at both.
   const follow = TUNING.looseHoldFollowRate / (1 + kind.mass * TUNING.looseHoldLagPerKilogram);
   const response = Math.min(1, TUNING.looseHoldResponseRate / (1 + kind.mass * TUNING.looseHoldLagPerKilogram) * stepSeconds);
@@ -1016,7 +1006,7 @@ function reportLooseObjectKnock(object) {
     showCaption(loudness > 0.55 ? 'ownObjectCrash' : 'ownObjectKnock');
     if (!looseState.hasShownKnockHint && hollow.isActive) {
       looseState.hasShownKnockHint = true;
-      showMessage('That carried. Move slowly with something in your hands and it will not knock.', 6, 'info');
+      showMessage('That carried. Move slowly with something in the beam and it will not knock.', 6, 'info');
     }
   } else {
     showCaption(loudness > 0.55 ? 'objectCrash' : 'objectKnock', { x: object.knockX, z: object.knockZ });
@@ -1031,7 +1021,7 @@ function getHeldLooseObject() {
   return looseState.held;
 }
 
-// How much slower you walk with this in your hands: 1 is not at all.
+// How much slower you walk with this in the beam: 1 is not at all.
 function getCarrySpeedFactor() {
   const held = looseState.held;
   if (!held) return 1;
@@ -1039,37 +1029,33 @@ function getCarrySpeedFactor() {
 }
 
 function canSprintWhileCarrying() {
-  return !looseState.held || looseState.held.kind.hands < 2;
+  return !looseState.held || !looseState.held.kind.bulky;
 }
 
-// With both arms full you cannot get down on your elbows: a vent is closed to you until you put it down.
+// Something bulky will not go into a vent ahead of you: a vent is closed to you until you put it down.
 function canCrawlWhileCarrying() {
-  return !looseState.held || looseState.held.kind.hands < 2;
+  return !looseState.held || !looseState.held.kind.bulky;
 }
 
-// Where the carried object wants to be: in front of you, lower than your eyes.
-// Looking down, it goes down with your look and your arms reach out, so that from a crouch you can lower it
-// all the way to the floor and let go of it there without a sound. Looking up, it follows only a little: that
-// is how you see over a crate.
+// Where the carried object wants to be: straight out from the scanner's lens, along the way the scanner
+// points, far enough to be clear of it, and a little lower for its weight. The scanner is in your right hand,
+// so that is to the right of and below the middle of what you see. It goes wherever you point: at the floor to
+// set it down, over your head if you look up.
 function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   const held = looseState.held;
   if (!held) return;
-  const hold = held.kind.hold;
-  const pitch = player.pitch * (player.pitch < 0 ? TUNING.looseHoldPitchShareDown : TUNING.looseHoldPitchShareUp);
-  const cosinePitch = Math.cos(pitch), sinePitch = Math.sin(pitch);
-  const reach = hold.forward + Math.max(0, -sinePitch) * TUNING.looseHoldReachDown;
-  const forwardX = Math.sin(player.yaw) * cosinePitch, forwardY = sinePitch, forwardZ = -Math.cos(player.yaw) * cosinePitch;
-  const rightX = Math.cos(player.yaw), rightZ = Math.sin(player.yaw);
-  const sag = held.kind.mass * TUNING.looseHoldSagPerKilogram;
-  // Reaching down brings it in towards your feet: only the height gets the extra reach.
-  looseState.holdTargetX = eyeX + forwardX * hold.forward + rightX * hold.right;
-  looseState.holdTargetY = eyeY + forwardY * reach - hold.down - sag;
-  looseState.holdTargetZ = eyeZ + forwardZ * hold.forward + rightZ * hold.right;
+  computeScannerBasis(player.yaw, player.pitch);
+  updateScannerLens(eyeX, eyeY, eyeZ, getPlayFieldOfViewDegrees());
+  const distance = TUNING.looseHoldDistance + held.prepared.partsRadius;
+  looseState.holdTargetX = scannerLens.x + scannerBasis.forwardX * distance;
+  looseState.holdTargetY = scannerLens.y + scannerBasis.forwardY * distance - held.kind.mass * TUNING.looseHoldSagPerKilogram;
+  looseState.holdTargetZ = scannerLens.z + scannerBasis.forwardZ * distance;
 }
 
-function pickUpLooseObject(object) {
+// `isByButton`: it is held for as long as the right mouse button is, and dropped when that is let go.
+function pickUpLooseObject(object, isByButton) {
   if (looseState.held || !object || object.isRemoved) return false;
-  if (object.kind.hands === 2 && player.isInVent) {
+  if (object.kind.bulky && player.isInVent) {
     showMessage('There is no room in here to lift the ' + object.kind.label + '.', 3, 'info');
     return false;
   }
@@ -1079,6 +1065,7 @@ function pickUpLooseObject(object) {
   object.restSeconds = 0;
   object.lastHandledTime = game.time;
   looseState.held = object;
+  looseState.isHeldByButton = Boolean(isByButton);
   looseState.holdBreakTimer = 0;
   looseState.isLettingGo = false; // the press that picked it up is not also the press that lets go of it
   looseState.lettingGoSeconds = 0;
@@ -1087,7 +1074,7 @@ function pickUpLooseObject(object) {
     looseState.hasShownCarryHint = true;
     showMessage(input.isTouchDevice
       ? 'USE again lets go of it. Hold USE and let go to throw it.'
-      : 'E again lets go of it. Hold E and let go to throw it.', 7, 'info');
+      : (isByButton ? 'It stays in the beam while you hold the button. Swing it and let go to throw it.' : 'E again lets go of it. Hold E and let go to throw it.'), 7, 'info');
   }
   return true;
 }
@@ -1108,7 +1095,7 @@ function releaseHeldLooseObject(throwStrength) {
     object.velocityX = looseState.playerVelocityX + forwardX * speed;
     object.velocityY = forwardY * speed + TUNING.looseThrowLift * throwStrength;
     object.velocityZ = looseState.playerVelocityZ + forwardZ * speed;
-    // It leaves your hands turning end over end, away from you.
+    // It leaves the beam turning end over end, away from you.
     object.spinX += Math.cos(player.yaw) * -TUNING.looseThrowSpin * throwStrength;
     object.spinZ += Math.sin(player.yaw) * -TUNING.looseThrowSpin * throwStrength;
     playLooseObjectHandlingSound(object.kind.material, false);
@@ -1116,7 +1103,7 @@ function releaseHeldLooseObject(throwStrength) {
   return object;
 }
 
-// E was pressed with something in your hands and nothing in front of you to use (09-player.js calls this).
+// E was pressed with something in the beam and nothing in front of you to use (09-player.js calls this).
 // What that press does is decided when the key comes up again: let go at once and it only lets go of the
 // object; held, it winds up a throw.
 function beginLettingGo() {
@@ -1126,6 +1113,12 @@ function beginLettingGo() {
 }
 
 function updateLooseCarryInput(dt) {
+  // The right mouse button: down on something in reach takes it into the beam, up lets it go as it is moving.
+  if (input.isGrabHeld && !looseState.held && player.focusedLooseObject && !player.focusedLooseObject.isRemoved) {
+    pickUpLooseObject(player.focusedLooseObject, true);
+  } else if (looseState.held && looseState.isHeldByButton && !input.isGrabHeld) {
+    releaseHeldLooseObject(0);
+  }
   if (!looseState.held || !looseState.isLettingGo) { looseState.isLettingGo = false; looseState.lettingGoSeconds = 0; return; }
   const isDown = input.keysDown.has('KeyE') || input.touchUseHeld;
   if (isDown) { looseState.lettingGoSeconds += dt; return; }
@@ -1151,7 +1144,7 @@ function findLooseObjectInFocus(eyeX, eyeY, eyeZ, betterThan) {
     if (object.isHeld) continue;
     const deltaX = object.x - eyeX, deltaY = object.y - eyeY, deltaZ = object.z - eyeZ;
     const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
-    if (distance > TUNING.loosePickUpReach + object.prepared.boundsRadius) continue;
+    if (distance > TUNING.looseBeamReach + object.prepared.boundsRadius) continue;
     const alignment = (deltaX * scannerBasis.forwardX + deltaY * scannerBasis.forwardY + deltaZ * scannerBasis.forwardZ) / Math.max(distance, 0.001);
     // A wide object does not need to be looked at dead centre.
     const score = Math.min(1, alignment + object.prepared.boundsRadius * 0.12);
@@ -1233,7 +1226,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   const held = looseState.held;
   // What you carry is against something and you are walking on into it: it stops you, as a crate against a
   // wall would. It can only hold you back so fast, though. At a walk that is enough; at a run you carry on,
-  // and a moment later it is out of your hands.
+  // and a moment later the beam has lost it.
   if (held && held.touchedThisStep) {
     const gapX = looseState.holdTargetX - held.x, gapZ = looseState.holdTargetZ - held.z;
     const gap = Math.sqrt(gapX * gapX + gapZ * gapZ);
@@ -1250,7 +1243,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
 
   rememberPlayerMovement(dt);
 
-  // Left too far behind (round a door frame, under a lintel, on the other side of you): it comes out of your hands.
+  // Left too far behind (round a door frame, under a lintel, on the other side of you): the beam loses it.
   if (held) {
     const deltaX = looseState.holdTargetX - held.x, deltaY = looseState.holdTargetY - held.y, deltaZ = looseState.holdTargetZ - held.z;
     // Only something that is caught on the station can be lost this way. In open air it is merely behind, however
@@ -1262,7 +1255,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
       if (looseState.holdBreakTimer >= TUNING.looseHoldBreakSeconds) {
         releaseHeldLooseObject(0);
         looseState.statistics.pulledFromHands++;
-        showMessage('The ' + held.kind.label + ' is pulled out of your hands.', 3, 'warning');
+        showMessage('The beam loses the ' + held.kind.label + '.', 3, 'warning');
       }
     } else {
       looseState.holdBreakTimer = 0;

@@ -57,7 +57,7 @@ const pointCloud = {
 };
 
 const beamLines = {
-  vertices: new Float32Array(MAXIMUM_BEAM_LINES * 2 * 4),
+  vertices: new Float32Array((MAXIMUM_BEAM_LINES + 1) * 2 * 4), // the last line is the beam that holds what you carry
   count: 0,
   originX: 0, originY: 0, originZ: 0
 };
@@ -737,17 +737,17 @@ function drawLooseObjectShape(isStationLit, vertexArray, vertexCount) {
   gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
 }
 
-// A loose object that has points on it hides the points behind it, so that it reads as a solid thing and not
-// as a cloud you can see through. One that has not been scanned hides nothing: until your scanner has found it,
-// it is not there to your eyes, and a black shape against the points behind would give it away.
-// (With "Light the station" on in debug mode they are all drawn, in the colour of things you can pick up.)
+// Loose objects are not drawn, any more than the creatures are: what you see of one is the points your scanner
+// has left on it. Those points are solid dots, so an object that has been scanned all over hides what is behind
+// it by itself, and one with three points on it is three points. (A black shape for the whole object, the moment
+// one pulse had landed on it, gave away its outline.)
+// Only with "Light the station" on in debug mode are they drawn, in the colour of things you can pick up.
 function drawLooseObjectOccluders(camera, isStationLit) {
-  if (looseObjects.length === 0) return;
+  if (!isStationLit || looseObjects.length === 0) return;
   const gl = renderer.gl;
   if (isStationLit) gl.uniform3f(renderer.debugWorldUniforms.uColor, 0.9, 0.6, 0.12);
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
     const object = looseObjects[objectIndex];
-    if (!isStationLit && !isLooseObjectSeen(object)) continue; // nothing has been scanned onto it: it is not there to your eyes
     const deltaX = object.x - camera.x, deltaZ = object.z - camera.z;
     if (deltaX * deltaX + deltaZ * deltaZ > 60 * 60) continue; // TWEAK: further than 60 m away they are not worth drawing
     const matrix = object.matrix, parts = object.prepared.parts;
@@ -1034,6 +1034,22 @@ function renderFrame(camera, frameState) {
     gl.bindBuffer(gl.ARRAY_BUFFER, renderer.beamBuffer);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, beamLines.vertices, 0, beamLines.count * 8);
     gl.drawArrays(gl.LINES, 0, beamLines.count * 2);
+  }
+  // 3a. The beam that holds what you carry: one amber line from the lens to the object, so that you can tell
+  //     something is on the end of it even when you have not scanned it.
+  const carried = frameState.showViewmodel ? getHeldLooseObject() : null;
+  if (carried !== null) {
+    const vertices = beamLines.vertices, offset = MAXIMUM_BEAM_LINES * 8;
+    const flicker = 0.5 + 0.12 * Math.sin(frameState.time * 31) + 0.08 * Math.sin(frameState.time * 47);
+    vertices[offset] = beamLines.originX; vertices[offset + 1] = beamLines.originY; vertices[offset + 2] = beamLines.originZ; vertices[offset + 3] = flicker;
+    vertices[offset + 4] = carried.x; vertices[offset + 5] = carried.y; vertices[offset + 6] = carried.z; vertices[offset + 7] = flicker * 0.6;
+    gl.useProgram(renderer.beamProgram);
+    gl.uniformMatrix4fv(renderer.beamUniforms.uViewProjection, false, renderer.viewProjectionMatrix);
+    gl.uniform3f(renderer.beamUniforms.uColor, 1.0, 0.62, 0.18); // TWEAK: the colour of the holding beam
+    gl.bindVertexArray(renderer.beamVertexArray);
+    gl.bindBuffer(gl.ARRAY_BUFFER, renderer.beamBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, offset * 4, vertices, offset, 8);
+    gl.drawArrays(gl.LINES, MAXIMUM_BEAM_LINES * 2, 2);
   }
   gl.disable(gl.BLEND);
   gl.depthMask(true);
