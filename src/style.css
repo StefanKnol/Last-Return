@@ -139,8 +139,8 @@ body {
 }
 .touch-button.is-held { background: var(--instrument); color: var(--void); }
 .touch-small { height: 34px; min-width: 52px; font-size: 10px; }
-/* DROP sits apart from the other buttons, to their left, so that it is not pressed by mistake for USE. */
-.touch-drop { position: absolute; right: calc(100% + 14px); bottom: 0; }
+/* DROP sits apart from the other buttons, above their left-hand column: clear of USE, and of the messages along the bottom. */
+.touch-drop { position: absolute; left: 0; bottom: calc(100% + 10px); }
 .touch-drop[hidden] { display: none; }
 .touch-scan { width: 92px; height: 92px; border-radius: 50%; font-size: 13px; border-color: var(--instrument); }
 .touch-top-buttons { position: absolute; top: calc(150px + env(safe-area-inset-top, 0px)); right: var(--gutter-right); display: flex; gap: 6px; }

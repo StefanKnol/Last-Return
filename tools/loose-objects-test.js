@@ -630,14 +630,14 @@ function installLab() {
   await drawFrames(phone.page, 8);
   const phoneCarrying = await phone.page.evaluate(() => {
     const button = document.getElementById('touch-drop'), box = button.getBoundingClientRect();
-    const overlaps = ['touch-use', 'touch-sweep', 'touch-scan', 'touch-crouch', 'touch-run', 'touch-spread', 'hud-block-instruments'].filter((id) => {
+    const overlaps = ['touch-use', 'touch-sweep', 'touch-scan', 'touch-crouch', 'touch-run', 'touch-spread', 'touch-map', 'touch-pause', 'hud-block-instruments', 'hud-block-map', 'hud-block-objective', 'hud-messages', 'reticle-ring'].filter((id) => {
       const other = document.getElementById(id).getBoundingClientRect();
       return !(other.right <= box.left || other.left >= box.right || other.bottom <= box.top || other.top >= box.bottom);
     });
     return { dropHidden: button.hidden, box: [Math.round(box.left), Math.round(box.top), Math.round(box.right), Math.round(box.bottom)], overlaps: overlaps,
       onScreen: box.left >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight, messages: window.looseLab.messages() };
   });
-  check('on a phone the DROP button is only there while you carry something, on screen and clear of the other buttons',
+  check('on a phone the DROP button is only there while you carry something, on screen and clear of the other buttons, the map, the messages and the aiming ring',
     phoneBefore.dropHidden && !phoneCarrying.dropHidden && phoneCarrying.onScreen && phoneCarrying.overlaps.length === 0, phoneCarrying);
   check('and the hint names the button, not a key', phoneCarrying.messages.some((text) => /DROP lets go/.test(text)), phoneCarrying.messages);
   await phone.page.tap('#touch-drop');
