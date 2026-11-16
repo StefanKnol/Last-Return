@@ -160,11 +160,11 @@ const TUNING = {
   looseRestSpeed: 0.05,             // slower than this (m/s) ...
   looseRestSpin: 0.35,              // ... and turning slower than this (radians per second) ...
   looseRestSeconds: 0.4,            // ... for this long, while touching something: it is at rest, and left alone until something touches it
-  looseImprintSeconds: 0.5,         // how long points scanned onto a moving or carried object stay. (On one at rest they stay for good.)
+  looseImprintSeconds: 0.7,         // how long points scanned onto a moving or carried object stay. (On one at rest they stay for good.)
   // Carrying.
   looseBeamReach: 2.6,              // how far away the scanner's beam can take hold of one
   looseHoldDistance: 0.7,           // how far out from the scanner's lens it hangs, on top of its own size (a crate is 0.4 from middle to corner). The lens is 0.55 in front of your eyes.
-  looseHoldFollowRate: 9,           // how eagerly it closes the gap to where the beam wants it. Lower is a looser, swingier carry.
+  looseHoldFollowRate: 8,           // how eagerly it closes the gap to where the beam wants it. Lower is a looser, swingier carry.
   looseHoldResponseRate: 14,        // how quickly it gets up to speed. Lower is heavier-feeling.
   looseHoldLagPerKilogram: 0.06,    // how much each kilogram takes off both of those. 0 = a crate follows like a jar.
   looseHoldTurnRate: 5,             // how eagerly the beam turns a thing back to how it was taken hold of. Low: its hold on that is weak.
@@ -292,7 +292,7 @@ const TUNING = {
   hollowSearchSeconds: 8.0,         // then it pokes around that area this long before giving up
   hollowSearchLeadSeconds: 2.5,     // it starts searching this many seconds of travel ahead of where it lost you,
                                     // in the direction you were moving. 0 = it searches exactly where it lost you.
-  hollowDoubleBackChance: 0.4,      // chance that, after giving up a search, it walks off and then returns to the
+  hollowDoubleBackChance: 0.3,      // chance that, after giving up a search, it walks off and then returns to the
                                     // same spot 6 to 11 seconds later. 0 = never, 1 = always.
   // Listening: while wandering near you it sometimes stops dead for a few seconds. It makes no footsteps
   // while it does, and it hears better.
@@ -336,7 +336,7 @@ const TUNING = {
 
   // ---- The Stills (calibration dummies) ------------------------------------
   stillSpeed: 1.8,                  // walking speed while nothing is scanning them. Your walk is 2.5.
-  stillObservedHoldSeconds: 1.3,    // a dummy stays frozen this long after the last pulse that touched it.
+  stillObservedHoldSeconds: 2.3,    // a dummy stays frozen this long after the last pulse that touched it.
                                     // Higher lets you look away for longer.
   stillKillDistance: 0.6,
   stillImprintSeconds: 22,          // how long the points a scan leaves on a dummy stay visible (maximum 63).
