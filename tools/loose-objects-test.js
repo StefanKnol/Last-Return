@@ -573,12 +573,14 @@ function installLab() {
   check('the screen says what you carry, and the first time, which key lets go of it',
     !afterPickUp.chipHidden && afterPickUp.chip === 'CARRYING: GAS CANISTER' && afterPickUp.messages.some((text) => /Q lets go/.test(text)), afterPickUp);
 
-  // (A short hold: the browser may draw a frame of its own while the key is down, and that counts as time held too.)
-  await page.keyboard.down('KeyQ');
-  await inGame(() => window.lastReturnDebug.simulate(0.02));
-  await page.keyboard.up('KeyQ');
+  // The key is put down and let go inside the game here, not through the browser: between a real press and a
+  // real release the browser may draw frames of its own, and each of those counts as time the key was held.
+  // (The real key is what the next check uses, where holding it longer changes nothing.)
   const tapped = await inGame(() => {
     const d = window.lastReturnDebug;
+    d.input.keysDown.add('KeyQ'); d.input.dropPressed = true;
+    d.simulate(0.02);
+    d.input.keysDown.delete('KeyQ');
     d.simulate(0.05);
     const object = d.looseObjects[0];
     return { carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityZ) };
@@ -611,8 +613,13 @@ function installLab() {
     d.clearMessages();
     return { lookingAtIt: d.player.focusedLooseObject === other };
   }, spot);
-  await page.keyboard.press('KeyE');
-  const handsFullAfter = await inGame(() => { const d = window.lastReturnDebug; d.simulate(0.2); return { carrying: d.getHeldLooseObject().kindKey, messages: window.looseLab.messages() }; });
+  // E is given inside the game, so that the message is read in the same step as the press that causes it.
+  const handsFullAfter = await inGame(() => {
+    const d = window.lastReturnDebug;
+    d.input.wantsInteract = true;
+    d.simulate(0.05);
+    return { carrying: d.getHeldLooseObject().kindKey, messages: window.looseLab.messages() };
+  });
   check('with something in your hands already, E on another object says your hands are full', handsFull.lookingAtIt && handsFullAfter.carrying === 'jar' && handsFullAfter.messages.some((text) => /hands are full/.test(text)), handsFullAfter);
 
   check('no script errors were reported', problems.length === 0, problems);
