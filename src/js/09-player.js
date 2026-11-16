@@ -226,7 +226,7 @@ function initializeInput() {
   canvas.addEventListener('wheel', function (event) {
     if (game.mode !== 'playing') return;
     event.preventDefault();
-    setScannerSpread(player.spreadDegrees + (event.deltaY > 0 ? -2 : 2));
+    setScannerSpread(player.spreadDegrees + (event.deltaY > 0 ? -0.5 : 0.5));
   }, { passive: false });
   canvas.addEventListener('contextmenu', function (event) { event.preventDefault(); });
 
