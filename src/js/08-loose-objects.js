@@ -91,6 +91,9 @@ const LOOSE_OBJECT_KINDS = {
   },
   plate: {
     label: 'steel plate', mass: 3.5, value: 6, material: 'metal', loud: 1.3, lies: 'upright', bulky: false, bounce: 0.25, grip: 0.5,
+    // It is thin, but nothing in a station is thinner than a shelf board: steps of a centimetre or so are fine enough
+    // for it not to pass through one, and steps as fine as its own thickness would slow everything that moves with it.
+    stepRadius: 0.025,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.2, 0.012, 0.15] }]
   },
   pumpMotor: {
@@ -1546,8 +1549,10 @@ function planStationLooseObjects() {
     // What cannot be shoved aside does not go where it would stand in the only way through.
     if (LOOSE_OBJECT_KINDS[kindKey].mass >= TUNING.looseShoveBlockMass * 0.6 && !isLooseTileEasyToPass(index)) kindKey = 'canister';
     const lies = LOOSE_OBJECT_KINDS[kindKey].lies;
-    addStationLooseObject(kindKey, index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, random() * TWO_PI,
-      lies === 'onItsSide' || (lies === 'either' && random() < 0.5), random() < 0.5, 'floor');
+    const yaw = random() * TWO_PI, isOnItsSide = lies === 'onItsSide' || (lies === 'either' && random() < 0.5), isTurnedTheOtherWay = random() < 0.5;
+    // Something round lies either way; a tool case lies on its broad side, never on its end.
+    addStationLooseObject(kindKey, index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, yaw,
+      isOnItsSide, lies === 'onItsSide' ? false : isTurnedTheOtherWay, 'floor');
     placed++;
   }
   level.looseObjectCount = stationLooseObjects.length;
