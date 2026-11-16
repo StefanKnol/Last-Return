@@ -717,6 +717,7 @@ function updateAttractMode(dt) {
   const paintYaw = viewYaw + Math.sin(attract.timer * 0.83) * 0.6;
   const paintPitch = viewPitch + Math.sin(attract.timer * 1.31) * 0.32;
   computeScannerBasis(paintYaw, paintPitch);
+  updateScanEmitterAtEye(ATTRACT_CAMERA.x, ATTRACT_CAMERA.y, ATTRACT_CAMERA.z);
   resetBeamLines(ATTRACT_CAMERA.x + 0.2, ATTRACT_CAMERA.y - 0.2, ATTRACT_CAMERA.z);
   attract.rayBudget += quality.raysPerSecond * 0.45 * dt;
   const rayCount = Math.min(400, Math.floor(attract.rayBudget));
@@ -724,7 +725,7 @@ function updateAttractMode(dt) {
   const spreadTangent = Math.tan(13 * DEGREES_TO_RADIANS);
   for (let rayIndex = 0; rayIndex < rayCount; rayIndex++) {
     const radius = Math.sqrt(Math.random()) * spreadTangent, angle = Math.random() * TWO_PI;
-    fireScannerPulse(ATTRACT_CAMERA.x, ATTRACT_CAMERA.y, ATTRACT_CAMERA.z, Math.cos(angle) * radius, Math.sin(angle) * radius, rayIndex % 16 === 0);
+    fireScannerPulse(Math.cos(angle) * radius, Math.sin(angle) * radius, rayIndex % 16 === 0);
   }
   attract.sweepTimer -= dt;
   if (attract.sweepTimer <= 0 && attract.sweepProgress < 0) { attract.sweepProgress = 0; attract.sweepTimer = 11; }
@@ -736,7 +737,7 @@ function updateAttractMode(dt) {
     const halfWidthTangent = Math.tan(50 * DEGREES_TO_RADIANS), halfHeightTangent = Math.tan(34 * DEGREES_TO_RADIANS);
     for (let rayIndex = 0; rayIndex < sweepRays; rayIndex++) {
       const lineProgress = previousProgress + (attract.sweepProgress - previousProgress) * Math.random();
-      fireScannerPulse(ATTRACT_CAMERA.x, ATTRACT_CAMERA.y, ATTRACT_CAMERA.z, (Math.random() * 2 - 1) * halfWidthTangent,
+      fireScannerPulse((Math.random() * 2 - 1) * halfWidthTangent,
         interpolateLinear(halfHeightTangent, -halfHeightTangent, lineProgress), false);
     }
     if (attract.sweepProgress >= 1) attract.sweepProgress = -1;
@@ -951,7 +952,8 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
     wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
-    castScannerPulse: castScannerPulse, updateScannerLens: updateScannerLens, scannerLens: scannerLens, getPlayFieldOfViewDegrees: getPlayFieldOfViewDegrees, beginLettingGo: beginLettingGo,
+    fireScanPulse: fireScanPulse, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateScanEmitterAtEye: updateScanEmitterAtEye, computeScannerPulseDirection: computeScannerPulseDirection,
+    getPlayFieldOfViewDegrees: getPlayFieldOfViewDegrees, beginLettingGo: beginLettingGo,
     castScannerRay: castScannerRay, rayHit: rayHit, scannerBasis: scannerBasis, computeScannerBasis: computeScannerBasis,
     setScanHeld: function (isHeld) { input.isScanHeld = isHeld; },
     addScanPoint: addScanPoint,

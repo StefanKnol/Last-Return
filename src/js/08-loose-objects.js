@@ -425,47 +425,18 @@ function intersectRayWithLooseObject(object, originX, originY, originZ, directio
 }
 
 // The nearest loose object a ray meets before `nearerThan`, or null. `castScannerRay` asks this for every pulse.
+// `looseRaySkipsHeld` is set for the one ray a frame that asks what you are looking at past what you carry.
 let looseRayDistance = 0;
+let looseRaySkipsHeld = false;
 function findLooseObjectOnRay(originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {
   let best = null;
   looseRayDistance = nearerThan;
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-    if (looseObjects[objectIndex].isHeld) continue;
+    if (looseRaySkipsHeld && looseObjects[objectIndex].isHeld) continue;
     const distance = intersectRayWithLooseObject(looseObjects[objectIndex], originX, originY, originZ, directionX, directionY, directionZ, looseRayDistance);
     if (distance > 0) { looseRayDistance = distance; best = looseObjects[objectIndex]; }
   }
   return best;
-}
-
-// Where the scanner's lens is in the station: the place the laser lines are drawn from.
-const scannerLens = { x: 0, y: 0, z: 0 };
-function updateScannerLens(eyeX, eyeY, eyeZ, fieldOfViewDegrees) {
-  const lens = getSteadyLensInView(fieldOfViewDegrees), basis = scannerBasis;
-  scannerLens.x = eyeX + basis.rightX * lens.x + basis.upX * lens.y - basis.forwardX * lens.z;
-  scannerLens.y = eyeY + basis.rightY * lens.x + basis.upY * lens.y - basis.forwardY * lens.z;
-  scannerLens.z = eyeZ + basis.rightZ * lens.x + basis.upZ * lens.y - basis.forwardZ * lens.z;
-}
-
-// One pulse of the scanner, with what you carry taken into account. Where a pulse lands is worked out from
-// your eyes, like everything you see. But the scanner is in your right hand, and its beam is drawn from there:
-// so what you carry stops a pulse only when it is on the straight line from the lens to where the pulse was
-// going. A canister at your left side is never on that line. A crate held in front of the scanner is.
-// Fills `rayHit` and returns true on a hit, like castScannerRay. Call updateScannerLens first.
-function castScannerPulse(eyeX, eyeY, eyeZ, directionX, directionY, directionZ, maximumDistance) {
-  const isHit = castScannerRay(eyeX, eyeY, eyeZ, directionX, directionY, directionZ, maximumDistance);
-  const held = looseState.held;
-  if (held === null) return isHit;
-  // Where the pulse was going: what it hit, or as far as the scanner reaches.
-  const reach = isHit ? rayHit.distance : maximumDistance;
-  let alongX = eyeX + directionX * reach - scannerLens.x, alongY = eyeY + directionY * reach - scannerLens.y, alongZ = eyeZ + directionZ * reach - scannerLens.z;
-  const length = Math.sqrt(alongX * alongX + alongY * alongY + alongZ * alongZ);
-  if (length < 0.05) return isHit;
-  alongX /= length; alongY /= length; alongZ /= length;
-  const distance = intersectRayWithLooseObject(held, scannerLens.x, scannerLens.y, scannerLens.z, alongX, alongY, alongZ, length);
-  if (distance <= 0) return isHit;
-  fillRayHit(distance, SURFACE_INTERACTIVE, 0.6 + Math.random() * 0.3, 0, scannerLens.x, scannerLens.y, scannerLens.z, alongX, alongY, alongZ);
-  rayHit.looseObject = held;
-  return true;
 }
 
 // How long a point scanned onto this object stays: for good while it lies still, a moment while it moves.
@@ -1045,11 +1016,11 @@ function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   const held = looseState.held;
   if (!held) return;
   computeScannerBasis(player.yaw, player.pitch);
-  updateScannerLens(eyeX, eyeY, eyeZ, getPlayFieldOfViewDegrees());
+  updateScanEmitterAtLens(eyeX, eyeY, eyeZ);
   const distance = TUNING.looseHoldDistance + held.prepared.partsRadius;
-  looseState.holdTargetX = scannerLens.x + scannerBasis.forwardX * distance;
-  looseState.holdTargetY = scannerLens.y + scannerBasis.forwardY * distance - held.kind.mass * TUNING.looseHoldSagPerKilogram;
-  looseState.holdTargetZ = scannerLens.z + scannerBasis.forwardZ * distance;
+  looseState.holdTargetX = scanEmitter.x + scannerBasis.forwardX * distance;
+  looseState.holdTargetY = scanEmitter.y + scannerBasis.forwardY * distance - held.kind.mass * TUNING.looseHoldSagPerKilogram;
+  looseState.holdTargetZ = scanEmitter.z + scannerBasis.forwardZ * distance;
 }
 
 // `isByButton`: it is held for as long as the right mouse button is, and dropped when that is let go.

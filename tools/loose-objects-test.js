@@ -117,16 +117,14 @@ function installLab() {
     coneShare: function (object, degrees) {
       d.computeScannerBasis(p.yaw, p.pitch);
       const basis = d.scannerBasis, tangent = Math.tan(degrees * Math.PI / 180), eyeY = d.getPlayerEyeY(), pulses = 800;
-      d.updateScannerLens(p.x, eyeY, p.z, d.getPlayFieldOfViewDegrees());
+      d.updateScanEmitterAtLens(p.x, eyeY, p.z);
+      const emitter = d.scanEmitter;
       let stopped = 0;
       for (let pulse = 0; pulse < pulses; pulse++) {
         const radius = Math.pow((pulse + 0.5) / pulses, 0.62) * tangent, angle = pulse * 2.399963;
         const across = Math.cos(angle) * radius, up = Math.sin(angle) * radius;
-        const x = basis.forwardX + basis.rightX * across + basis.upX * up;
-        const y = basis.forwardY + basis.rightY * across + basis.upY * up;
-        const z = basis.forwardZ + basis.rightZ * across + basis.upZ * up;
-        const length = Math.hypot(x, y, z);
-        if (d.castScannerPulse(p.x, eyeY, p.z, x / length, y / length, z / length, 30) && d.rayHit.looseObject === object) stopped++;
+        const direction = d.computeScannerPulseDirection(across, up);
+        if (d.castScannerRay(emitter.x, emitter.y, emitter.z, direction.x, direction.y, direction.z, 30) && d.rayHit.looseObject === object) stopped++;
       }
       return round(stopped / pulses);
     },
@@ -383,11 +381,6 @@ function installLab() {
       entry.lookingUp = lab.coneShare(object, d.tuning.scannerSpreadDefaultDegrees);
       p.pitch = 0; d.simulate(0.4);
       entry.fadesWhileCarried = d.getLooseObjectPointLifeCode(object) > 0;
-      // Seen from your eyes it is in view all the same: a ray from the eye straight at it would meet it.
-      // The scanner is not at your eyes, which is the whole point.
-      const eyeY = d.getPlayerEyeY(), away = Math.hypot(object.x - p.x, object.y - eyeY, object.z - p.z);
-      d.updateScannerLens(p.x, eyeY, p.z, d.getPlayFieldOfViewDegrees());
-      entry.aimedAtItFromTheEye = d.castScannerPulse(p.x, eyeY, p.z, (object.x - p.x) / away, (object.y - eyeY) / away, (object.z - p.z) / away, 30) && d.rayHit.looseObject === object;
       // Out of your hands it is an object like any other: a pulse that meets it stops on it.
       d.releaseHeldLooseObject(0);
       d.castScannerRay(object.x - 3, object.y, object.z, 1, 0, 0, 10);
@@ -406,36 +399,52 @@ function installLab() {
     blocking.crate.normal >= 0.85 && blocking.pumpMotor.normal >= 0.5 && blocking.toolCase.normal >= 0.5 &&
     blocking.jar.normal >= 0.1 && blocking.jar.normal <= 0.6 && blocking.pipe.normal >= 0.05 && blocking.pipe.normal <= 0.4 &&
     kindsCarried.every((key) => blocking[key].normal > 0 && blocking[key].lookingDown > 0 && blocking[key].lookingUp > 0), blocking);
+  check('a pulse that meets a carried object stops on it', kindsCarried.every((key) => blocking[key].narrow > 0 || blocking[key].normal > 0), kindsCarried);
   check('the wide beam sees round it, and the narrow beam least of all: every kind takes a smaller share of the wide beam than of the normal one',
     kindsCarried.every((key) => blocking[key].wide < blocking[key].normal && blocking[key].narrow >= blocking[key].normal) && blocking.crate.wide < 0.8, blocking);
   check('points on a carried object fade, points on one lying still stay, and any of them out of your hands stops a pulse that meets it',
     Object.keys(blocking).filter((key) => key !== 'lyingAhead').every((key) => blocking[key].stopsAPulseOutOfYourHands && blocking[key].fadesWhileCarried) && blocking.lyingAhead.staysOnceAtRest, blocking.lyingAhead);
 
-  // A pulse that the crate stops lands on the crate, on the straight line from the lens to where it was going.
-  const onTheLine = await inGame((spot) => {
-    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
+  // --- where the scanner's light comes from ---
+  const bareWallForScanner = await inGame(() => { window.looseLab.reset(); return window.looseLab.findBareWall(); });
+  const zeroed = await inGame((bare) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = { offBy: [], sideways: [] };
     d.clearLooseObjects();
-    lab.stand(spot.x, spot.z, Math.PI / 2);
-    const object = lab.carry('crate');
-    const eyeY = d.getPlayerEyeY();
+    const cast = function (fromEye, across, up) {
+      const eyeY = d.getPlayerEyeY();
+      d.computeScannerBasis(p.yaw, p.pitch);
+      if (fromEye) d.updateScanEmitterAtEye(p.x, eyeY, p.z); else d.updateScanEmitterAtLens(p.x, eyeY, p.z);
+      const direction = d.computeScannerPulseDirection(across, up), emitter = d.scanEmitter;
+      const isHit = d.castScannerRay(emitter.x, emitter.y, emitter.z, direction.x, direction.y, direction.z, 40);
+      return isHit ? { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z } : null;
+    };
+    // Three metres from a bare wall, square to it: every pulse lands where the eye sees its place in the ring.
+    lab.stand(bare.x + bare.stepX * (bare.wall - 3), bare.z + bare.stepZ * (bare.wall - 3), bare.yaw);
+    for (const offset of [[0, 0], [0.19, 0], [-0.19, 0], [0, 0.19], [0, -0.19], [0.1, -0.12]]) {
+      const seen = cast(true, offset[0], offset[1]), lit = cast(false, offset[0], offset[1]);
+      result.offBy.push(seen && lit ? Math.hypot(seen.x - lit.x, seen.y - lit.y, seen.z - lit.z) : 99);
+    }
+    const emitter = d.scanEmitter, eyeY = d.getPlayerEyeY();
+    result.lensFromTheEye = lab.round(Math.hypot(emitter.x - p.x, emitter.y - eyeY, emitter.z - p.z));
+    result.lensBelowTheEye = lab.round(eyeY - emitter.y);
+    // With your face against the wall the scanner would be inside it. It is held back, and still paints.
+    lab.stand(bare.x + bare.stepX * (bare.wall - 0.32), bare.z + bare.stepZ * (bare.wall - 0.32), bare.yaw);
     d.computeScannerBasis(p.yaw, p.pitch);
-    d.updateScannerLens(p.x, eyeY, p.z, d.getPlayFieldOfViewDegrees());
-    const basis = d.scannerBasis, lens = { x: d.scannerLens.x, y: d.scannerLens.y, z: d.scannerLens.z };
-    // Where a pulse a little below the middle would land with nothing in your hands ...
-    let x = basis.forwardX - basis.upX * 0.03, y = basis.forwardY - basis.upY * 0.03, z = basis.forwardZ - basis.upZ * 0.03;
-    const length = Math.hypot(x, y, z); x /= length; y /= length; z /= length;
-    d.castScannerRay(p.x, eyeY, p.z, x, y, z, 30);
-    const beyond = { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z };
-    // ... and where it lands now.
-    const stopped = d.castScannerPulse(p.x, eyeY, p.z, x, y, z, 30) && d.rayHit.looseObject === object;
-    const hit = { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z };
-    const whole = Math.hypot(beyond.x - lens.x, beyond.y - lens.y, beyond.z - lens.z), part = Math.hypot(hit.x - lens.x, hit.y - lens.y, hit.z - lens.z);
-    const offTheLine = Math.hypot(lens.x + (beyond.x - lens.x) * part / whole - hit.x, lens.y + (beyond.y - lens.y) * part / whole - hit.y, lens.z + (beyond.z - lens.z) * part / whole - hit.z);
-    return { stopped: stopped, metresFromTheLens: lab.round(part), offTheLine: offTheLine, onTheCrate: Math.hypot(hit.x - object.x, hit.y - object.y, hit.z - object.z) < object.prepared.partsRadius + 0.01,
-      lensFromTheEye: [lab.round(Math.hypot(lens.x - p.x, lens.z - p.z)), lab.round(lens.y - eyeY)] };
-  }, spot);
-  check('a pulse that a carried crate stops lands on the crate, on the straight line from the scanner\'s lens to where it was going',
-    onTheLine.stopped && onTheLine.onTheCrate && onTheLine.offTheLine < 1e-6 && onTheLine.metresFromTheLens < 1.4, onTheLine);
+    d.updateScanEmitterAtLens(p.x, d.getPlayerEyeY(), p.z);
+    result.atTheWall = { emitterInTheOpen: d.isSpaceOpenAt(d.scanEmitter.x, d.scanEmitter.y, d.scanEmitter.z),
+      fromTheWall: lab.round(bare.wall - ((d.scanEmitter.x - bare.x) * bare.stepX + (d.scanEmitter.z - bare.z) * bare.stepZ)),
+      paints: [cast(false, 0, 0), cast(false, 0.15, 0.1), cast(false, -0.15, -0.1)].every((hit) => hit !== null) };
+    // Anything can fire a pulse from anywhere: one from the middle of the room, straight down, lands on the floor under it.
+    const before = d.pointCloud.totalReturns;
+    const landed = d.fireScanPulse(bare.x, 1.2, bare.z, 0, -1, 0, false);
+    result.fromAnywhere = { landed: landed, onTheFloor: landed && Math.abs(d.rayHit.y) < 0.01 && Math.abs(d.rayHit.x - bare.x) < 0.001, pointsAdded: d.pointCloud.totalReturns - before };
+    return result;
+  }, bareWallForScanner);
+  check('the scanner\'s pulses leave its lens, a forearm from your eyes, and land where you see the aiming ring on the wall you are looking at',
+    zeroed.lensFromTheEye > 0.5 && zeroed.lensBelowTheEye > 0.1 && zeroed.offBy.every((metres) => metres < 0.01), zeroed);
+  check('with your face against a wall the scanner is held back out of it, and still paints', zeroed.atTheWall.emitterInTheOpen && zeroed.atTheWall.fromTheWall > 0.05 && zeroed.atTheWall.paints, zeroed.atTheWall);
+  check('a pulse can be fired from anywhere, not only from the scanner: one fired straight down in mid-room leaves a point on the floor under it',
+    zeroed.fromAnywhere.landed && zeroed.fromAnywhere.onTheFloor && zeroed.fromAnywhere.pointsAdded === 1, zeroed.fromAnywhere);
 
   // --- knocks ---
   const bareWall = await inGame(() => { window.looseLab.reset(); return window.looseLab.findBareWall(); });
