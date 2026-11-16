@@ -922,6 +922,18 @@ function findNearestWalkableTileIndex(x, z) {
 const navigationQueue = new Int32Array(TILE_COUNT);
 const NAVIGATION_UNREACHABLE = 32000;
 
+// A working array with one number for every tile of the map, for a function to use while it runs.
+// The map is 1024 by 1024 tiles, so a fresh one is two megabytes. Building and checking a station used to make
+// dozens of them and throw them away, faster than a browser clears up after itself; this hands out the same
+// one again instead. Each caller asks for its own by name, so no two functions ever share one. Whoever
+// borrows one must not keep it after returning and must not expect anything of what is in it
+// (computeDistanceField fills it before use).
+const borrowedTileFields = {};
+function borrowTileField(name) {
+  if (!borrowedTileFields[name]) borrowedTileFields[name] = new Int16Array(TILE_COUNT);
+  return borrowedTileFields[name];
+}
+
 // Flood-fills walking distance (in tiles) outward from a target tile.
 // `forbiddenZone` lets a walker refuse to enter one zone; `allowedZones` restricts it to a set.
 function computeDistanceField(field, targetIndex, forbiddenZone, allowedZones) {
