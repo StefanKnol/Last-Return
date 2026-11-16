@@ -259,10 +259,10 @@ function castRayAgainstWorld(originX, originY, originZ, directionX, directionY, 
   return false;
 }
 
-// The full scanner pulse: rooms, props and anything standing in them.
-function castScannerRay(originX, originY, originZ, directionX, directionY, directionZ, maximumDistance) {
-  const hitWorld = castRayAgainstWorld(originX, originY, originZ, directionX, directionY, directionZ, maximumDistance);
-  let bestDistance = hitWorld ? rayHit.distance : maximumDistance;
+// What a ray meets that is not the station itself: a creature, or a loose object. Returns true and fills
+// `rayHit` if there is one nearer than `nearerThan`; otherwise returns false and leaves `rayHit` as it was.
+function castRayAgainstThings(originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {
+  let bestDistance = nearerThan;
   let bestFigure = null;
   for (let figureIndex = 0; figureIndex < raycastableFigures.length; figureIndex++) {
     const figure = raycastableFigures[figureIndex];
@@ -292,5 +292,12 @@ function castScannerRay(originX, originY, originZ, directionX, directionY, direc
     rayHit.figure = bestFigure;
     return true;
   }
+  return false;
+}
+
+// The full scanner pulse from one point: rooms, props and anything standing in them.
+function castScannerRay(originX, originY, originZ, directionX, directionY, directionZ, maximumDistance) {
+  const hitWorld = castRayAgainstWorld(originX, originY, originZ, directionX, directionY, directionZ, maximumDistance);
+  if (castRayAgainstThings(originX, originY, originZ, directionX, directionY, directionZ, hitWorld ? rayHit.distance : maximumDistance)) return true;
   return hitWorld;
 }

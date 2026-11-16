@@ -116,7 +116,6 @@ const TUNING = {
   scannerSpreadMaximumDegrees: 26,  // widest beam (mouse wheel up)
   scannerSpreadDefaultDegrees: 11,
   scannerClearanceMetres: 0.08,     // the scanner is held back this far from a wall your face is against, so that it is never inside it
-  scannerNearestZeroMetres: 1.6,    // the scanner's pattern is zeroed on what you look at, but never nearer than this (nearer, the pulses would cross over)
   // Heat runs from 0 (cold) to 1 (overheated). The HUD bar shows it.
   heatPerSecondWhilePainting: 0.1,  // 0.1 = ten seconds of continuous painting from cold to overheated
   heatCoolingPerSecond: 0.2,        // 0.2 = five seconds from overheated back to cold when not scanning

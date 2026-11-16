@@ -427,8 +427,8 @@ function intersectRayWithLooseObject(object, originX, originY, originZ, directio
   return best;
 }
 
-// The nearest loose object a ray meets before `nearerThan`, or null. `castScannerRay` asks this for every pulse.
-// `looseRaySkipsHeld` is set for the one ray a frame that asks what you are looking at past what you carry.
+// The nearest loose object a ray meets before `nearerThan`, or null. Every scanner pulse asks this.
+// `looseRaySkipsHeld` is set while the player's scanner asks what your eyes see past what the beam is carrying.
 let looseRayDistance = 0;
 let looseRaySkipsHeld = false;
 function findLooseObjectOnRay(originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {

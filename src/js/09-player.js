@@ -516,15 +516,15 @@ function markInteractableDiscovered(objectId) {
 // ---- Where scanning light comes from ----
 //
 // A pulse is fired from a point, along a direction, and stops on the first thing in its way: rock, a prop,
-// a door, a creature, a loose object. `fireScanPulse` is that, and it is the only way anything in the game
-// scans. It does not care where the point is: the player's scanner fires from its lens, the title screen from
-// its camera, and anything else that should scan one day (something thrown, another player's scanner) can
-// fire from wherever it is. Whatever is between that point and the wall is in the way, with no special cases.
+// a door, a creature, a loose object. `fireScanPulse` is that. It does not care where the point is: the title
+// screen fires from its camera, and anything that should scan one day from where it lies (something thrown,
+// another player's scanner) can fire from there.
+//
+// The player's own scanner has one refinement, because you aim it with your eyes and hold it in your hand
+// (see castScannerPulse below).
 
-// Fires one pulse from (originX, Y, Z) along a direction of length one. Leaves a scan point where it lands and
-// returns true, or returns false if it met nothing within the scanner's range.
-function fireScanPulse(originX, originY, originZ, directionX, directionY, directionZ, drawBeam) {
-  if (!castScannerRay(originX, originY, originZ, directionX, directionY, directionZ, TUNING.scannerMaximumRange)) return false;
+// Notes what a pulse has just landed on (it is in `rayHit`): the scan point, and what the game makes of it.
+function recordScanHit(drawBeam) {
   let lifeCode = 0;
   const figure = rayHit.figure;
   if (figure !== null) {
@@ -538,30 +538,30 @@ function fireScanPulse(originX, originY, originZ, directionX, directionY, direct
   addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode, looseObject !== null);
   if (rayHit.objectId !== 0) markInteractableDiscovered(rayHit.objectId);
   if (drawBeam) addBeamLine(rayHit.x, rayHit.y, rayHit.z, 0.1 + Math.random() * 0.12);
+}
+
+// Fires one pulse from (originX, Y, Z) along a direction of length one. Leaves a scan point where it lands and
+// returns true, or returns false if it met nothing within the scanner's range.
+function fireScanPulse(originX, originY, originZ, directionX, directionY, directionZ, drawBeam) {
+  if (!castScannerRay(originX, originY, originZ, directionX, directionY, directionZ, TUNING.scannerMaximumRange)) return false;
+  recordScanHit(drawBeam);
   return true;
 }
 
-// The player's scanner: where its pulses start, and what it is pointed at.
-//
-// You aim with your eyes and the scanner is in your right hand, a forearm's length away from them. So the
-// scanner is "zeroed", the way a sight is: every pulse leaves the lens, aimed so that the pattern lands
-// exactly where you see the aiming ring at the distance of whatever you are looking at. Nearer or further
-// than that, it lands a little to one side, as light from something held in your hand does.
+// The player's scanner: where you aim from, and where the light leaves it.
 const scanEmitter = {
-  x: 0, y: 0, z: 0,             // where pulses start: the lens, or the eye when there is no scanner in a hand
+  x: 0, y: 0, z: 0,             // where the light leaves: the lens, or the eye when there is no scanner in a hand
   eyeX: 0, eyeY: 0, eyeZ: 0,    // where the aiming is done from
-  aimDistance: 10               // how far away the thing is that the pattern is zeroed on
+  isAtEye: true
 };
-const scanPulseDirection = { x: 0, y: 0, z: -1 };
 
-// For a view with no scanner in a hand (the title screen's camera, the workshop): pulses start at the eye.
-// Call computeScannerBasis first.
+// For a view with no scanner in a hand (the title screen's camera, the workshop): the light leaves the eye.
 function updateScanEmitterAtEye(eyeX, eyeY, eyeZ) {
   scanEmitter.x = scanEmitter.eyeX = eyeX; scanEmitter.y = scanEmitter.eyeY = eyeY; scanEmitter.z = scanEmitter.eyeZ = eyeZ;
-  scanEmitter.aimDistance = 10;
+  scanEmitter.isAtEye = true;
 }
 
-// For the player: pulses start at the scanner's lens. Call computeScannerBasis first.
+// For the player: the light leaves the scanner's lens. Call computeScannerBasis first.
 function updateScanEmitterAtLens(eyeX, eyeY, eyeZ) {
   const basis = scannerBasis, lens = getSteadyLensInView(getPlayFieldOfViewDegrees());
   let offsetX = basis.rightX * lens.x + basis.upX * lens.y - basis.forwardX * lens.z;
@@ -576,38 +576,58 @@ function updateScanEmitterAtLens(eyeX, eyeY, eyeZ) {
   }
   scanEmitter.eyeX = eyeX; scanEmitter.eyeY = eyeY; scanEmitter.eyeZ = eyeZ;
   scanEmitter.x = eyeX + offsetX; scanEmitter.y = eyeY + offsetY; scanEmitter.z = eyeZ + offsetZ;
-  // What you are looking at, past anything the scanner's beam is carrying: that is what it is zeroed on.
-  looseRaySkipsHeld = true;
-  const isLookingAtSomething = castScannerRay(eyeX, eyeY, eyeZ, basis.forwardX, basis.forwardY, basis.forwardZ, TUNING.scannerMaximumRange);
-  looseRaySkipsHeld = false;
-  scanEmitter.aimDistance = Math.max(TUNING.scannerNearestZeroMetres, isLookingAtSomething ? rayHit.distance : TUNING.scannerMaximumRange);
+  scanEmitter.isAtEye = false;
 }
 
-// The direction a pulse of the scanner takes that is to land (horizontalTangent, verticalTangent) off the
-// middle of the view: 0, 0 is the centre of the aiming ring. The answer is in `scanPulseDirection`.
-function computeScannerPulseDirection(horizontalTangent, verticalTangent) {
-  const basis = scannerBasis, emitter = scanEmitter, distance = emitter.aimDistance;
-  // The place it is meant to land: on the flat plane, square to your view, through what you are looking at.
-  let directionX = emitter.eyeX + (basis.forwardX + basis.rightX * horizontalTangent + basis.upX * verticalTangent) * distance - emitter.x;
-  let directionY = emitter.eyeY + (basis.forwardY + basis.rightY * horizontalTangent + basis.upY * verticalTangent) * distance - emitter.y;
-  let directionZ = emitter.eyeZ + (basis.forwardZ + basis.rightZ * horizontalTangent + basis.upZ * verticalTangent) * distance - emitter.z;
-  const length = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ);
-  scanPulseDirection.x = directionX / length; scanPulseDirection.y = directionY / length; scanPulseDirection.z = directionZ / length;
-  return scanPulseDirection;
-}
-
-// Fires one pulse of the scanner, to land (horizontalTangent, verticalTangent) off the middle of the view.
+// One pulse of the player's scanner, to land (horizontalTangent, verticalTangent) off the middle of the view:
+// 0, 0 is the centre of the aiming ring. Fills `rayHit` and returns true on a hit.
+//
+// You aim with your eyes, so everything is scanned exactly as you see it: the pulse lands on whatever is in
+// that direction from your eyes, be it a wall, a creature or something lying on the floor. (Worked out from
+// the scanner alone, the corner of a doorway beside your scanner hand blocked what your eyes could plainly see
+// past it, and a creature close in front of you was lit a hand's width to one side of where you aimed.)
+// The one thing that is different is what the scanner's own beam is carrying. That hangs in front of the lens,
+// in your right hand, and it is in the way when it is on the straight line from the lens to the spot the pulse
+// was going to, which is the line the beam is drawn along.
 // Call computeScannerBasis and one of the two updateScanEmitter functions first.
+function castScannerPulse(horizontalTangent, verticalTangent) {
+  const basis = scannerBasis, emitter = scanEmitter, range = TUNING.scannerMaximumRange;
+  let directionX = basis.forwardX + basis.rightX * horizontalTangent + basis.upX * verticalTangent;
+  let directionY = basis.forwardY + basis.rightY * horizontalTangent + basis.upY * verticalTangent;
+  let directionZ = basis.forwardZ + basis.rightZ * horizontalTangent + basis.upZ * verticalTangent;
+  let length = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ);
+  directionX /= length; directionY /= length; directionZ /= length;
+  const carried = emitter.isAtEye ? null : getHeldLooseObject();
+  if (carried === null) return castScannerRay(emitter.eyeX, emitter.eyeY, emitter.eyeZ, directionX, directionY, directionZ, range);
+  // Where your eyes see this pulse land, looking past what you carry (or, if on nothing, where it runs out).
+  looseRaySkipsHeld = true;
+  const isLanding = castScannerRay(emitter.eyeX, emitter.eyeY, emitter.eyeZ, directionX, directionY, directionZ, range);
+  looseRaySkipsHeld = false;
+  const reach = isLanding ? rayHit.distance : range;
+  // The line from the lens to that spot: is what you carry on it?
+  let alongX = emitter.eyeX + directionX * reach - emitter.x, alongY = emitter.eyeY + directionY * reach - emitter.y, alongZ = emitter.eyeZ + directionZ * reach - emitter.z;
+  length = Math.sqrt(alongX * alongX + alongY * alongY + alongZ * alongZ);
+  if (length < 0.05) return isLanding;
+  alongX /= length; alongY /= length; alongZ /= length;
+  const distance = intersectRayWithLooseObject(carried, emitter.x, emitter.y, emitter.z, alongX, alongY, alongZ, length);
+  if (distance <= 0) return isLanding;
+  fillRayHit(distance, SURFACE_INTERACTIVE, 0.6 + Math.random() * 0.3, 0, emitter.x, emitter.y, emitter.z, alongX, alongY, alongZ);
+  rayHit.looseObject = carried;
+  return true;
+}
+
+// Fires one pulse of the player's scanner and leaves its point.
 function fireScannerPulse(horizontalTangent, verticalTangent, drawBeam) {
-  const direction = computeScannerPulseDirection(horizontalTangent, verticalTangent);
-  return fireScanPulse(scanEmitter.x, scanEmitter.y, scanEmitter.z, direction.x, direction.y, direction.z, drawBeam);
+  if (!castScannerPulse(horizontalTangent, verticalTangent)) return false;
+  recordScanHit(drawBeam);
+  return true;
 }
 
 function updateScanner(dt, eyeX, eyeY, eyeZ) {
   const quality = QUALITY_PRESETS[settings.quality];
   computeScannerBasis(player.yaw, player.pitch);
   const basis = scannerBasis;
-  updateScanEmitterAtLens(eyeX, eyeY, eyeZ); // pulses leave the lens, zeroed on what you are looking at
+  updateScanEmitterAtLens(eyeX, eyeY, eyeZ); // the light leaves the lens: what is between it and the wall is in the way
   // Roughly where the scanner is held. While the scanner is on screen the renderer moves the start of the
   // laser lines onto its lens (moveBeamLineOriginsToViewmodelLens); this is what is left when it is not.
   resetBeamLines(
@@ -684,7 +704,7 @@ function updateScanner(dt, eyeX, eyeY, eyeZ) {
   player.scannerActivity = approachValue(player.scannerActivity, wantsPaint || isSweeping ? 1 : 0, dt * 9);
 
   // The range readout always measures straight ahead, even when not scanning.
-  if (castScannerRay(eyeX, eyeY, eyeZ, basis.forwardX, basis.forwardY, basis.forwardZ, TUNING.scannerMaximumRange)) {
+  if (castScannerPulse(0, 0)) {
     player.centerRange = rayHit.distance;
   } else {
     player.centerRange = -1;
