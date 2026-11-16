@@ -27,7 +27,7 @@ const GENERATED_SIZE_PRESETS = {
   small: { label: 'Small', fillers: [2, 1, 0], loops: 2, vents: 1, keycards: 1, extraJobs: [0, 1], errands: [0, 0], extraGenerators: [0, 1], extraSpools: [0, 0], spineLength: [10, 14] },
   medium: { label: 'Medium', fillers: [4, 2, 1], loops: 3, vents: 2, keycards: 1, extraJobs: [1, 1], errands: [0, 1], extraGenerators: [0, 2], extraSpools: [0, 0], spineLength: [13, 18] },
   large: { label: 'Large', fillers: [7, 4, 2], loops: 5, vents: 3, keycards: 2, extraJobs: [1, 2], errands: [0, 1], extraGenerators: [1, 2], extraSpools: [0, 1], spineLength: [16, 22] },
-  massive: { label: 'Massive', fillers: [12, 6, 4], loops: 7, vents: 7, keycards: 3, extraJobs: [2, 3], errands: [1, 2], extraGenerators: [1, 3], extraSpools: [0, 1], spineLength: [18, 26] },
+  massive: { label: 'Massive', fillers: [15, 8, 6], loops: 8, vents: 14, keycards: 3, extraJobs: [2, 3], errands: [1, 2], extraGenerators: [1, 3], extraSpools: [0, 2], spineLength: [15, 28] },
 };
 
 // TWEAK: how spread out a station is.
