@@ -5,6 +5,12 @@
 - Live game test option for people to test new features and provide feedback (github issue feedback instead of bug)
   - in game bug reporting or feedback instead of github issue, direct in game with screenshot of current location (no menu's)?
 
+- health system
+  - not instant death on being caught, monster gives chance to escape after attack
+  - health items to be found (physics based)
+
+- shop in item collection mode (repo mode)
+
 - Even better models
   - player models (overdone and funny, only visible when scanning)
 
@@ -22,6 +28,12 @@
   - multiple generators, could be only objective (3 or more if only objective, random fuel required per generator)
   - fuel spawn closer to generators, not across the map and back
     - fuel as object to carry with physics engine
+  - REPO item collection
+    - collecting items with value until target is reached
+    - multiple stages, lower levels unlock with stages
+      - stages generated as they unlock? not all at once? bigger levels but performant
+      - only load level around player, not whole level for performance
+    - shop at collection points
 
 - more monsters to vary threat or increase it
   - lidar monster produces dots around it on everything, but can see the player
@@ -44,6 +56,7 @@
   - christmas
   - halloween
   - easter
+  - april fools, metal pipe sound effect pipe item
 
 - multiplayer? (mostly for item collection, like extraction looters), more interesting with the opened github issue <https://github.com/StefanKnol/No-Return/issues/14>
   - dev backdoor to mess with people :P (play/direct the monsters, play sounds, control doors, disco mode with random lidar dots coming out of a disco ball and music)
