@@ -55,9 +55,9 @@ const DIFFICULTY_PRESETS = {
     hearingFactor: 1.15,        // hears 15 % further than TUNING says: a sprint step carries 16.1 m (11.2 m on Standard)
     pressureFactor: 1.4,        // it closes in 40 % sooner and breathers are 40 % shorter
     heatFactor: 1.3,            // about 7.7 s of continuous painting before overheating instead of 10 s
-    angerFactor: 1.0,
+    angerFactor: 1.2,
     staminaFactor: 1.0,
-    phantomFactor: 1.0,
+    phantomFactor: 1.4,
     checkpointsEnabled: true
   }
 };
@@ -90,10 +90,10 @@ const QUALITY_PRESETS = {
   // raysPerSecond: pulses fired per second while painting. Higher fills surfaces in faster.
   // sweepRays:     pulses fired by one full sweep.
   // renderScale:   1.0 draws at full screen resolution, 0.75 draws smaller and stretches (faster, softer).
-  low: { key: 'low', maximumPoints: 500000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 0.75 },
-  medium: { key: 'medium', maximumPoints: 1000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 0.8 },
-  high: { key: 'high', maximumPoints: 2000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 1.0 },
-  ultra: { key: 'ultra', maximumPoints: 3000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 1.0 },
+  low: { key: 'low', maximumPoints: 1000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 0.75 },
+  medium: { key: 'medium', maximumPoints: 2000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 0.8 },
+  high: { key: 'high', maximumPoints: 4000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 1.0 },
+  ultra: { key: 'ultra', maximumPoints: 5000000, raysPerSecond: 6500, sweepRays: 20000, renderScale: 1.0 },
 };
 
 const TUNING = {
@@ -111,7 +111,7 @@ const TUNING = {
   interactionReach: 2.0,        // how close you must be to use a terminal, note or pickup
 
   // ---- The scanner ---------------------------------------------------------
-  scannerMaximumRange: 60,      // pulses that travel further than this report NO RETURN
+  scannerMaximumRange: 50,      // pulses that travel further than this report NO RETURN
   scannerSpreadMinimumDegrees: 3,   // narrowest beam (mouse wheel down). Half-angle of the cone.
   scannerSpreadMaximumDegrees: 26,  // widest beam (mouse wheel up)
   scannerSpreadDefaultDegrees: 11,
@@ -180,7 +180,7 @@ const TUNING = {
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
-  scanGrenadeSweeps: 1.6,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000). This was 2.5 while a third of them went into the floor under it; 1.6 puts as many on the room as 2.5 did then.
+  scanGrenadeSweeps: 1.7,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000). This was 2.5 while a third of them went into the floor under it; 1.6 puts as many on the room as 2.5 did then.
   scanGrenadePatchMetres: 0.25,     // it wastes no light on anything it is up against: a pulse that would land on floor, wall or ceiling nearer than this is aimed somewhere else instead. (Lying on the floor, 35 of every 100 pulses of an all-round burst landed within a hand of it.)
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned
   scanGrenadeStunSeconds: 3.5,      // how long the Hollow stands stunned. An enraged Hollow is not stunned.
