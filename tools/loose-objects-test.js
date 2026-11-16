@@ -555,6 +555,180 @@ function installLab() {
   check('the Hollow kicks it too: that is a noise where the canister is, captioned as something out there and not as yours',
     kicked.byTheHollow.moved > 0.3 && kicked.byTheHollow.knocks.heard >= 1 && kicked.byTheHollow.noiseAtTheObject && kicked.byTheHollow.saidWithADirection >= 1 && kicked.byTheHollow.saidAsYours === 0, kicked.byTheHollow);
 
+  // --- how it is turned ---
+  const turned = await inGame(([spot, bare]) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    lab.reset();
+    // The angle between the pipe's length and your right-hand side, in degrees, 0 to 90: 0 is square across you.
+    const acrossYou = function (object) {
+      const lengthX = object.matrix[0], lengthZ = object.matrix[6], rightX = Math.cos(p.yaw), rightZ = Math.sin(p.yaw);
+      const cosine = Math.abs(lengthX * rightX + lengthZ * rightZ) / Math.hypot(lengthX, lengthZ);
+      return Math.round(Math.acos(Math.min(1, cosine)) * 180 / Math.PI);
+    };
+    // A pipe lying on the floor a step and a half ahead, at an angle to you, taken into the beam.
+    const takeUp = function (x, z, yaw) {
+      d.clearLooseObjects();
+      lab.stand(x, z, yaw);
+      const pipe = d.createLooseObject('pipe', x + Math.sin(yaw) * 1.4, 0.2, z - Math.cos(yaw) * 1.4, yaw + 0.5);
+      for (let step = 0; step < 150 && !pipe.isAsleep; step++) d.simulate(1 / 30);
+      const lying = acrossYou(pipe);
+      d.pickUpLooseObject(pipe);
+      d.simulate(2.5);
+      return { pipe: pipe, lying: lying };
+    };
+    // In the open: the beam takes it as it lies, and it comes round with you when you turn.
+    let taken = takeUp(spot.x, spot.z, Math.PI / 2);
+    result.lying = taken.lying;
+    result.takenUp = { angle: acrossYou(taken.pipe), level: Math.abs(taken.pipe.matrix[3]) < 0.1 };
+    for (let step = 0; step < 30; step++) { p.yaw += Math.PI / 60; d.simulate(1 / 30); } // a quarter turn in a second
+    d.simulate(2.5);
+    result.afterAQuarterTurn = { angle: acrossYou(taken.pipe), stillHeld: d.getHeldLooseObject() === taken.pipe };
+    // At the bare wall: walk it, crouched, against the wall. One end meets the wall first and the wall turns it.
+    taken = takeUp(bare.x + bare.stepX * (bare.wall - 3.1), bare.z + bare.stepZ * (bare.wall - 3.1), bare.yaw);
+    result.atTheWall = { before: acrossYou(taken.pipe) };
+    const before = lab.knocks();
+    d.input.keysDown.add('KeyW'); d.input.keysDown.add('KeyC');
+    d.simulate(5);
+    d.input.keysDown.clear();
+    result.atTheWall.against = acrossYou(taken.pipe);
+    result.atTheWall.stillHeld = d.getHeldLooseObject() === taken.pipe;
+    result.atTheWall.knocks = lab.since(before);
+    // Back off: it stays as the wall left it.
+    d.input.keysDown.add('KeyS');
+    d.simulate(1);
+    d.input.keysDown.clear();
+    d.simulate(2.5);
+    result.atTheWall.backedOff = acrossYou(taken.pipe);
+    result.atTheWall.stillHeldAfter = d.getHeldLooseObject() === taken.pipe;
+    return result;
+  }, [spot, bareWallForScanner]);
+  check('the beam takes a thing as it lies, without straightening it, and it comes round with you when you turn',
+    turned.lying > 20 && Math.abs(turned.takenUp.angle - turned.lying) <= 8 && turned.afterAQuarterTurn.stillHeld && Math.abs(turned.afterAQuarterTurn.angle - turned.lying) <= 8, turned);
+  // (Even crouched this is not silent every time: as the wall turns the pipe, its far end comes round faster than you walk.)
+  check('walked against a wall, a pipe held at an angle is turned by the wall, with one knock at most, and it stays as the wall left it',
+    turned.atTheWall.stillHeld && turned.atTheWall.against < turned.atTheWall.before - 15 && turned.atTheWall.knocks.heard <= 1 &&
+    turned.atTheWall.stillHeldAfter && Math.abs(turned.atTheWall.backedOff - turned.atTheWall.against) <= 8, turned.atTheWall);
+
+  // --- a pile ---
+  const pile = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, result = {};
+    lab.reset();
+    d.clearLooseObjects();
+    lab.stand(spot.x - 2.6, spot.z, Math.PI / 2);
+    const kinds = ['crate', 'toolCase', 'canister', 'crate', 'jar', 'pumpMotor', 'toolCase', 'canister', 'pipe', 'jar'];
+    const started = performance.now();
+    for (let index = 0; index < kinds.length; index++) {
+      d.createLooseObject(kinds[index], spot.x + (index % 3 - 1) * 0.12, 1.6, spot.z + (index % 2 - 0.5) * 0.12, index * 0.9);
+      d.simulate(0.5);
+    }
+    let settledAfter = -1;
+    for (let step = 0; step < 300; step++) {
+      d.simulate(1 / 30);
+      if (settledAfter < 0 && d.looseObjects.every((object) => object.isAsleep)) settledAfter = lab.round((step + 1) / 30);
+    }
+    const describe = function () {
+      return { atRest: d.looseObjects.filter((object) => object.isAsleep).length, of: d.looseObjects.length,
+        lowest: lab.round(Math.min.apply(null, d.looseObjects.map((object) => object.y))), highest: lab.round(Math.max.apply(null, d.looseObjects.map((object) => object.y))),
+        widest: lab.round(Math.max.apply(null, d.looseObjects.map((object) => Math.hypot(object.x - spot.x, object.z - spot.z)))),
+        allInTheOpen: d.looseObjects.every((object) => lab.isInTheOpen(object.x, object.y, object.z)),
+        allNumbers: d.looseObjects.every((object) => [object.x, object.y, object.z, object.orientationW].every(Number.isFinite)) };
+    };
+    result.dropped = describe();
+    result.dropped.settledAfter = settledAfter;
+    result.dropped.milliseconds = Math.round(performance.now() - started);
+    // Something is lying on something: take the lowest thing away and what was on it comes down.
+    const lowest = d.looseObjects.slice().sort((a, b) => a.y - b.y)[0];
+    const above = d.looseObjects.filter((object) => object !== lowest && object.y > lowest.y + 0.05 && Math.hypot(object.x - lowest.x, object.z - lowest.z) < 0.5);
+    result.somethingOnTop = above.length;
+    const heights = above.map((object) => object.y);
+    d.removeLooseObject(lowest);
+    d.simulate(0.2);
+    result.wokeWhenItWent = above.some((object) => !object.isAsleep);
+    for (let step = 0; step < 300 && !d.looseObjects.every((object) => object.isAsleep); step++) d.simulate(1 / 30);
+    result.cameDown = above.some((object, index) => object.y < heights[index] - 0.05);
+    result.afterwards = describe();
+    result.putBack = d.looseState.statistics.putBack;
+    return result;
+  }, spot);
+  check('ten things dropped onto one spot make a heap that comes to rest, with nothing through the floor and nothing lost',
+    pile.dropped.atRest === pile.dropped.of && pile.dropped.settledAfter >= 0 && pile.dropped.settledAfter <= 8 && pile.dropped.lowest > 0.02 &&
+    pile.dropped.highest > 0.3 && pile.dropped.widest < 3 && pile.dropped.allInTheOpen && pile.dropped.allNumbers && pile.putBack === 0, pile.dropped);
+  check('take the lowest thing out of the heap and what lay on it wakes, comes down and comes to rest again',
+    pile.somethingOnTop >= 1 && pile.wokeWhenItWent && pile.cameDown && pile.afterwards.atRest === pile.afterwards.of && pile.afterwards.allInTheOpen, pile);
+
+  // --- a door ---
+  const wedged = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    lab.reset();
+    d.clearLooseObjects();
+    const door = d.doors.find((candidate) => candidate.kind === 0 && candidate.forcedState === null);
+    const alongX = door.slab.halfX < door.slab.halfZ ? 1 : 0, alongZ = 1 - alongX; // the way through the door
+    const near = function () { d.teleport(door.centerX - alongX * 1.2, door.centerZ - alongZ * 1.2, Math.atan2(alongX, -alongZ)); d.simulate(1.5); };
+    const away = function () { d.teleport(door.centerX - alongX * 7, door.centerZ - alongZ * 7, 0); d.simulate(4); };
+    near();
+    result.opensForYou = door.openFraction;
+    away();
+    result.closesBehindYou = door.openFraction;
+    near();
+    const object = d.createLooseObject('canister', door.centerX, 0.4, door.centerZ, 0);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    away();
+    result.wedged = { open: door.openFraction, objectStill: object.isAsleep, inTheDoorway: Math.hypot(object.x - door.centerX, object.z - door.centerZ) < 0.6 };
+    // Take it out of the doorway and the door closes.
+    d.removeLooseObject(object);
+    d.simulate(4);
+    result.afterItIsGone = door.openFraction;
+    return result;
+  });
+  check('a door opens for you and closes behind you; with something lying in the doorway it waits, open; take the thing away and it closes',
+    wedged.opensForYou === 1 && wedged.closesBehindYou === 0 && wedged.wedged.open === 1 && wedged.wedged.objectStill && wedged.wedged.inTheDoorway && wedged.afterItIsGone === 0, wedged);
+
+  // --- thrown about at random ---
+  const stations = [['classic', 0], ['generated', 2, 'medium', 'mixed', 'two'], ['generated', 5, 'large', 'mixed', 'two']];
+  for (const station of stations) {
+    const storm = await inGame((station) => {
+      const d = window.lastReturnDebug, lab = window.looseLab;
+      d.loadStation.apply(null, station);
+      d.game.flags.hasLeftLift = true;
+      d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
+      d.input.keysDown.clear();
+      // Chance that is the same every run.
+      let seed = 12345 + station[1] * 977;
+      const chance = function () { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+      const places = [];
+      for (let z = 2; z < 300; z++) for (let x = 2; x < 300; x++) if (d.isSpaceOpenAt(x + 0.5, 1, z + 0.5) && !(d.getTileFlagsAt(x + 0.5, z + 0.5) & d.tileFlagPit)) places.push([x + 0.5, z + 0.5]);
+      const kinds = Object.keys(d.looseObjectKinds), thrown = [];
+      const statistics = d.looseState.statistics, lostBefore = statistics.lostDownThePit, putBackBefore = statistics.putBack;
+      const started = performance.now();
+      let stillMoving = 0, outside = 0, notNumbers = 0, count = 0;
+      for (let batch = 0; batch < 4; batch++) {
+        d.clearLooseObjects();
+        for (let index = 0; index < 30; index++) {
+          const place = places[Math.floor(chance() * places.length)];
+          const floor = d.getFloorHeightAt(place[0], place[1]);
+          const object = d.createLooseObject(kinds[Math.floor(chance() * kinds.length)], place[0], floor + 0.7 + chance() * 0.6, place[1], chance() * 6);
+          d.setLooseObjectOrientation(object, chance() - 0.5, chance() - 0.5, chance() - 0.5, chance() - 0.5);
+          const speed = 2 + chance() * 11, heading = chance() * Math.PI * 2, climb = (chance() - 0.5) * 2;
+          object.velocityX = Math.cos(heading) * speed; object.velocityZ = Math.sin(heading) * speed; object.velocityY = climb * speed * 0.6;
+          object.spinX = (chance() - 0.5) * 30; object.spinY = (chance() - 0.5) * 30; object.spinZ = (chance() - 0.5) * 30;
+          thrown.push(object);
+        }
+        for (let step = 0; step < 420 && !d.looseObjects.every((object) => object.isAsleep); step++) d.simulate(1 / 30);
+        for (const object of d.looseObjects) {
+          count++;
+          if (![object.x, object.y, object.z, object.orientationX, object.orientationW, object.velocityX].every(Number.isFinite)) notNumbers++;
+          else if (!lab.isInTheOpen(object.x, object.y, object.z)) outside++;
+          else if (!object.isAsleep) stillMoving++;
+        }
+      }
+      d.clearLooseObjects();
+      return { station: station.slice(0, 3).join(' '), places: places.length, thrown: thrown.length, stillInTheStation: count, lostDownThePit: statistics.lostDownThePit - lostBefore,
+        notNumbers: notNumbers, outside: outside, stillMoving: stillMoving, putBack: statistics.putBack - putBackBefore, seconds: Math.round((performance.now() - started) / 100) / 10 };
+    }, station);
+    check('120 objects thrown at random through ' + storm.station + ', spinning, at up to 13 m/s: every one ends inside the station and at rest (or down the pit), and none had to be put back',
+      storm.thrown === 120 && storm.stillInTheStation + storm.lostDownThePit === 120 && storm.notNumbers === 0 && storm.outside === 0 && storm.stillMoving === 0 && storm.putBack === 0, storm);
+  }
+
   // --- its points, and the floor's ---
   const pointsKept = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};

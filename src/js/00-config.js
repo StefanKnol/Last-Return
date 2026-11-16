@@ -168,6 +168,8 @@ const TUNING = {
   looseHoldFollowRate: 9,           // how eagerly it closes the gap to where the beam wants it. Lower is a looser, swingier carry.
   looseHoldResponseRate: 14,        // how quickly it gets up to speed. Lower is heavier-feeling.
   looseHoldLagPerKilogram: 0.06,    // how much each kilogram takes off both of those. 0 = a crate follows like a jar.
+  looseHoldTurnRate: 5,             // how eagerly the beam turns a thing back to how it was taken hold of. Low: its hold on that is weak.
+  looseHoldSlipDegrees: 22,         // knocked this far round against something, the beam gives and holds it as the knock left it
   looseHoldFastestSpeed: 7,         // it never chases your hands faster than this (m/s), however far behind it is
   looseHoldSagPerKilogram: 0.002,   // metres it hangs below the line the scanner points along, per kilogram
   looseHoldStopDistance: 0.35,      // when it is against something and this far behind where the beam wants it, it starts to hold you back ...

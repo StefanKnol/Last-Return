@@ -89,7 +89,7 @@ const looseState = {
   shoveBackDepth: 0, shoveBackX: 0, shoveBackZ: 0,
   // How fast you walked this frame before anything on the floor held you back: that is the speed you kick with.
   playerStrideX: 0, playerStrideZ: 0,
-  statistics: { knocksHeard: 0, knocksQuiet: 0, pulledFromHands: 0, lostDownThePit: 0 },
+  statistics: { knocksHeard: 0, knocksQuiet: 0, pulledFromHands: 0, lostDownThePit: 0, putBack: 0 }, // putBack: an object got into the rock and was set back where it last was not. Should stay 0.
   lastKnock: { x: 0, z: 0, speed: 0, carries: 0, isOwn: false, time: -10 } // the last knock the Hollow could hear: where, how hard, how far it carried
 };
 
@@ -242,7 +242,9 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     isHeld: false,
     isAsleep: false,                    // at rest: it is left out of the steps until something touches it
     restSeconds: 0,
-    touchedThisStep: false,
+    touchedThisStep: false, wasTouching: false, isMoving: false,
+    moveEast: 0, moveWest: 0, moveUp: 0, moveDown: 0, moveSouth: 0, moveNorth: 0, // how far it has to shift to be out of what it touches
+    gripX: 0, gripY: 0, gripZ: 0, gripW: 1, // how it was turned, compared with the way you faced, when the beam took hold of it
     lastGoodX: x, lastGoodY: y, lastGoodZ: z,
     // The hardest knock since the last frame, for the sound and the noise.
     knockSpeed: 0, knockX: 0, knockY: 0, knockZ: 0, knockIsOwn: false,
@@ -274,11 +276,12 @@ function resetLooseObjectsForNewRun() {
   looseState.hasShownCarryHint = false;
   looseState.hasShownKnockHint = false;
   const statistics = looseState.statistics;
-  statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0;
+  statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0; statistics.putBack = 0;
 }
 
 function removeLooseObject(object) {
   changePointsOnLooseObject(object, 0); // its points do not stay behind in the air
+  wakeLooseObjectsTouching(object); // and what lay on it comes down
   if (looseState.held === object) looseState.held = null;
   object.isRemoved = true;
   object.isHeld = false;
@@ -700,20 +703,23 @@ function pushLooseObject(object, armX, armY, armZ, pushX, pushY, pushZ) {
   object.spinX += turned.x; object.spinY += turned.y; object.spinZ += turned.z;
 }
 
-// Everything one object is touching at this moment, across all the balls of its shell. Worked out once per
-// piece of a step and then settled together: taking the contacts one ball at a time makes a box that lands
-// flat kick up on the corner that happened to be looked at first.
-const LOOSE_MAXIMUM_TOUCHES = 96;
-const LOOSE_SETTLE_PASSES = 6; // TWEAK: how many times the touches are gone over. More is steadier and slower.
+// Everything every moving object is touching at this moment, across all the balls of their shells. Worked out
+// once per piece of a step for all of them, and then settled together. Taking the contacts one ball at a time
+// makes a box that lands flat kick up on the corner that happened to be looked at first; taking the objects one
+// at a time makes two things that lean on each other shove one another about for ever.
+const LOOSE_MAXIMUM_TOUCHES = 640;
+const LOOSE_SETTLE_PASSES = 8; // TWEAK: how many times the touches are gone over. More is steadier and slower.
 const looseTouches = [];
 for (let touchIndex = 0; touchIndex < LOOSE_MAXIMUM_TOUCHES; touchIndex++) {
-  looseTouches.push({ normalX: 0, normalY: 0, normalZ: 0, depth: 0, armX: 0, armY: 0, armZ: 0, otherArmX: 0, otherArmY: 0, otherArmZ: 0,
+  looseTouches.push({ object: null, normalX: 0, normalY: 0, normalZ: 0, depth: 0, armX: 0, armY: 0, armZ: 0, otherArmX: 0, otherArmY: 0, otherArmZ: 0,
     other: null, isSoft: false, isPlayer: false, velocityX: 0, velocityZ: 0, resistance: 1, wantedSpeed: 0, pushed: 0 });
 }
 let looseTouchCount = 0;
+const looseMoving = []; // the objects that are not at rest, for the step in hand
 
 // How fast the touching point of the object is moving away from what it touches (negative: into it).
-function getLooseTouchSpeed(object, touch, alongX, alongY, alongZ) {
+function getLooseTouchSpeed(touch, alongX, alongY, alongZ) {
+  const object = touch.object;
   let speedX = object.velocityX + object.spinY * touch.armZ - object.spinZ * touch.armY - touch.velocityX;
   let speedY = object.velocityY + object.spinZ * touch.armX - object.spinX * touch.armZ;
   let speedZ = object.velocityZ + object.spinX * touch.armY - object.spinY * touch.armX - touch.velocityZ;
@@ -728,8 +734,8 @@ function getLooseTouchSpeed(object, touch, alongX, alongY, alongZ) {
 }
 const looseScratchSpeed = { x: 0, y: 0, z: 0 };
 
+// Adds what one object is touching to the list.
 function gatherLooseTouches(object) {
-  looseTouchCount = 0;
   const shell = object.prepared.shell, matrix = object.matrix;
   for (let ballIndex = 0; ballIndex < object.prepared.shellCount; ballIndex++) {
     const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], radius = shell[ballIndex * 4 + 3];
@@ -738,33 +744,38 @@ function gatherLooseTouches(object) {
     const ballZ = object.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
     collectLooseContacts(object, ballX, ballY, ballZ, radius);
     for (let contactIndex = 0; contactIndex < looseContactCount && looseTouchCount < LOOSE_MAXIMUM_TOUCHES; contactIndex++) {
-      const contact = looseContacts[contactIndex], touch = looseTouches[looseTouchCount++];
+      const contact = looseContacts[contactIndex];
+      let other = contact.other;
+      // Two moving objects touch each other once, not once from each side: the one made later notes it.
+      if (other && other.isMoving && other.id > object.id) continue;
+      const touch = looseTouches[looseTouchCount++];
       const normalX = contact.normalX, normalY = contact.normalY, normalZ = contact.normalZ;
       const pointX = ballX - normalX * radius, pointY = ballY - normalY * radius, pointZ = ballZ - normalZ * radius;
+      touch.object = object;
       touch.normalX = normalX; touch.normalY = normalY; touch.normalZ = normalZ; touch.depth = contact.depth;
       touch.armX = pointX - object.x; touch.armY = pointY - object.y; touch.armZ = pointZ - object.z;
-      touch.other = contact.other; touch.isSoft = contact.isSoft; touch.isPlayer = contact.isPlayer;
+      touch.other = other; touch.isSoft = contact.isSoft; touch.isPlayer = contact.isPlayer;
       touch.velocityX = contact.velocityX; touch.velocityZ = contact.velocityZ;
       touch.pushed = 0;
       touch.resistance = getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, normalX, normalY, normalZ);
-      let other = contact.other;
       if (other) {
         touch.otherArmX = pointX - other.x; touch.otherArmY = pointY - other.y; touch.otherArmZ = pointZ - other.z;
       }
-      // How fast it came in. This is measured from how it was moving before this piece of the step began: your
+      // How fast it came in. This is measured from how it was moving before this piece of the step began: the
       // beam pressing a carried object against a wall, and gravity pressing one into the floor, are pushes and
       // not hits, and must neither bounce nor be heard.
       let cameInX = object.beforeVelocityX + object.beforeSpinY * touch.armZ - object.beforeSpinZ * touch.armY - touch.velocityX;
       let cameInY = object.beforeVelocityY + object.beforeSpinZ * touch.armX - object.beforeSpinX * touch.armZ;
       let cameInZ = object.beforeVelocityZ + object.beforeSpinX * touch.armY - object.beforeSpinY * touch.armX - touch.velocityZ;
       if (other) {
-        cameInX -= other.velocityX + other.spinY * touch.otherArmZ - other.spinZ * touch.otherArmY;
-        cameInY -= other.velocityY + other.spinZ * touch.otherArmX - other.spinX * touch.otherArmZ;
-        cameInZ -= other.velocityZ + other.spinX * touch.otherArmY - other.spinY * touch.otherArmX;
+        const otherVelocityX = other.isMoving ? other.beforeVelocityX : other.velocityX, otherVelocityY = other.isMoving ? other.beforeVelocityY : other.velocityY, otherVelocityZ = other.isMoving ? other.beforeVelocityZ : other.velocityZ;
+        const otherSpinX = other.isMoving ? other.beforeSpinX : other.spinX, otherSpinY = other.isMoving ? other.beforeSpinY : other.spinY, otherSpinZ = other.isMoving ? other.beforeSpinZ : other.spinZ;
+        cameInX -= otherVelocityX + otherSpinY * touch.otherArmZ - otherSpinZ * touch.otherArmY;
+        cameInY -= otherVelocityY + otherSpinZ * touch.otherArmX - otherSpinX * touch.otherArmZ;
+        cameInZ -= otherVelocityZ + otherSpinX * touch.otherArmY - otherSpinY * touch.otherArmX;
       }
       const closingSpeed = -(cameInX * normalX + cameInY * normalY + cameInZ * normalZ);
       // Another object that lies at rest is as good as part of the floor, until it is hit hard enough to shift it.
-      // (Two things leaning on each other would otherwise keep each other awake for ever.)
       if (other && other.isAsleep) {
         if (closingSpeed > TUNING.looseWakeFromSpeed) wakeLooseObject(other);
         else { other = null; touch.other = null; }
@@ -781,18 +792,16 @@ function gatherLooseTouches(object) {
       }
     }
   }
-  return looseTouchCount;
 }
 
-// Stops the object going into what it touches, lets it bounce and grip, and moves it back out.
-function settleLooseTouches(object) {
+// Stops everything in the list going into what it touches, lets it bounce and grip, and notes how far each
+// object has to move to be out again.
+function settleLooseTouches() {
   const count = looseTouchCount;
-  if (count === 0) return;
-  object.touchedThisStep = true;
   for (let pass = 0; pass < LOOSE_SETTLE_PASSES; pass++) {
     for (let touchIndex = 0; touchIndex < count; touchIndex++) {
-      const touch = looseTouches[touchIndex];
-      const leavingSpeed = getLooseTouchSpeed(object, touch, touch.normalX, touch.normalY, touch.normalZ);
+      const touch = looseTouches[touchIndex], object = touch.object;
+      const leavingSpeed = getLooseTouchSpeed(touch, touch.normalX, touch.normalY, touch.normalZ);
       // A touch can only push, never pull: what counts is the total it has given so far.
       const before = touch.pushed;
       touch.pushed = Math.max(0, before + (touch.wantedSpeed - leavingSpeed) / touch.resistance);
@@ -802,45 +811,67 @@ function settleLooseTouches(object) {
       if (touch.other) pushLooseObject(touch.other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, -touch.normalX * push, -touch.normalY * push, -touch.normalZ * push);
     }
   }
-  // Grip: a push against the slide, no stronger than the surface can give for how hard the two are pressed together.
   for (let touchIndex = 0; touchIndex < count; touchIndex++) {
-    const touch = looseTouches[touchIndex];
-    if (touch.isSoft || touch.pushed <= 0) continue;
-    getLooseTouchSpeed(object, touch);
-    let slideX = looseScratchSpeed.x, slideY = looseScratchSpeed.y, slideZ = looseScratchSpeed.z;
-    const into = slideX * touch.normalX + slideY * touch.normalY + slideZ * touch.normalZ;
-    slideX -= touch.normalX * into; slideY -= touch.normalY * into; slideZ -= touch.normalZ * into;
-    const slide = Math.sqrt(slideX * slideX + slideY * slideY + slideZ * slideZ);
-    if (slide < 1e-4) continue;
-    slideX /= slide; slideY /= slide; slideZ /= slide;
-    let slideResistance = getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, slideX, slideY, slideZ);
-    if (touch.other) slideResistance += getLoosePushResistance(touch.other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX, slideY, slideZ);
-    const grip = Math.min(object.kind.grip * touch.pushed, slide / slideResistance);
-    pushLooseObject(object, touch.armX, touch.armY, touch.armZ, -slideX * grip, -slideY * grip, -slideZ * grip);
-    if (touch.other) pushLooseObject(touch.other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX * grip, slideY * grip, slideZ * grip);
+    const touch = looseTouches[touchIndex], object = touch.object, other = touch.other;
+    object.touchedThisStep = true;
+    if (other) other.touchedThisStep = true;
+    if (touch.isSoft) continue;
+    // Grip: a push against the slide, no stronger than the surface can give for how hard the two are pressed together.
+    if (touch.pushed > 0) {
+      getLooseTouchSpeed(touch);
+      let slideX = looseScratchSpeed.x, slideY = looseScratchSpeed.y, slideZ = looseScratchSpeed.z;
+      const into = slideX * touch.normalX + slideY * touch.normalY + slideZ * touch.normalZ;
+      slideX -= touch.normalX * into; slideY -= touch.normalY * into; slideZ -= touch.normalZ * into;
+      const slide = Math.sqrt(slideX * slideX + slideY * slideY + slideZ * slideZ);
+      if (slide >= 1e-4) {
+        slideX /= slide; slideY /= slide; slideZ /= slide;
+        let slideResistance = getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, slideX, slideY, slideZ);
+        if (other) slideResistance += getLoosePushResistance(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX, slideY, slideZ);
+        const grip = Math.min(object.kind.grip * touch.pushed, slide / slideResistance);
+        pushLooseObject(object, touch.armX, touch.armY, touch.armZ, -slideX * grip, -slideY * grip, -slideZ * grip);
+        if (other) pushLooseObject(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX * grip, slideY * grip, slideZ * grip);
+      }
+    }
+    // Out again. Four corners resting on the floor all ask for the same move, so the moves are not added up:
+    // along each direction the largest one asked for is made, and most of it, not all (all at once makes an
+    // object at rest shiver). Between two objects the lighter gives way more.
+    if (touch.depth <= LOOSE_CONTACT_SLOP) continue;
+    const amount = (touch.depth - LOOSE_CONTACT_SLOP) * 0.8;
+    let share = 1;
+    if (other && !other.isHeld) share = object.isHeld ? 0 : object.prepared.inverseMass / (object.prepared.inverseMass + other.prepared.inverseMass);
+    noteLooseMove(object, touch.normalX * amount * share, touch.normalY * amount * share, touch.normalZ * amount * share);
+    if (other && share < 1) noteLooseMove(other, -touch.normalX * amount * (1 - share), -touch.normalY * amount * (1 - share), -touch.normalZ * amount * (1 - share));
   }
-  // Out again. Four corners resting on the floor all ask for the same move, so the moves are not added up:
-  // along each direction the largest one asked for is made, and most of it, not all (all at once makes an
-  // object at rest shiver).
-  let moveEast = 0, moveWest = 0, moveUp = 0, moveDown = 0, moveSouth = 0, moveNorth = 0;
-  for (let touchIndex = 0; touchIndex < count; touchIndex++) {
-    const touch = looseTouches[touchIndex];
-    if (touch.isSoft || touch.depth <= LOOSE_CONTACT_SLOP) continue;
-    let amount = (touch.depth - LOOSE_CONTACT_SLOP) * 0.8;
-    if (touch.other && !touch.other.isHeld) amount *= object.prepared.inverseMass / (object.prepared.inverseMass + touch.other.prepared.inverseMass);
-    const x = touch.normalX * amount, y = touch.normalY * amount, z = touch.normalZ * amount;
-    if (x > moveEast) moveEast = x; else if (x < moveWest) moveWest = x;
-    if (y > moveUp) moveUp = y; else if (y < moveDown) moveDown = y;
-    if (z > moveSouth) moveSouth = z; else if (z < moveNorth) moveNorth = z;
-  }
-  object.x += moveEast + moveWest; object.y += moveUp + moveDown; object.z += moveSouth + moveNorth;
+}
+
+function noteLooseMove(object, x, y, z) {
+  if (x > object.moveEast) object.moveEast = x; else if (x < object.moveWest) object.moveWest = x;
+  if (y > object.moveUp) object.moveUp = y; else if (y < object.moveDown) object.moveDown = y;
+  if (z > object.moveSouth) object.moveSouth = z; else if (z < object.moveNorth) object.moveNorth = z;
 }
 
 // ---------------------------------------------------------------------------
-// One step of one object
+// Stepping
 // ---------------------------------------------------------------------------
 
-// Pulls the carried object towards where the beam wants it, and turns it to face the way you face.
+// a * b for two rotations given as quaternions; the answer goes into `looseScratchTurn`.
+const looseScratchTurn = { x: 0, y: 0, z: 0, w: 1 };
+function multiplyLooseTurns(ax, ay, az, aw, bx, by, bz, bw) {
+  looseScratchTurn.x = aw * bx + ax * bw + ay * bz - az * by;
+  looseScratchTurn.y = aw * by - ax * bz + ay * bw + az * bx;
+  looseScratchTurn.z = aw * bz + ax * by - ay * bx + az * bw;
+  looseScratchTurn.w = aw * bw - ax * bx - ay * by - az * bz;
+  return looseScratchTurn;
+}
+
+// Notes how the object is turned compared with the way you face. The beam holds it like that from now on.
+function gripLooseObject(object) {
+  const grip = multiplyLooseTurns(0, -Math.sin(-player.yaw / 2), 0, Math.cos(-player.yaw / 2),
+    object.orientationX, object.orientationY, object.orientationZ, object.orientationW);
+  object.gripX = grip.x; object.gripY = grip.y; object.gripZ = grip.z; object.gripW = grip.w;
+}
+
+// Pulls the carried object towards where the beam wants it, and keeps it turned the way it was taken hold of.
 function driveHeldLooseObject(object, stepSeconds) {
   const kind = object.kind;
   // TWEAK: these two lines are how carrying feels. `follow` is how fast it wants to close the gap to that place
@@ -859,20 +890,23 @@ function driveHeldLooseObject(object, stepSeconds) {
   object.velocityY += (wantedY - object.velocityY) * response;
   object.velocityZ += (wantedZ - object.velocityZ) * response;
 
-  // The turn still to make, from how it is to level and facing your way, as an axis times an angle.
-  const targetY = Math.sin(-player.yaw / 2), targetW = Math.cos(-player.yaw / 2);
-  const x = object.orientationX, y = object.orientationY, z = object.orientationZ, w = object.orientationW;
-  // target * inverse(current), with target = (0, targetY, 0, targetW)
-  let errorX = -targetW * x - targetY * z;
-  let errorY = -targetW * y + targetY * w;
-  let errorZ = -targetW * z + targetY * x;
-  let errorW = targetW * w + targetY * y;
+  // How it should be turned: the way you face, then the way it was turned when the beam took hold of it.
+  // And the turn still to make from how it is to that, as an axis times an angle.
+  const target = multiplyLooseTurns(0, Math.sin(-player.yaw / 2), 0, Math.cos(-player.yaw / 2), object.gripX, object.gripY, object.gripZ, object.gripW);
+  const error = multiplyLooseTurns(target.x, target.y, target.z, target.w, -object.orientationX, -object.orientationY, -object.orientationZ, object.orientationW);
+  let errorX = error.x, errorY = error.y, errorZ = error.z, errorW = error.w;
   if (errorW < 0) { errorX = -errorX; errorY = -errorY; errorZ = -errorZ; errorW = -errorW; }
   const sine = Math.sqrt(errorX * errorX + errorY * errorY + errorZ * errorZ);
+  const angle = sine > 1e-5 ? 2 * Math.atan2(sine, errorW) : 0;
+  // The beam's hold on how a thing is turned is weak. Knock it against something hard enough to turn it this
+  // far and the beam gives: it holds the thing as the knock left it. That is how you turn what you carry.
+  if (object.wasTouching && angle > TUNING.looseHoldSlipDegrees * DEGREES_TO_RADIANS) {
+    gripLooseObject(object);
+    return;
+  }
   let turnX = 0, turnY = 0, turnZ = 0;
-  if (sine > 1e-5) {
-    const angle = 2 * Math.atan2(sine, errorW);
-    const rate = angle * follow / sine;
+  if (angle > 0) {
+    const rate = angle * TUNING.looseHoldTurnRate / (1 + kind.mass * TUNING.looseHoldLagPerKilogram) / sine;
     turnX = errorX * rate; turnY = errorY * rate; turnZ = errorZ * rate;
   }
   object.spinX += (turnX - object.spinX) * response;
@@ -894,23 +928,53 @@ function integrateLooseObject(object, seconds) {
   updateLooseObjectMatrix(object);
 }
 
-function stepLooseObject(object, stepSeconds) {
+// One step of the whole world of loose objects: everything that is not at rest moves, and then everything
+// that touches anything is settled together.
+function stepLooseObjects(stepSeconds) {
+  looseMoving.length = 0;
   // A fast object takes its step in pieces, so that it cannot be on one side of a shelf at the start of a
-  // step and on the other at the end: no piece moves it further than half its smallest ball.
-  const speed = Math.sqrt(object.velocityX * object.velocityX + object.velocityY * object.velocityY + object.velocityZ * object.velocityZ) +
-    Math.sqrt(object.spinX * object.spinX + object.spinY * object.spinY + object.spinZ * object.spinZ) * object.prepared.boundsRadius;
-  const pieces = clampNumber(Math.ceil(speed * stepSeconds / (object.prepared.smallestRadius * 0.5)), 1, 12);
-  const seconds = stepSeconds / pieces;
-  object.touchedThisStep = false;
-  for (let piece = 0; piece < pieces; piece++) {
-    object.beforeVelocityX = object.velocityX; object.beforeVelocityY = object.velocityY; object.beforeVelocityZ = object.velocityZ;
-    object.beforeSpinX = object.spinX; object.beforeSpinY = object.spinY; object.beforeSpinZ = object.spinZ;
-    if (object.isHeld) driveHeldLooseObject(object, seconds);
-    else object.velocityY -= TUNING.looseGravity * seconds;
-    integrateLooseObject(object, seconds);
-    gatherLooseTouches(object);
-    settleLooseTouches(object);
+  // step and on the other at the end: no piece moves it further than half its smallest ball. They all take
+  // the same number of pieces, the number the fastest one needs.
+  let piecesNeeded = 1;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    object.isMoving = !object.isAsleep;
+    if (object.isAsleep) continue;
+    looseMoving.push(object);
+    object.wasTouching = object.touchedThisStep;
+    object.touchedThisStep = false;
+    const speed = Math.sqrt(object.velocityX * object.velocityX + object.velocityY * object.velocityY + object.velocityZ * object.velocityZ) +
+      Math.sqrt(object.spinX * object.spinX + object.spinY * object.spinY + object.spinZ * object.spinZ) * object.prepared.boundsRadius;
+    piecesNeeded = Math.max(piecesNeeded, speed * stepSeconds / (object.prepared.smallestRadius * 0.5));
   }
+  if (looseMoving.length === 0) return;
+  const pieces = clampNumber(Math.ceil(piecesNeeded), 1, 12);
+  const seconds = stepSeconds / pieces;
+  for (let piece = 0; piece < pieces; piece++) {
+    for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) {
+      const object = looseMoving[movingIndex];
+      object.beforeVelocityX = object.velocityX; object.beforeVelocityY = object.velocityY; object.beforeVelocityZ = object.velocityZ;
+      object.beforeSpinX = object.spinX; object.beforeSpinY = object.spinY; object.beforeSpinZ = object.spinZ;
+      if (object.isHeld) driveHeldLooseObject(object, seconds);
+      else object.velocityY -= TUNING.looseGravity * seconds;
+      integrateLooseObject(object, seconds);
+      object.moveEast = 0; object.moveWest = 0; object.moveUp = 0; object.moveDown = 0; object.moveSouth = 0; object.moveNorth = 0;
+    }
+    looseTouchCount = 0;
+    for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) gatherLooseTouches(looseMoving[movingIndex]);
+    settleLooseTouches();
+    for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) {
+      const object = looseMoving[movingIndex];
+      object.x += object.moveEast + object.moveWest; object.y += object.moveUp + object.moveDown; object.z += object.moveSouth + object.moveNorth;
+    }
+  }
+  for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) finishLooseObjectStep(looseMoving[movingIndex], stepSeconds);
+}
+
+// What is left to do for one object when a step is over: the small losses, a check that it is still in the
+// station, and whether it has come to rest.
+function finishLooseObjectStep(object, stepSeconds) {
+  object.isMoving = false;
   // Air and, on the ground, the small losses that bring a rolling thing to a stop.
   const drag = 1 - TUNING.looseAirDrag * stepSeconds;
   object.velocityX *= drag; object.velocityY *= drag; object.velocityZ *= drag;
@@ -926,6 +990,7 @@ function stepLooseObject(object, stepSeconds) {
       object.y > tileCeilingHeight[tileZ * GRID_WIDTH + tileX] + object.prepared.boundsRadius) {
     object.x = object.lastGoodX; object.y = object.lastGoodY; object.z = object.lastGoodZ;
     object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0;
+    looseState.statistics.putBack++;
   }
 
   // Rest: slow, touching something, and for long enough.
@@ -940,6 +1005,31 @@ function stepLooseObject(object, stepSeconds) {
     }
   } else {
     object.restSeconds = 0;
+  }
+}
+
+// Is anything loose lying where this door's slab comes down? (What the beam is carrying does not count: you
+// are standing there with it, and the door is open for you anyway.)
+function isLooseObjectInDoorway(door) {
+  const slab = door.slab;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    if (object.isHeld) continue;
+    const reach = object.prepared.boundsRadius;
+    if (Math.abs(object.x - door.centerX) > slab.halfX + reach || Math.abs(object.z - door.centerZ) > slab.halfZ + reach) continue;
+    if (object.y - reach > door.baseY + DOOR_OPENING_HEIGHT) continue;
+    return true;
+  }
+  return false;
+}
+
+// Wakes every object at rest within `radius` metres of a place on the plan.
+function wakeLooseObjectsNear(x, z, radius) {
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    if (!object.isAsleep) continue;
+    const reach = radius + object.prepared.boundsRadius;
+    if ((object.x - x) * (object.x - x) + (object.z - z) * (object.z - z) < reach * reach) wakeLooseObject(object);
   }
 }
 
@@ -1036,6 +1126,7 @@ function pickUpLooseObject(object, isByButton) {
   object.restSeconds = 0;
   object.lastHandledTime = game.time;
   looseState.held = object;
+  gripLooseObject(object); // as it lies: the beam does not straighten it
   looseState.isHeldByButton = Boolean(isByButton);
   looseState.holdBreakTimer = 0;
   looseState.isLettingGo = false; // the press that picked it up is not also the press that lets go of it
@@ -1172,10 +1263,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   looseState.accumulator = Math.min(looseState.accumulator + dt, TUNING.looseStepSeconds * 8);
   while (looseState.accumulator >= TUNING.looseStepSeconds) {
     looseState.accumulator -= TUNING.looseStepSeconds;
-    for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-      const object = looseObjects[objectIndex];
-      if (!object.isAsleep) stepLooseObject(object, TUNING.looseStepSeconds);
-    }
+    stepLooseObjects(TUNING.looseStepSeconds);
   }
 
   for (let objectIndex = looseObjects.length - 1; objectIndex >= 0; objectIndex--) {

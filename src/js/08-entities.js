@@ -151,9 +151,14 @@ function updateDoors(dt) {
         }
       }
     }
+    // Something loose lying in the doorway: the door will not come down on it. It waits, open, for as long as
+    // the thing is there. (Which wedges it open for the Hollow as much as for you.) The lift's own door, and
+    // any door that is being told what to do, does as it is told.
+    if (!wantsOpen && door.forcedState === null && door.openFraction > 0 && isLooseObjectInDoorway(door)) wantsOpen = true;
     if (wantsOpen) {
       door.closeDelay = 1.3;
       if (door.openFraction === 0) {
+        wakeLooseObjectsNear(door.centerX, door.centerZ, 1.3); // what leans on the door is about to lose its support
         const slab = door.slab;
         fadePointsInsideBox(door.centerX - slab.halfX - 0.1, door.baseY, door.centerZ - slab.halfZ - 0.1,
           door.centerX + slab.halfX + 0.1, door.baseY + 2.5, door.centerZ + slab.halfZ + 0.1,
