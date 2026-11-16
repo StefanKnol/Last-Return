@@ -189,6 +189,16 @@ const TUNING = {
   hollowChasesKickedMass: 4,        // something this light or lighter (kg) that it kicks, it goes after ...
   hollowChasesKickedSeconds: 5,     // ... for this long at most, unless it is hunting you
   hollowChasesAgainAfterSeconds: 15, // and it does not go after the same thing again for this long
+  // Only things you have had in the beam interest it. When it has batted a small one about for a while, it throws it back at you.
+  hollowFlingsMass: 1.5,            // this light or lighter (kg) it throws: a can, a jar, a cardboard box, a scan grenade
+  hollowFlingsAfterSeconds: 2,      // after going after the thing for this long, the next time it has it at its feet
+  hollowFlingsWithinMetres: 1.3,    // "at its feet"
+  hollowFlingsSpeed: 12,            // how fast it throws, over the ground (m/s)
+  hollowFlingsScatterMetres: 1.5,   // it lands within this far of you: at you or near you, on purpose
+  // What a station has lying about (see planStationLooseObjects in 08-loose-objects.js).
+  looseLitterPerRoom: 0.7,          // boxes, plates and stray cans: this many for every room and corridor
+  looseValuablesPerRoom: 0.4,       // things worth carrying out: this many for every room and corridor
+  looseValuablesShareOnSurfaces: 0.5, // this share of those stands on tables, shelves and crates; the rest on the floor, out of the way
   // Walking into one that lies on the floor.
   looseShoveFreeMass: 2,            // lighter than this (kg) you kick along without it slowing you
   looseShoveBlockMass: 16,          // this heavy or heavier it does not move for your legs and stops you: pick it up. In between it slows you by its share of the way from one to the other.
@@ -523,7 +533,6 @@ const CAPTIONS = {
   hollowOverhead: { text: '[something crawls overhead]', level: 'sound', withinMetres: 10, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
   hollowOnGlass: { text: '[glass crunches under something]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
   hollowOnPlate: { text: '[a floor plate clanks under something]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
-  hollowOnCans: { text: '[cans scatter, and not by you]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
 
   // ---- hatches and doors ----
   hatchRattle: { text: '[a ceiling hatch rattles]', level: 'sound', withinMetres: 10, seconds: 1.5, slot: 'hatch', rank: 0 },
@@ -550,7 +559,8 @@ const CAPTIONS = {
   // ---- you ----
   ownGlass: { text: '[glass crunches under your boots]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   ownPlate: { text: '[a floor plate clanks under you]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
-  ownCans: { text: '[cans scatter from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  hollowFling: { text: '[something is thrown, hard, out of the dark]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'hollowFeet', rank: 2 },
+  ownObjectKicked: { text: '[something skitters away from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   scanGrenade: { text: '[a rising whine, and a crack of light]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   hollowStunned: { text: '[it stands frozen in the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },
   ownObjectKnock: { text: '[it knocks against something]', level: 'sound', withinMetres: 0, seconds: 2, slot: 'ownHands', rank: 0 },

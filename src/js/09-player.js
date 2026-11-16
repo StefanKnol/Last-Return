@@ -631,7 +631,7 @@ function castScannerPulse(horizontalTangent, verticalTangent) {
   alongX /= length; alongY /= length; alongZ /= length;
   const distance = intersectRayWithLooseObject(carried, emitter.x, emitter.y, emitter.z, alongX, alongY, alongZ, length);
   if (distance <= 0) return isLanding;
-  fillRayHit(distance, SURFACE_INTERACTIVE, 0.6 + Math.random() * 0.3, 0, emitter.x, emitter.y, emitter.z, alongX, alongY, alongZ);
+  fillRayHit(distance, carried.kind.loud > 1 ? SURFACE_HAZARD : SURFACE_INTERACTIVE, 0.6 + Math.random() * 0.3, 0, emitter.x, emitter.y, emitter.z, alongX, alongY, alongZ);
   rayHit.looseObject = carried;
   return true;
 }
