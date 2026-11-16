@@ -180,7 +180,7 @@ const TUNING = {
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
-  scanGrenadeSweeps: 1.0,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000)
+  scanGrenadeSweeps: 2.5,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000)
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned
   scanGrenadeStunSeconds: 3.5,      // how long the Hollow stands stunned. An enraged Hollow is not stunned.
   noiseRadiusScanGrenade: 20,       // going off is loud. The Hollow comes to where it went off, not to you.
@@ -246,7 +246,7 @@ const TUNING = {
   hollowCrawlClimbSeconds: 1.4,       // how long it stands under a hatch reaching up before it is gone
   hollowCrawlDropWarningSeconds: 2.5, // how long the hatch it is coming out of rattles before it drops. This is your warning.
   hollowCrawlLandingGraceSeconds: 1.0,// after it lands it cannot catch you for this long
-  hollowCrawlFixedSteps: 14,          // how unwilling it is to use the crawlspace at all: going up and coming down count
+  hollowCrawlFixedSteps: 12,          // how unwilling it is to use the crawlspace at all: going up and coming down count
                                       // as this many steps of walking when it works out the shortest way ...
   hollowCrawlStepsPerMetre: 1.5,      // ... and every metre crawled counts as this many. Raise both and it only goes up
                                       // when a lock leaves it no choice; lower them and it takes short cuts over your head.
@@ -267,7 +267,7 @@ const TUNING = {
   hollowDoorBangWithinMetres: 7,      // it only goes at a door it is this close to, with a clear walk to it
   hollowDoorBangWorthSteps: 15,       // and only if through the door is at least this many steps shorter than the way round
   // How the Hollow holds itself. Its size is in FIGURE_PROPORTIONS_HOLLOW (04-figures.js); these two decide how bent it is.
-  hollowBaseStoop: 0.3,             // how bent it always is, from 0 (as upright as its hunch allows) to 1 (folded right over).
+  hollowBaseStoop: 0.4,             // how bent it always is, from 0 (as upright as its hunch allows) to 1 (folded right over).
                                     // It still draws itself up when it stops to listen.
   hollowCeilingGap: 0.25,           // metres it keeps between its head and the ceiling. It reads the ceiling over it and
                                     // just ahead, and bends further to keep this gap. Raise it and it crouches along low
@@ -278,7 +278,7 @@ const TUNING = {
   //   above hollowAngerNoticeLevel  the beam tells it exactly where you are, and it hunts
   //   at 1                          it is enraged: the beam stops slowing it for hollowEnragedDurationSeconds
   // Anger also carries over between encounters, so the more you light it up, the shorter your next grace period.
-  hollowAngerPerBeamSecond: 0.3,   // anger gained per second in the beam. 0.24 = about 4.2 s from calm to enraged.
+  hollowAngerPerBeamSecond: 0.2,   // anger gained per second in the beam. 0.24 = about 4.2 s from calm to enraged.
                                     // A quick tap of the beam (0.2 s) costs about 0.05.
   hollowAngerNoticeLevel: 0.27,      // 0.3 = about 1.25 s of beam from calm before it knows where you are.
                                     // Raise it to make brief scans safer, lower it toward 0 to make any touch dangerous.
