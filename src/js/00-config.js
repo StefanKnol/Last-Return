@@ -343,7 +343,7 @@ const TUNING = {
                                     // Long imprints mean old outlines linger and the room looks more crowded than it is.
 
   // ---- Apparitions ---------------------------------------------------------
-  phantomImprintSeconds: 4,       // how long the points of a figure that "was never there" stay visible
+  phantomImprintSeconds: 3.5,       // how long the points of a figure that "was never there" stay visible
   // Besides the few that stand at fixed places, apparitions turn up by chance, at a place chosen at that moment
   // from where you are and which way you are looking (see 08-phantoms.js). These numbers say how often.
   phantomFirstAfterSeconds: 45,     // none in the first seconds after you leave the lift
