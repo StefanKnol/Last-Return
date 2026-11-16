@@ -561,8 +561,8 @@ function installLab() {
     return result;
   }, spot);
   check('a canister lying on the floor is kicked along when you walk into it, and does not stop you', kicked.layStill && kicked.byYou.moved > 0.3 && kicked.byYou.playerPassed && kicked.byYou.knocks.heard >= 1 && kicked.byYou.saidAsYours >= 1, kicked.byYou);
-  check('the Hollow kicks it too: that is a noise where the canister is, captioned as something out there and not as yours',
-    kicked.byTheHollow.moved > 0.3 && kicked.byTheHollow.knocks.heard >= 1 && kicked.byTheHollow.noiseAtTheObject && kicked.byTheHollow.saidWithADirection >= 1 && kicked.byTheHollow.saidAsYours === 0, kicked.byTheHollow);
+  check('the Hollow kicks it too: you hear that, captioned as something out there and not as yours, and the Hollow is not startled by a noise of its own making',
+    kicked.byTheHollow.moved > 0.3 && kicked.byTheHollow.knocks.heard >= 1 && !kicked.byTheHollow.noiseAtTheObject && kicked.byTheHollow.saidWithADirection >= 1 && kicked.byTheHollow.saidAsYours === 0, kicked.byTheHollow);
 
   // --- how it is turned ---
   const turned = await inGame(([spot, bare]) => {
@@ -737,6 +737,138 @@ function installLab() {
     check('120 objects thrown at random through ' + storm.station + ', spinning, at up to 13 m/s: every one ends inside the station and at rest (or down the pit), and none had to be put back',
       storm.thrown === 120 && storm.stillInTheStation + storm.lostDownThePit === 120 && storm.notNumbers === 0 && storm.outside === 0 && storm.stillMoving === 0 && storm.putBack === 0, storm);
   }
+
+  // --- the scan grenade ---
+  await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab;
+    lab.reset();
+    d.setDebugOption('freezeCreatures', false); // the Hollow has to be able to be stunned, and to come
+    lab.stand(spot.x - 2.8, spot.z, Math.PI / 2);
+    lab.carry('scanGrenade');
+  }, spot);
+  await drawFrames(page, 4);
+  const beforeArming = await inGame(() => ({ prompt: document.getElementById('hud-prompt').textContent, chip: document.getElementById('chip-carrying').textContent }));
+  await page.keyboard.press('KeyQ');
+  const armed = await inGame(() => { const d = window.lastReturnDebug; d.simulate(0.1); const grenade = d.getHeldLooseObject(); return { armed: grenade.armedTime >= 0, spent: grenade.isSpent, label: d.getLooseObjectLabel(grenade), messages: window.looseLab.messages() }; });
+  check('with a scan grenade in the beam the screen offers Q to arm it, and Q arms it',
+    /\[Q\]  Arm the scan grenade/.test(beforeArming.prompt) && beforeArming.chip === 'CARRYING: SCAN GRENADE' && armed.armed && !armed.spent && armed.label === 'scan grenade, armed' && armed.messages.some((text) => /Armed/.test(text)), [beforeArming, armed]);
+
+  const grenade = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    const object = d.getHeldLooseObject();
+    // The Hollow stands in the open, a few metres past where you are; you throw the grenade its way.
+    d.spawnHollow(spot.x + 1.5, spot.z + 0.6);
+    d.hollow.graceTimer = 0; d.hollow.state = 0; d.hollow.hasHeardNoise = false; d.hollow.anger = 0;
+    const hollowAt = { x: d.hollow.figure.x, z: d.hollow.figure.z };
+    const pointsBefore = d.pointCloud.totalReturns;
+    lab.noises.length = 0;
+    p.pitch = 0.15;
+    d.releaseHeldLooseObject(0.45);
+    let wentOffAt = null, stunnedAtAll = false, movedWhileStunned = 0, longestStun = 0;
+    for (let step = 0; step < 180; step++) {
+      d.simulate(1 / 30);
+      if (wentOffAt === null && object.burstSeconds > 0) wentOffAt = { x: object.x, z: object.z, afterSeconds: lab.round(step / 30) };
+      if (d.hollow.stunSeconds > 0) {
+        stunnedAtAll = true; longestStun = Math.max(longestStun, d.hollow.stunSeconds);
+        movedWhileStunned = Math.max(movedWhileStunned, d.hollow.currentSpeed);
+      }
+      if (object.isSpent && d.hollow.stunSeconds <= 0 && step > 60) break;
+    }
+    result.wentOff = wentOffAt;
+    result.metresFromYou = wentOffAt ? lab.round(Math.hypot(wentOffAt.x - p.x, wentOffAt.z - p.z)) : 0;
+    result.metresFromTheHollow = wentOffAt ? lab.round(Math.hypot(wentOffAt.x - hollowAt.x, wentOffAt.z - hollowAt.z)) : 99;
+    result.pointsAdded = d.pointCloud.totalReturns - pointsBefore;
+    result.noiseThere = wentOffAt !== null && lab.noises.some((noise) => Math.hypot(noise.x - wentOffAt.x, noise.z - wentOffAt.z) < 0.5 && noise.radius > 10);
+    result.hitsOnTheHollow = object.burstHitsOnHollow;
+    result.stunned = { atAll: stunnedAtAll, seconds: lab.round(longestStun), fastestWhileStunned: lab.round(movedWhileStunned) };
+    // Afterwards it comes for where the light came from: the grenade, not you.
+    d.simulate(1.5);
+    const goingTo = d.hollow.state === 2 ? { x: d.hollow.lastKnownPlayerX, z: d.hollow.lastKnownPlayerZ } : { x: d.hollow.targetX, z: d.hollow.targetZ };
+    // (The grenade rolls on while it is going off, so: where it went off, or where it lies now.)
+    result.afterwards = { state: d.hollow.state, metresFromWhereItWentOff: wentOffAt !== null ? lab.round(Math.hypot(goingTo.x - wentOffAt.x, goingTo.z - wentOffAt.z)) : 99,
+      metresFromWhereItLies: lab.round(Math.hypot(goingTo.x - object.x, goingTo.z - object.z)), metresFromYou: lab.round(Math.hypot(goingTo.x - p.x, goingTo.z - p.z)) };
+    result.afterwards.toTheGrenade = Math.min(result.afterwards.metresFromWhereItWentOff, result.afterwards.metresFromWhereItLies) < 1.5;
+    result.afterwards.notToYou = result.afterwards.metresFromYou > 2;
+    result.spent = { isSpent: object.isSpent, label: d.getLooseObjectLabel(object), counted: d.looseState.statistics.grenadesSpent };
+    d.hollow.isActive = false;
+    // Used up: Q with it in the beam again does nothing.
+    d.pickUpLooseObject(object);
+    d.simulate(0.5);
+    d.input.wantsUseCarried = true;
+    d.simulate(0.3);
+    result.spent.armsAgain = object.armedTime > 0 && object.burstSeconds < d.tuning.scanGrenadeBurstSeconds;
+    return result;
+  }, spot);
+  check('thrown, the armed grenade goes off a moment after it lands, metres from you, and scans the room from there: thousands of points, and a noise at that place',
+    grenade.wentOff !== null && grenade.metresFromYou > 2.5 && grenade.pointsAdded > 8000 && grenade.noiseThere, grenade);
+  check('its light stuns the Hollow where it stands, for a few seconds', grenade.hitsOnTheHollow >= 25 && grenade.stunned.atAll && grenade.stunned.seconds > 2 && grenade.stunned.fastestWhileStunned < 0.05, [grenade.hitsOnTheHollow, grenade.stunned]);
+  check('and then the Hollow comes for where the light came from, which is the grenade and not you', grenade.afterwards.toTheGrenade && grenade.afterwards.notToYou, grenade.afterwards);
+  check('a grenade that has gone off is spent: it says so and cannot be armed again', grenade.spent.isSpent && grenade.spent.label === 'spent scan grenade' && grenade.spent.counted === 1 && !grenade.spent.armsAgain, grenade.spent);
+
+  const grenadeEdges = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    // Armed and never thrown: its fuse runs out and it goes off in the beam.
+    d.clearLooseObjects();
+    lab.stand(spot.x - 2.8, spot.z, Math.PI / 2);
+    let object = lab.carry('scanGrenade');
+    d.input.wantsUseCarried = true;
+    d.simulate(0.1);
+    const pointsBefore = d.pointCloud.totalReturns;
+    d.simulate(d.tuning.scanGrenadeFuseSeconds - 0.5);
+    result.beforeTheFuseIsOut = { spent: object.isSpent, bursting: object.burstSeconds > 0 };
+    d.simulate(0.5 + d.tuning.scanGrenadeBurstSeconds + 0.3);
+    result.afterTheFuse = { spent: object.isSpent, stillInTheBeam: d.getHeldLooseObject() === object, pointsAdded: d.pointCloud.totalReturns - pointsBefore };
+    // An enraged Hollow is not stunned by it.
+    d.clearLooseObjects();
+    object = d.createLooseObject('scanGrenade', spot.x + 0.5, 0.3, spot.z, 0);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    d.setDebugOption('freezeCreatures', true); // it stays where it is put, enraged
+    d.spawnHollow(spot.x + 2, spot.z);
+    d.hollow.graceTimer = 0; d.hollow.enragedTimer = 30;
+    object.armedTime = d.game.time; object.goesOffTime = d.game.time;
+    d.simulate(d.tuning.scanGrenadeBurstSeconds + 0.2);
+    result.enraged = { hits: object.burstHitsOnHollow, stunSeconds: d.hollow.stunSeconds };
+    d.hollow.isActive = false; d.hollow.enragedTimer = 0;
+    return result;
+  }, spot);
+  check('armed and never thrown, it goes off in the beam when its fuse runs out, and not before',
+    !grenadeEdges.beforeTheFuseIsOut.spent && !grenadeEdges.beforeTheFuseIsOut.bursting && grenadeEdges.afterTheFuse.spent && grenadeEdges.afterTheFuse.stillInTheBeam && grenadeEdges.afterTheFuse.pointsAdded > 8000, grenadeEdges);
+  check('an enraged Hollow is lit by it and not stunned', grenadeEdges.enraged.hits >= 25 && grenadeEdges.enraged.stunSeconds === 0, grenadeEdges.enraged);
+
+  // --- the Hollow goes after what it kicks ---
+  const chased = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, result = {};
+    lab.reset(); // creatures held still again: the test walks the Hollow by hand
+    lab.stand(spot.x - 2.9, spot.z - 2, Math.PI / 2);
+    for (const kindKey of ['canister', 'pumpMotor']) {
+      d.clearLooseObjects();
+      const object = d.createLooseObject(kindKey, spot.x, 0.3, spot.z, 0);
+      if (kindKey === 'canister') d.setLooseObjectOrientation(object, 0.7071, 0, 0, 0.7071); // lying on its side, to roll
+      for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+      d.spawnHollow(object.x, object.z - 1.5);
+      d.hollow.graceTimer = 0; d.hollow.state = 0;
+      const start = { x: object.x, z: object.z };
+      for (let step = 0; step < 24; step++) { d.hollow.figure.z += 3 / 30; d.simulate(1 / 30); } // it walks through where the thing lies
+      const entry = { kicked: lab.round(Math.hypot(object.x - start.x, object.z - start.z)), state: d.hollow.state,
+        goingAfterIt: d.hollow.state === 1 && Math.hypot(d.hollow.targetX - object.x, d.hollow.targetZ - object.z) < 0.6 };
+      // Give the thing a shove by hand and see whether the Hollow's aim follows it, now and after it has had enough.
+      object.x += 1.2; d.wakeLooseObject(object); object.kickedByHollowTime = d.game.time;
+      d.simulate(0.2);
+      entry.followsIt = Math.hypot(d.hollow.targetX - object.x, d.hollow.targetZ - object.z) < 0.6;
+      d.simulate(d.tuning.hollowChasesKickedSeconds + 1);
+      const before = { x: d.hollow.targetX, z: d.hollow.targetZ };
+      object.x -= 1.5; d.wakeLooseObject(object); object.kickedByHollowTime = d.game.time;
+      d.simulate(0.2);
+      entry.hasHadEnough = Math.hypot(d.hollow.targetX - before.x, d.hollow.targetZ - before.z) < 0.01;
+      result[kindKey] = entry;
+      d.hollow.isActive = false;
+    }
+    result.limit = d.tuning.hollowChasesKickedMass;
+    return result;
+  }, spot);
+  check('the Hollow goes after a canister it has kicked, follows it as it rolls, and has had enough after a few seconds',
+    chased.canister.kicked > 0.3 && chased.canister.goingAfterIt && chased.canister.followsIt && chased.canister.hasHadEnough, chased.canister);
+  check('it does not go after something too heavy to roll off, like a pump motor', !chased.pumpMotor.goingAfterIt && !chased.pumpMotor.followsIt, chased.pumpMotor);
 
   // --- its points, and the floor's ---
   const pointsKept = await inGame((spot) => {

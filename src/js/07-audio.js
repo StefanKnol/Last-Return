@@ -32,6 +32,7 @@ const SOUND_LEVELS = {
   looseKnockGlass: 1,     // ... of glass (a sample jar)
   looseKnockCase: 1,      // ... a dull box (a tool case, a crate)
   looseHandling: 1,       // taking an object in your hands, and the grunt of air as you throw it
+  scanGrenade: 1,         // a scan grenade: the click of arming it, and the whine and crack as it goes off
   heartbeat: 4,
 
   // ---- the scanner and the interface ----
@@ -1267,6 +1268,25 @@ function playLooseObjectKnock(material, loudness, weight, x, y, z) {
   playNoiseBurst({ duration: 0.03, filterType: 'bandpass', frequency: 2800, resonance: 1.2, gain: 1.4 * level, attack: 0.001, destination: destination });
   playNoiseBurst({ duration: 0.06, filterType: 'bandpass', frequency: 420 * Math.sqrt(size), resonance: 0.9, gain: 2.0 * level, attack: 0.002, destination: destination }); // the weight of it
   if (loudness > 0.6 && audio.metalStruck) playMetalStrike({ shape: 'bar', frequency: frequency * 1.07, duration: 0.3, hardness: 0.6, damping: 0.7, gain: 0.6 * level, delay: 0.08 + Math.random() * 0.05, destination: destination });
+}
+
+// A scan grenade at (x, y, z). `what` is 'arm' (the pin: a click and a rising tick) or 'burst' (it goes off: a
+// whine that climbs for as long as its light lasts, a crack at the start, and hiss).
+function playScanGrenadeSound(what, x, y, z) {
+  if (!isAudioReady()) return;
+  const destination = createTemporaryPanner(x, y, z);
+  if (!destination) return;
+  const level = SOUND_LEVELS.scanGrenade;
+  if (what === 'arm') {
+    playNoiseBurst({ duration: 0.03, filterType: 'bandpass', frequency: 3400, resonance: 2, gain: 0.9 * level, attack: 0.001, destination: destination });
+    playTone({ waveform: 'triangle', frequency: 880, frequencyEnd: 1320, duration: 0.18, gain: 0.18 * level, delay: 0.05, destination: destination });
+    return;
+  }
+  const seconds = TUNING.scanGrenadeBurstSeconds;
+  playNoiseBurst({ duration: 0.05, filterType: 'bandpass', frequency: 2600, resonance: 0.9, gain: 3.2 * level, attack: 0.001, destination: destination });
+  playResonantNoise({ frequency: 500, frequencyEnd: 2600, resonance: 24, duration: seconds, gain: 0.5 * level, attack: 0.03, reverbAmount: 0.8, destination: destination });
+  playTone({ waveform: 'sine', frequency: 300, frequencyEnd: 1900, duration: seconds, gain: 0.12 * level, attack: 0.04, reverbAmount: 0.5, destination: destination });
+  playNoiseBurst({ duration: seconds, filterType: 'bandpass', frequency: 4800, frequencyEnd: 7500, gain: 0.22 * level, attack: 0.05, resonance: 3, destination: destination });
 }
 
 // Taking a loose object in your hands (`isPickingUp`), or the rush of your sleeve as you throw it.

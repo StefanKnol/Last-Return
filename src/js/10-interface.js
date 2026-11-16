@@ -711,7 +711,7 @@ function updateHud(realDt) {
     elements['chip-extra'].textContent = extraText;
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
-    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + carried.kind.label.toUpperCase();
+    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase();
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];
@@ -762,10 +762,14 @@ function updateHud(realDt) {
       prompt.textContent = 'THROW  ' + '\u25AE'.repeat(filled) + '\u25AF'.repeat(8 - filled);
     } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject) {
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + focusedLooseObject.kind.label;
+      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject);
     } else if (game.mode === 'playing' && focused) {
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E]  ') + focused.prompt;
+    } else if (game.mode === 'playing' && heldLooseObject && heldLooseObject.kind.use && !heldLooseObject.isSpent && heldLooseObject.armedTime < 0 && !input.isTouchDevice) {
+      // In the beam, and it does something: say which key.
+      prompt.hidden = false;
+      prompt.textContent = '[Q]  ' + heldLooseObject.kind.use.prompt;
     } else if (game.mode === 'playing' && !input.isPointerLocked && !input.useDragLook && !input.isTouchDevice) {
       prompt.hidden = false;
       prompt.textContent = 'Click to take control of the scanner';

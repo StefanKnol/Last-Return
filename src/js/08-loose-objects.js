@@ -30,6 +30,9 @@
 //              { shape: 'box', center: [x, y, z], half: [x, y, z] }
 //              { shape: 'ball', center: [x, y, z], radius: r }
 //              { shape: 'capsule', from: [x, y, z], to: [x, y, z], radius: r }   a rod with round ends
+//   use        for an object that does something when you press Q with it in the beam:
+//              { prompt: 'Arm the scan grenade', activate: function (object) { ... } }
+//              What it then does over time is `update(object, dt)`, called every frame for every object of the kind.
 // Where it hangs is the same for all of them: straight out from the scanner's lens, `looseHoldDistance` (in
 // 00-config.js) beyond its own size. How much of the beam it takes follows from how big it is.
 const LOOSE_OBJECT_KINDS = {
@@ -53,6 +56,17 @@ const LOOSE_OBJECT_KINDS = {
   crate: {
     label: 'crate', mass: 12, material: 'case', bulky: true, bounce: 0.12, grip: 0.7,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.25, 0.22, 0.22] }]
+  },
+  // A scan grenade: arm it (Q), throw it, and where it lands it scans the room for you, all round. The light
+  // stuns the Hollow if enough of it lands on it, and the noise brings it to where the grenade went off.
+  scanGrenade: {
+    label: 'scan grenade', mass: 0.6, material: 'metal', bulky: false, bounce: 0.3, grip: 0.6,
+    parts: [
+      { shape: 'capsule', from: [0, -0.045, 0], to: [0, 0.045, 0], radius: 0.04 },
+      { shape: 'box', center: [0.05, 0.02, 0], half: [0.02, 0.05, 0.02] }
+    ],
+    use: { prompt: 'Arm the scan grenade', activate: armScanGrenade },
+    update: updateScanGrenade
   },
   pumpMotor: {
     label: 'pump motor', mass: 18, material: 'metal', bulky: true, bounce: 0.1, grip: 0.65,
@@ -89,7 +103,7 @@ const looseState = {
   shoveBackDepth: 0, shoveBackX: 0, shoveBackZ: 0,
   // How fast you walked this frame before anything on the floor held you back: that is the speed you kick with.
   playerStrideX: 0, playerStrideZ: 0,
-  statistics: { knocksHeard: 0, knocksQuiet: 0, pulledFromHands: 0, lostDownThePit: 0, putBack: 0 }, // putBack: an object got into the rock and was set back where it last was not. Should stay 0.
+  statistics: { knocksHeard: 0, knocksQuiet: 0, pulledFromHands: 0, lostDownThePit: 0, putBack: 0, grenadesSpent: 0 }, // putBack: an object got into the rock and was set back where it last was not. Should stay 0.
   lastKnock: { x: 0, z: 0, speed: 0, carries: 0, isOwn: false, time: -10 } // the last knock the Hollow could hear: where, how hard, how far it carried
 };
 
@@ -252,6 +266,9 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     lastHandledTime: -10,               // when you last had it in the beam: a knock soon after is your doing
     lastScannedTime: -10,               // when a pulse last landed on it
     hasRestPoints: false,               // it was scanned where it lies, and those points are still on it
+    // For a kind that does something (`use`): when it was set off, when it starts doing it, and whether it is used up.
+    armedTime: -1, goesOffTime: -1, burstSeconds: 0, burstBudget: 0, burstHitsOnHollow: 0, isSpent: false,
+    kickedByHollowTime: -100, chasedSince: -100, // when the Hollow last kicked it, and when it last started going after it
     isRemoved: false
   };
   setLooseObjectYaw(object, yaw || 0);
@@ -276,7 +293,7 @@ function resetLooseObjectsForNewRun() {
   looseState.hasShownCarryHint = false;
   looseState.hasShownKnockHint = false;
   const statistics = looseState.statistics;
-  statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0; statistics.putBack = 0;
+  statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0; statistics.putBack = 0; statistics.grenadesSpent = 0;
 }
 
 function removeLooseObject(object) {
@@ -428,14 +445,15 @@ function intersectRayWithLooseObject(object, originX, originY, originZ, directio
 }
 
 // The nearest loose object a ray meets before `nearerThan`, or null. Every scanner pulse asks this.
-// `looseRaySkipsHeld` is set while the player's scanner asks what your eyes see past what the beam is carrying.
+// `looseRaySkipped` is an object the ray passes through: what the beam is carrying, while the player's scanner
+// asks what your eyes see past it; or a scan grenade, for its own light.
 let looseRayDistance = 0;
-let looseRaySkipsHeld = false;
+let looseRaySkipped = null;
 function findLooseObjectOnRay(originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {
   let best = null;
   looseRayDistance = nearerThan;
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-    if (looseRaySkipsHeld && looseObjects[objectIndex].isHeld) continue;
+    if (looseObjects[objectIndex] === looseRaySkipped) continue;
     const distance = intersectRayWithLooseObject(looseObjects[objectIndex], originX, originY, originZ, directionX, directionY, directionZ, looseRayDistance);
     if (distance > 0) { looseRayDistance = distance; best = looseObjects[objectIndex]; }
   }
@@ -784,6 +802,7 @@ function gatherLooseTouches(object) {
       // How fast it should be leaving once this is settled: not at all, or bouncing off if it came in fast.
       // In the beam it never bounces: the beam takes that up.
       touch.wantedSpeed = !touch.isSoft && !object.isHeld && closingSpeed > TUNING.looseBounceFromSpeed ? closingSpeed * object.kind.bounce : 0;
+      if (touch.isSoft && !touch.isPlayer && closingSpeed > 0.3) object.kickedByHollowTime = game.time;
       if (closingSpeed > object.knockSpeed) {
         object.knockSpeed = closingSpeed;
         object.knockX = pointX; object.knockY = pointY; object.knockZ = pointZ;
@@ -1062,7 +1081,10 @@ function reportLooseObjectKnock(object) {
   const radius = interpolateLinear(TUNING.noiseRadiusKnockSoft, TUNING.noiseRadiusKnockHard, loudness) * weight;
   const lastKnock = looseState.lastKnock;
   lastKnock.x = object.knockX; lastKnock.z = object.knockZ; lastKnock.speed = speed; lastKnock.carries = radius; lastKnock.isOwn = object.knockIsOwn; lastKnock.time = game.time;
-  emitNoise(object.knockX, object.knockZ, radius);
+  // What the Hollow has just kicked makes its noise for you to hear, but does not startle the Hollow: it knows
+  // what that was. (It goes after the thing all the same, if the thing is light: see updateHollowAfterKickedObjects.)
+  const isOfTheHollowsOwnMaking = !object.knockIsOwn && game.time - object.kickedByHollowTime < 3;
+  if (!isOfTheHollowsOwnMaking) emitNoise(object.knockX, object.knockZ, radius);
   if (object.knockIsOwn) {
     showCaption(loudness > 0.55 ? 'ownObjectCrash' : 'ownObjectKnock');
     if (!looseState.hasShownKnockHint && hollow.isActive) {
@@ -1175,6 +1197,12 @@ function beginLettingGo() {
 }
 
 function updateLooseCarryInput(dt) {
+  // Q: set off what the beam is carrying, if it is something that does anything.
+  if (input.wantsUseCarried) {
+    input.wantsUseCarried = false;
+    const carried = looseState.held;
+    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0) carried.kind.use.activate(carried);
+  }
   // The right mouse button: down on something in reach takes it into the beam, up lets it go as it is moving.
   if (input.isGrabHeld && !looseState.held && player.focusedLooseObject && !player.focusedLooseObject.isRemoved) {
     pickUpLooseObject(player.focusedLooseObject, true);
@@ -1218,6 +1246,88 @@ function findLooseObjectInFocus(eyeX, eyeY, eyeZ, betterThan) {
     best = object;
   }
   return best;
+}
+
+// ---------------------------------------------------------------------------
+// The Hollow and what it kicks
+// ---------------------------------------------------------------------------
+
+// Something light that the Hollow has just kicked rolls off, and it goes after it: for a few seconds, and not
+// while it is hunting you. Then it loses interest in that thing for a while. (Something you threw at it works
+// the same way, through the noise it made.)
+function updateHollowAfterKickedObjects() {
+  if (!hollow.isActive) return;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    if (object.isHeld || object.kind.mass > TUNING.hollowChasesKickedMass) continue;
+    if (game.time - object.kickedByHollowTime > 0.5) continue; // not just now
+    if (game.time - object.chasedSince > TUNING.hollowChasesAgainAfterSeconds) object.chasedSince = game.time; // a new chase begins
+    if (game.time - object.chasedSince > TUNING.hollowChasesKickedSeconds) continue; // it has had enough of this one
+    object.chaseUntil = Math.min(object.chasedSince + TUNING.hollowChasesKickedSeconds, game.time + 2);
+  }
+  // Go after the one most recently kicked that is still worth it.
+  let chased = null;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    if (object.chaseUntil !== undefined && game.time < object.chaseUntil && !object.isHeld && (chased === null || object.kickedByHollowTime > chased.kickedByHollowTime)) chased = object;
+  }
+  if (chased !== null) drawHollowTowards(chased.x, chased.z);
+}
+
+// ---------------------------------------------------------------------------
+// The scan grenade
+// ---------------------------------------------------------------------------
+
+// Q, with it in the beam: the pin is out. It goes off a moment after it first hits something once you have let
+// go of it, or when its fuse runs out, wherever it is by then.
+function armScanGrenade(object) {
+  object.armedTime = game.time;
+  object.goesOffTime = game.time + TUNING.scanGrenadeFuseSeconds;
+  object.hasLanded = false;
+  playScanGrenadeSound('arm', object.x, object.y, object.z);
+  showMessage('Armed. It goes off where it lands. Throw it.', 4, 'warning');
+}
+
+function updateScanGrenade(object, dt) {
+  if (object.isSpent || object.armedTime < 0) return;
+  // Thrown, and it has just hit something for the first time: that is where it goes off.
+  if (!object.isHeld && !object.hasLanded && object.knockSpeed > TUNING.looseKnockFaintestSpeed) {
+    object.hasLanded = true;
+    object.goesOffTime = Math.min(object.goesOffTime, game.time + TUNING.scanGrenadeLandingSeconds);
+  }
+  if (game.time < object.goesOffTime) return;
+  if (object.burstSeconds === 0) {
+    // It goes off.
+    playScanGrenadeSound('burst', object.x, object.y, object.z);
+    showCaption('scanGrenade', { x: object.x, z: object.z });
+    emitNoise(object.x, object.z, TUNING.noiseRadiusScanGrenade);
+    object.burstHitsOnHollow = 0;
+  }
+  // Its light: pulses in every direction from where it is, a share of them each frame, for as long as it lasts.
+  const pulsesInAll = QUALITY_PRESETS[settings.quality].sweepRays * TUNING.scanGrenadeSweeps;
+  object.burstBudget += pulsesInAll * Math.min(dt, TUNING.scanGrenadeBurstSeconds - object.burstSeconds) / TUNING.scanGrenadeBurstSeconds;
+  const pulses = Math.min(4000, Math.floor(object.burstBudget));
+  object.burstBudget -= pulses;
+  looseRaySkipped = object; // its own light does not stop on its own case
+  for (let pulse = 0; pulse < pulses; pulse++) {
+    // Evenly over the whole sphere: a height between pole and pole, and a turn round the upright.
+    const height = Math.random() * 2 - 1, turn = Math.random() * TWO_PI, across = Math.sqrt(1 - height * height);
+    if (fireScanPulse(object.x, object.y + 0.03, object.z, Math.cos(turn) * across, height, Math.sin(turn) * across, false) && rayHit.figure === hollow.figure) object.burstHitsOnHollow++;
+  }
+  looseRaySkipped = null;
+  if (object.burstHitsOnHollow >= TUNING.scanGrenadeStunHits && !object.hasStunned) object.hasStunned = stunHollow(TUNING.scanGrenadeStunSeconds);
+  object.burstSeconds += dt;
+  if (object.burstSeconds >= TUNING.scanGrenadeBurstSeconds) {
+    object.isSpent = true;
+    looseState.statistics.grenadesSpent++;
+  }
+}
+
+// What the screen calls an object: a thing that has been used up says so.
+function getLooseObjectLabel(object) {
+  if (object.isSpent) return 'spent ' + object.kind.label;
+  if (object.armedTime >= 0) return object.kind.label + ', armed';
+  return object.kind.label;
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,8 +1376,10 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     stepLooseObjects(TUNING.looseStepSeconds);
   }
 
+  updateHollowAfterKickedObjects();
   for (let objectIndex = looseObjects.length - 1; objectIndex >= 0; objectIndex--) {
     const object = looseObjects[objectIndex];
+    if (object.kind.update) object.kind.update(object, dt);
     if (object.knockSpeed > 0) reportLooseObjectKnock(object);
     if (object.y < PIT_NO_RETURN_DEPTH) {
       looseState.statistics.lostDownThePit++;

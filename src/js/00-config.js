@@ -176,6 +176,18 @@ const TUNING = {
   looseHoldBreakDistance: 0.9,      // caught on something and further than this from where the beam wants it ...
   looseHoldBreakSeconds: 0.25,      // ... for this long, and the beam loses it. (Not caught on anything, it has to be two and a half times as far.)
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
+  // The scan grenade (a loose object that does something: see `use` in LOOSE_OBJECT_KINDS).
+  scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
+  scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
+  scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
+  scanGrenadeSweeps: 1.0,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000)
+  scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned
+  scanGrenadeStunSeconds: 3.5,      // how long the Hollow stands stunned. An enraged Hollow is not stunned.
+  noiseRadiusScanGrenade: 20,       // going off is loud. The Hollow comes to where it went off, not to you.
+  // The Hollow and things it kicks.
+  hollowChasesKickedMass: 4,        // something this light or lighter (kg) that it kicks, it goes after ...
+  hollowChasesKickedSeconds: 5,     // ... for this long at most, unless it is hunting you
+  hollowChasesAgainAfterSeconds: 15, // and it does not go after the same thing again for this long
   // Walking into one that lies on the floor.
   looseShoveFreeMass: 2,            // lighter than this (kg) you kick along without it slowing you
   looseShoveBlockMass: 16,          // this heavy or heavier it does not move for your legs and stops you: pick it up. In between it slows you by its share of the way from one to the other.
@@ -538,6 +550,8 @@ const CAPTIONS = {
   ownGlass: { text: '[glass crunches under your boots]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   ownPlate: { text: '[a floor plate clanks under you]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   ownCans: { text: '[cans scatter from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  scanGrenade: { text: '[a rising whine, and a crack of light]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
+  hollowStunned: { text: '[it stands frozen in the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },
   ownObjectKnock: { text: '[it knocks against something]', level: 'sound', withinMetres: 0, seconds: 2, slot: 'ownHands', rank: 0 },
   ownObjectCrash: { text: '[it hits hard. That carried]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownHands', rank: 1 },
   objectKnock: { text: '[something is knocked over]', level: 'sound', withinMetres: 20, seconds: 2.5, slot: 'objects', rank: 0 },
