@@ -14,8 +14,7 @@ const input = {
   touchScanHeld: false,
   touchSprint: false,
   touchCrouch: false,
-  touchDropHeld: false, // the DROP button, which is only there while you carry something
-  dropPressed: false,   // Q or DROP has been pressed since the game last looked
+  touchUseHeld: false,  // a finger is on USE: with something in your hands, holding it winds up a throw
   moveStickX: 0,
   moveStickZ: 0,
   lookDeltaX: 0,
@@ -172,7 +171,6 @@ function initializeInput() {
     if (game.mode === 'playing') {
       if (code === 'KeyE') input.wantsInteract = true;
       else if (code === 'KeyF') input.wantsSweep = true;
-      else if (code === 'KeyQ') input.dropPressed = true; // lets go of what you carry, or winds up a throw (08-loose-objects.js)
       else if (code === 'Tab' || code === 'KeyM') toggleMapOverlay();
       else if (code === 'Digit1') setScannerSpread(5);
       else if (code === 'Digit2') setScannerSpread(TUNING.scannerSpreadDefaultDegrees);
@@ -353,12 +351,13 @@ function initializeTouchControls() {
     if (input.touchCrouch) { input.touchSprint = false; document.getElementById('touch-run').classList.remove('is-held'); }
     element.classList.toggle('is-held', input.touchCrouch);
   });
-  // DROP: a tap lets go of what you carry, holding it winds up a throw. The game reads how long it is held.
-  const dropButton = document.getElementById('touch-drop');
-  dropButton.addEventListener('touchstart', function (event) { event.preventDefault(); input.touchDropHeld = true; input.dropPressed = true; dropButton.classList.add('is-held'); }, { passive: false });
-  const releaseDrop = function () { input.touchDropHeld = false; dropButton.classList.remove('is-held'); };
-  dropButton.addEventListener('touchend', releaseDrop);
-  dropButton.addEventListener('touchcancel', releaseDrop);
+  // USE is also what lets go of something you carry, and held down it winds up a throw: the game needs to
+  // know for how long a finger stays on it.
+  const useButton = document.getElementById('touch-use');
+  useButton.addEventListener('touchstart', function () { input.touchUseHeld = true; }, { passive: true });
+  const releaseUse = function () { input.touchUseHeld = false; };
+  useButton.addEventListener('touchend', releaseUse);
+  useButton.addEventListener('touchcancel', releaseUse);
   bindTapButton('touch-spread', function () {
     const next = player.spreadDegrees < 8 ? TUNING.scannerSpreadDefaultDegrees : (player.spreadDegrees < 18 ? 24 : 5);
     setScannerSpread(next);
@@ -514,7 +513,7 @@ function fireScannerPulse(originX, originY, originZ, horizontalTangent, vertical
   let directionZ = basis.forwardZ + basis.rightZ * horizontalTangent + basis.upZ * verticalTangent;
   const length = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ);
   directionX /= length; directionY /= length; directionZ /= length;
-  if (!castScannerRay(originX, originY, originZ, directionX, directionY, directionZ, TUNING.scannerMaximumRange)) return false;
+  if (!castScannerPulse(originX, originY, originZ, directionX, directionY, directionZ, TUNING.scannerMaximumRange)) return false;
   let lifeCode = 0;
   const figure = rayHit.figure;
   if (figure !== null) {
@@ -523,8 +522,9 @@ function fireScannerPulse(originX, originY, originZ, horizontalTangent, vertical
     figure.lastScannedTime = game.time;
     lifeCode = convertSecondsToPointLifeCode(TUNING[figure.imprintTuningKey]);
   }
-  if (rayHit.looseObject !== null) lifeCode = getLooseObjectPointLifeCode(rayHit.looseObject);
-  addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode);
+  const looseObject = rayHit.looseObject;
+  if (looseObject !== null) { lifeCode = getLooseObjectPointLifeCode(looseObject); noteLooseObjectScanned(looseObject); }
+  addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode, looseObject !== null);
   if (rayHit.objectId !== 0) markInteractableDiscovered(rayHit.objectId);
   if (drawBeam) addBeamLine(rayHit.x, rayHit.y, rayHit.z, 0.1 + Math.random() * 0.12);
   return true;
@@ -534,6 +534,7 @@ function updateScanner(dt, eyeX, eyeY, eyeZ) {
   const quality = QUALITY_PRESETS[settings.quality];
   computeScannerBasis(player.yaw, player.pitch);
   const basis = scannerBasis;
+  updateScannerLens(eyeX, eyeY, eyeZ, getPlayFieldOfViewDegrees()); // where the beam starts, for what you carry
   // Roughly where the scanner is held. While the scanner is on screen the renderer moves the start of the
   // laser lines onto its lens (moveBeamLineOriginsToViewmodelLens); this is what is left when it is not.
   resetBeamLines(
@@ -610,7 +611,7 @@ function updateScanner(dt, eyeX, eyeY, eyeZ) {
   player.scannerActivity = approachValue(player.scannerActivity, wantsPaint || isSweeping ? 1 : 0, dt * 9);
 
   // The range readout always measures straight ahead, even when not scanning.
-  if (castScannerRay(eyeX, eyeY, eyeZ, basis.forwardX, basis.forwardY, basis.forwardZ, TUNING.scannerMaximumRange)) {
+  if (castScannerPulse(eyeX, eyeY, eyeZ, basis.forwardX, basis.forwardY, basis.forwardZ, TUNING.scannerMaximumRange)) {
     player.centerRange = rayHit.distance;
   } else {
     player.centerRange = -1;
@@ -634,6 +635,8 @@ function updateInteractionFocus(eyeX, eyeY, eyeZ) {
   if (looseObject) best = null;
   player.focusedInteractable = best;
   player.focusedLooseObject = looseObject;
+  // E (USE on a phone) does whatever you are looking at: uses it, or picks it up. With something in your hands
+  // and nothing to use in front of you, it lets go of what you carry.
   if (input.wantsInteract) {
     input.wantsInteract = false;
     if (looseObject) {
@@ -641,6 +644,8 @@ function updateInteractionFocus(eyeX, eyeY, eyeZ) {
       else pickUpLooseObject(looseObject);
     } else if (best) {
       useInteractable(best);
+    } else if (getHeldLooseObject()) {
+      beginLettingGo();
     }
   }
 }

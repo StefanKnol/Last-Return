@@ -277,7 +277,8 @@ function castScannerRay(originX, originY, originZ, directionX, directionY, direc
       if (distance > 0.05 && distance < bestDistance) { bestDistance = distance; bestFigure = figure; }
     }
   }
-  // Anything loose in the way: what you carry, what lies on a shelf.
+  // Anything loose in the way: what lies on a shelf or on the floor. Not what you carry: whether that is in
+  // the way depends on where the scanner is, not on where your eyes are (see castScannerPulse).
   const looseObject = looseObjects.length > 0
     ? findLooseObjectOnRay(originX, originY, originZ, directionX, directionY, directionZ, bestDistance) : null;
   if (looseObject !== null) {

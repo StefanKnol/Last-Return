@@ -437,6 +437,7 @@ function debugPutLooseObjectAhead(kindKey) {
 
 function debugRemoveLooseObjects() {
   markDebugUsed();
+  while (looseObjects.length > 0) removeLooseObject(looseObjects[looseObjects.length - 1]); // one by one, so that each takes its points with it
   clearLooseObjects();
   showMessage('Debug: every loose object removed.', 3, 'info');
 }

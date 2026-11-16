@@ -30,32 +30,34 @@
 //              { shape: 'ball', center: [x, y, z], radius: r }
 //              { shape: 'capsule', from: [x, y, z], to: [x, y, z], radius: r }   a rod with round ends
 //   hold       where it hangs while carried, from your eyes: metres to the right, down and ahead.
-//              This is what decides how much of the scanner's cone it blocks.
+//              The scanner is in your right hand: its lens is about 0.28 to the right, 0.21 down and 0.55 ahead.
+//              Something held to the left of that (everything one-handed) is never in the beam's way. Something
+//              held in front of it (the two-handed things) is, by as much as it rises above the lens.
 const LOOSE_OBJECT_KINDS = {
   canister: {
     label: 'gas canister', mass: 3, material: 'metal', hands: 1, bounce: 0.3, grip: 0.5,
     parts: [{ shape: 'capsule', from: [0, -0.13, 0], to: [0, 0.13, 0], radius: 0.07 }],
-    hold: { right: -0.1, down: 0.13, forward: 0.45 }
+    hold: { right: -0.28, down: 0.3, forward: 0.5 }
   },
   jar: {
     label: 'sample jar', mass: 0.8, material: 'glass', hands: 1, bounce: 0.2, grip: 0.45,
     parts: [{ shape: 'capsule', from: [0, -0.05, 0], to: [0, 0.05, 0], radius: 0.06 }],
-    hold: { right: -0.08, down: 0.09, forward: 0.42 }
+    hold: { right: -0.26, down: 0.28, forward: 0.45 }
   },
   toolCase: {
     label: 'tool case', mass: 6, material: 'case', hands: 1, bounce: 0.15, grip: 0.6,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.21, 0.08, 0.15] }],
-    hold: { right: -0.05, down: 0.13, forward: 0.5 }
+    hold: { right: -0.3, down: 0.4, forward: 0.42 }
   },
   pipe: {
     label: 'length of pipe', mass: 4, material: 'metal', hands: 1, bounce: 0.35, grip: 0.4,
     parts: [{ shape: 'capsule', from: [0, 0, -0.6], to: [0, 0, 0.6], radius: 0.03 }],
-    hold: { right: -0.15, down: 0.15, forward: 0.75 }
+    hold: { right: -0.32, down: 0.3, forward: 0.75 }
   },
   crate: {
     label: 'crate', mass: 12, material: 'case', hands: 2, bounce: 0.12, grip: 0.7,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.25, 0.22, 0.22] }],
-    hold: { right: 0, down: 0.19, forward: 0.55 }
+    hold: { right: 0.05, down: 0.4, forward: 0.87 }
   },
   pumpMotor: {
     label: 'pump motor', mass: 18, material: 'metal', hands: 2, bounce: 0.1, grip: 0.65,
@@ -64,7 +66,7 @@ const LOOSE_OBJECT_KINDS = {
       { shape: 'capsule', from: [0.12, 0, 0], to: [0.3, 0, 0], radius: 0.035 },
       { shape: 'box', center: [-0.02, -0.14, 0], half: [0.16, 0.025, 0.13] }
     ],
-    hold: { right: 0, down: 0.11, forward: 0.5 }
+    hold: { right: 0.1, down: 0.29, forward: 0.8 }
   }
 };
 
@@ -80,14 +82,18 @@ const looseState = {
   held: null,              // the object in your hands, or null
   holdTargetX: 0, holdTargetY: 0, holdTargetZ: 0,
   holdBreakTimer: 0,       // how long the carried object has been too far from your hands
-  dropKeyWasDown: false,
-  dropKeySeconds: 0,       // how long the drop key has been held: a tap lets go, a hold winds up a throw
+  isLettingGo: false,      // E went down with something in your hands and nothing to use: this press lets go or throws
+  lettingGoSeconds: 0,     // ... and has been held this long. A tap lets go, a hold winds up a throw.
   hasShownCarryHint: false,
   hasShownKnockHint: false,
   hollowLastX: 0, hollowLastZ: 0, hollowVelocityX: 0, hollowVelocityZ: 0, hollowWasActive: false,
   // How fast you are really moving, from where you were a frame ago. (`player.velocityX` is how fast your legs
   // are trying to go, which is not the same thing with a wall in front of you.)
   playerLastX: 0, playerLastZ: 0, playerVelocityX: 0, playerVelocityZ: 0, playerWasThere: false,
+  // How far something heavy on the floor has pushed back at you this frame (the deepest push, and which way).
+  shoveBackDepth: 0, shoveBackX: 0, shoveBackZ: 0,
+  // How fast you walked this frame before anything on the floor held you back: that is the speed you kick with.
+  playerStrideX: 0, playerStrideZ: 0,
   statistics: { knocksHeard: 0, knocksQuiet: 0, pulledFromHands: 0, lostDownThePit: 0 },
   lastKnock: { x: 0, z: 0, speed: 0, carries: 0, isOwn: false, time: -10 } // the last knock the Hollow could hear: where, how hard, how far it carried
 };
@@ -176,7 +182,21 @@ function prepareLooseObjectKind(kindKey) {
       fromX: part.from[0] - centreX, fromY: part.from[1] - centreY, fromZ: part.from[2] - centreZ,
       toX: part.to[0] - centreX, toY: part.to[1] - centreY, toZ: part.to[2] - centreZ };
   });
+  // How far any part reaches from the centre of mass. This is more than the shell's reach for a box, whose
+  // corners are sharp where the shell's are round: a pulse must be able to land on a corner.
+  let partsRadius = 0;
+  for (const part of parts) {
+    if (part.shape === 'box') {
+      partsRadius = Math.max(partsRadius, Math.sqrt(Math.pow(Math.abs(part.centerX) + part.halfX, 2) + Math.pow(Math.abs(part.centerY) + part.halfY, 2) + Math.pow(Math.abs(part.centerZ) + part.halfZ, 2)));
+    } else if (part.shape === 'ball') {
+      partsRadius = Math.max(partsRadius, Math.sqrt(part.centerX * part.centerX + part.centerY * part.centerY + part.centerZ * part.centerZ) + part.radius);
+    } else {
+      partsRadius = Math.max(partsRadius, Math.sqrt(part.fromX * part.fromX + part.fromY * part.fromY + part.fromZ * part.fromZ) + part.radius,
+        Math.sqrt(part.toX * part.toX + part.toY * part.toY + part.toZ * part.toZ) + part.radius);
+    }
+  }
   kind.prepared = {
+    partsRadius: partsRadius,
     shell: shell, shellCount: balls.length, parts: parts,
     inverseMass: 1 / kind.mass,
     inverseInertiaX: 1 / inertiaX, inverseInertiaY: 1 / inertiaY, inverseInertiaZ: 1 / inertiaZ,
@@ -233,6 +253,8 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     knockSpeed: 0, knockX: 0, knockY: 0, knockZ: 0, knockIsOwn: false,
     lastKnockTime: -10,
     lastHandledTime: -10,               // when you last had it in your hands: a knock soon after is your doing
+    lastScannedTime: -10,               // when a pulse last landed on it
+    hasRestPoints: false,               // it was scanned where it lies, and those points are still on it
     isRemoved: false
   };
   setLooseObjectYaw(object, yaw || 0);
@@ -245,8 +267,8 @@ function clearLooseObjects() {
   looseState.held = null;
   looseState.accumulator = 0;
   looseState.holdBreakTimer = 0;
-  looseState.dropKeyWasDown = false;
-  looseState.dropKeySeconds = 0;
+  looseState.isLettingGo = false;
+  looseState.lettingGoSeconds = 0;
   looseState.hollowWasActive = false;
   looseState.playerWasThere = false; looseState.playerVelocityX = 0; looseState.playerVelocityZ = 0;
 }
@@ -261,6 +283,7 @@ function resetLooseObjectsForNewRun() {
 }
 
 function removeLooseObject(object) {
+  changePointsOnLooseObject(object, 0); // its points do not stay behind in the air
   if (looseState.held === object) looseState.held = null;
   object.isRemoved = true;
   object.isHeld = false;
@@ -268,12 +291,52 @@ function removeLooseObject(object) {
   if (index >= 0) looseObjects.splice(index, 1);
 }
 
+// Is this point (in the station) on the surface of the object, where it is now? A hand's width of slack.
+function isPointOnLooseObject(object, x, y, z) {
+  const matrix = object.matrix, slack = 0.04;
+  const offsetX = x - object.x, offsetY = y - object.y, offsetZ = z - object.z;
+  const localX = matrix[0] * offsetX + matrix[3] * offsetY + matrix[6] * offsetZ;
+  const localY = matrix[1] * offsetX + matrix[4] * offsetY + matrix[7] * offsetZ;
+  const localZ = matrix[2] * offsetX + matrix[5] * offsetY + matrix[8] * offsetZ;
+  const parts = object.prepared.parts;
+  for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+    const part = parts[partIndex];
+    if (part.shape === 'box') {
+      if (Math.abs(localX - part.centerX) <= part.halfX + slack && Math.abs(localY - part.centerY) <= part.halfY + slack && Math.abs(localZ - part.centerZ) <= part.halfZ + slack) return true;
+    } else if (part.shape === 'ball') {
+      const reach = part.radius + slack;
+      if (Math.pow(localX - part.centerX, 2) + Math.pow(localY - part.centerY, 2) + Math.pow(localZ - part.centerZ, 2) <= reach * reach) return true;
+    } else {
+      // How far from the rod's middle line.
+      const alongX = part.toX - part.fromX, alongY = part.toY - part.fromY, alongZ = part.toZ - part.fromZ;
+      const lengthSquared = alongX * alongX + alongY * alongY + alongZ * alongZ;
+      const share = lengthSquared > 0 ? clampNumber(((localX - part.fromX) * alongX + (localY - part.fromY) * alongY + (localZ - part.fromZ) * alongZ) / lengthSquared, 0, 1) : 0;
+      const reach = part.radius + slack;
+      if (Math.pow(localX - part.fromX - alongX * share, 2) + Math.pow(localY - part.fromY - alongY * share, 2) + Math.pow(localZ - part.fromZ - alongZ * share, 2) <= reach * reach) return true;
+    }
+  }
+  return false;
+}
+
 // The points that were scanned onto an object at rest stay where they were measured. When it moves off they
-// are let go, the way a door's are when it slides away.
-function fadePointsOnLooseObject(object) {
-  const reach = object.prepared.boundsRadius + 0.04;
-  fadePointsInsideBox(object.x - reach, object.y - reach, object.z - reach, object.x + reach, object.y + reach, object.z + reach,
-    convertSecondsToPointLifeCode(TUNING.looseImprintSeconds));
+// are let go, the way a door's are when it slides away; when it is taken out of the world they go at once
+// (`seconds` 0). Only the points on the object itself: the floor it stood on keeps its own.
+function changePointsOnLooseObject(object, seconds) {
+  const reach = object.prepared.partsRadius + 0.05;
+  changePointsOnShape(object.x - reach, object.y - reach, object.z - reach, object.x + reach, object.y + reach, object.z + reach,
+    SURFACE_INTERACTIVE, seconds > 0 ? convertSecondsToPointLifeCode(seconds) : 0,
+    function (x, y, z) { return isPointOnLooseObject(object, x, y, z); });
+}
+
+// A pulse has landed on this object.
+function noteLooseObjectScanned(object) {
+  object.lastScannedTime = game.time;
+  if (object.isAsleep) object.hasRestPoints = true;
+}
+
+// Does the object have points on it right now? Only then is it drawn as something solid that hides what is behind it.
+function isLooseObjectSeen(object) {
+  return object.hasRestPoints || game.time - object.lastScannedTime < TUNING.looseImprintSeconds;
 }
 
 // Wakes an object at rest, and with it whatever lies against it or on top of it: take the bottom crate away
@@ -282,7 +345,12 @@ function wakeLooseObject(object) {
   if (!object.isAsleep) return;
   object.isAsleep = false;
   object.restSeconds = 0;
-  fadePointsOnLooseObject(object);
+  if (object.hasRestPoints) {
+    // Its points stay behind where it lay, and go over the next moment. It is seen for as long as they are.
+    changePointsOnLooseObject(object, TUNING.looseImprintSeconds);
+    object.hasRestPoints = false;
+    object.lastScannedTime = game.time;
+  }
   wakeLooseObjectsTouching(object);
 }
 
@@ -333,7 +401,7 @@ function intersectRayWithLooseBox(part, ray) {
 function intersectRayWithLooseObject(object, originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {
   const toCentreX = object.x - originX, toCentreY = object.y - originY, toCentreZ = object.z - originZ;
   const projection = toCentreX * directionX + toCentreY * directionY + toCentreZ * directionZ;
-  const boundsRadius = object.prepared.boundsRadius;
+  const boundsRadius = object.prepared.partsRadius;
   if (projection < -boundsRadius || projection - boundsRadius > nearerThan) return -1;
   const perpendicularSquared = toCentreX * toCentreX + toCentreY * toCentreY + toCentreZ * toCentreZ - projection * projection;
   if (perpendicularSquared > boundsRadius * boundsRadius) return -1;
@@ -372,10 +440,42 @@ function findLooseObjectOnRay(originX, originY, originZ, directionX, directionY,
   let best = null;
   looseRayDistance = nearerThan;
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    if (looseObjects[objectIndex].isHeld) continue;
     const distance = intersectRayWithLooseObject(looseObjects[objectIndex], originX, originY, originZ, directionX, directionY, directionZ, looseRayDistance);
     if (distance > 0) { looseRayDistance = distance; best = looseObjects[objectIndex]; }
   }
   return best;
+}
+
+// Where the scanner's lens is in the station: the place the laser lines are drawn from.
+const scannerLens = { x: 0, y: 0, z: 0 };
+function updateScannerLens(eyeX, eyeY, eyeZ, fieldOfViewDegrees) {
+  const lens = getSteadyLensInView(fieldOfViewDegrees), basis = scannerBasis;
+  scannerLens.x = eyeX + basis.rightX * lens.x + basis.upX * lens.y - basis.forwardX * lens.z;
+  scannerLens.y = eyeY + basis.rightY * lens.x + basis.upY * lens.y - basis.forwardY * lens.z;
+  scannerLens.z = eyeZ + basis.rightZ * lens.x + basis.upZ * lens.y - basis.forwardZ * lens.z;
+}
+
+// One pulse of the scanner, with what you carry taken into account. Where a pulse lands is worked out from
+// your eyes, like everything you see. But the scanner is in your right hand, and its beam is drawn from there:
+// so what you carry stops a pulse only when it is on the straight line from the lens to where the pulse was
+// going. A canister at your left side is never on that line. A crate held in front of the scanner is.
+// Fills `rayHit` and returns true on a hit, like castScannerRay. Call updateScannerLens first.
+function castScannerPulse(eyeX, eyeY, eyeZ, directionX, directionY, directionZ, maximumDistance) {
+  const isHit = castScannerRay(eyeX, eyeY, eyeZ, directionX, directionY, directionZ, maximumDistance);
+  const held = looseState.held;
+  if (held === null) return isHit;
+  // Where the pulse was going: what it hit, or as far as the scanner reaches.
+  const reach = isHit ? rayHit.distance : maximumDistance;
+  let alongX = eyeX + directionX * reach - scannerLens.x, alongY = eyeY + directionY * reach - scannerLens.y, alongZ = eyeZ + directionZ * reach - scannerLens.z;
+  const length = Math.sqrt(alongX * alongX + alongY * alongY + alongZ * alongZ);
+  if (length < 0.05) return isHit;
+  alongX /= length; alongY /= length; alongZ /= length;
+  const distance = intersectRayWithLooseObject(held, scannerLens.x, scannerLens.y, scannerLens.z, alongX, alongY, alongZ, length);
+  if (distance <= 0) return isHit;
+  fillRayHit(distance, SURFACE_INTERACTIVE, 0.6 + Math.random() * 0.3, 0, scannerLens.x, scannerLens.y, scannerLens.z, alongX, alongY, alongZ);
+  rayHit.looseObject = held;
+  return true;
 }
 
 // How long a point scanned onto this object stays: for good while it lies still, a moment while it moves.
@@ -473,8 +573,15 @@ function addLooseContactsWithCylinderProp(prop, positionX, positionY, positionZ,
   else addLooseContact(normalA, normalB, normalAlong, depth);
 }
 
-// Something that walks (you, the Hollow), as an upright post. It shoves an object but is not stopped by it.
-function addLooseContactWithWalker(isPlayer, walkerX, walkerZ, walkerRadius, bottomY, topY, velocityX, velocityZ, positionX, positionY, positionZ, radius) {
+// How much of your push a thing of this weight takes out of your stride: 0 for something you kick along without
+// feeling it, 1 for something that does not move for your shins at all and stops you.
+function getLooseShoveResistance(mass) {
+  return clampNumber((mass - TUNING.looseShoveFreeMass) / (TUNING.looseShoveBlockMass - TUNING.looseShoveFreeMass), 0, 1);
+}
+
+// Something that walks (you, the Hollow), as an upright post. It shoves the object along. The Hollow is not
+// held up by anything. You are, by as much as the thing weighs: `resistance` is 0 to 1 (see above).
+function addLooseContactWithWalker(isPlayer, resistance, walkerX, walkerZ, walkerRadius, bottomY, topY, velocityX, velocityZ, positionX, positionY, positionZ, radius) {
   if (positionY < bottomY - radius * 0.5 || positionY > topY + radius * 0.5) return;
   const deltaX = positionX - walkerX, deltaZ = positionZ - walkerZ;
   const distanceSquared = deltaX * deltaX + deltaZ * deltaZ, reach = walkerRadius + radius;
@@ -482,7 +589,15 @@ function addLooseContactWithWalker(isPlayer, walkerX, walkerZ, walkerRadius, bot
   const distance = Math.sqrt(distanceSquared);
   const contact = addLooseContact(deltaX / distance, 0, deltaZ / distance, reach - distance);
   if (!contact) return;
-  contact.velocityX = velocityX; contact.velocityZ = velocityZ; contact.isSoft = true; contact.isPlayer = isPlayer;
+  // The heavier it is, the less of your speed it takes up ...
+  contact.velocityX = velocityX * (1 - resistance); contact.velocityZ = velocityZ * (1 - resistance);
+  contact.isSoft = true; contact.isPlayer = isPlayer;
+  // ... and the more of the overlap is yours to give back.
+  const pushBack = (reach - distance) * resistance;
+  if (isPlayer && pushBack > looseState.shoveBackDepth) {
+    looseState.shoveBackDepth = pushBack;
+    looseState.shoveBackX = -deltaX / distance; looseState.shoveBackZ = -deltaZ / distance;
+  }
 }
 
 // Fills `looseContacts` with everything one ball of `object`'s shell overlaps.
@@ -582,12 +697,12 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
 
   // You and the Hollow. What you are carrying passes through you: it is in your hands.
   if (!object.isHeld && game.mode === 'playing') {
-    addLooseContactWithWalker(true, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + (player.isCrouching ? 1.0 : 1.7),
-      looseState.playerVelocityX, looseState.playerVelocityZ, positionX, positionY, positionZ, radius);
+    addLooseContactWithWalker(true, getLooseShoveResistance(object.kind.mass), player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + (player.isCrouching ? 1.0 : 1.7),
+      looseState.playerStrideX, looseState.playerStrideZ, positionX, positionY, positionZ, radius);
   }
   if (hollow.isActive) {
     const figure = hollow.figure;
-    addLooseContactWithWalker(false, figure.x, figure.z, 0.34, figure.y, figure.y + 1.9,
+    addLooseContactWithWalker(false, 0, figure.x, figure.z, 0.34, figure.y, figure.y + 1.9,
       looseState.hollowVelocityX, looseState.hollowVelocityZ, positionX, positionY, positionZ, radius);
   }
 }
@@ -965,15 +1080,14 @@ function pickUpLooseObject(object) {
   object.lastHandledTime = game.time;
   looseState.held = object;
   looseState.holdBreakTimer = 0;
-  looseState.dropKeySeconds = 0;
-  looseState.dropKeyWasDown = input.keysDown.has('KeyQ') || input.touchDropHeld;
-  input.dropPressed = false;
+  looseState.isLettingGo = false; // the press that picked it up is not also the press that lets go of it
+  looseState.lettingGoSeconds = 0;
   playLooseObjectHandlingSound(object.kind.material, true);
   if (!looseState.hasShownCarryHint) {
     looseState.hasShownCarryHint = true;
     showMessage(input.isTouchDevice
-      ? 'DROP lets go of it. Hold DROP and let go to throw it.'
-      : 'Q lets go of it. Hold Q and let go to throw it.', 7, 'info');
+      ? 'USE again lets go of it. Hold USE and let go to throw it.'
+      : 'E again lets go of it. Hold E and let go to throw it.', 7, 'info');
   }
   return true;
 }
@@ -983,6 +1097,8 @@ function releaseHeldLooseObject(throwStrength) {
   const object = looseState.held;
   if (!object) return null;
   looseState.held = null;
+  looseState.isLettingGo = false;
+  looseState.lettingGoSeconds = 0;
   object.isHeld = false;
   object.lastHandledTime = game.time;
   if (throwStrength > 0) {
@@ -1000,27 +1116,29 @@ function releaseHeldLooseObject(throwStrength) {
   return object;
 }
 
-// The drop key: a tap lets go, holding it winds up a throw that goes when the key is let go.
+// E was pressed with something in your hands and nothing in front of you to use (09-player.js calls this).
+// What that press does is decided when the key comes up again: let go at once and it only lets go of the
+// object; held, it winds up a throw.
+function beginLettingGo() {
+  if (!looseState.held) return;
+  looseState.isLettingGo = true;
+  looseState.lettingGoSeconds = 0;
+}
+
 function updateLooseCarryInput(dt) {
-  // `dropPressed` remembers a press until it has been seen here, so that a tap shorter than one frame still counts.
-  const isDown = input.keysDown.has('KeyQ') || input.touchDropHeld || input.dropPressed;
-  input.dropPressed = false;
-  if (!looseState.held) { looseState.dropKeyWasDown = isDown; looseState.dropKeySeconds = 0; return; }
-  if (isDown && !looseState.dropKeyWasDown) looseState.dropKeySeconds = 0;
-  if (isDown) looseState.dropKeySeconds += dt;
-  if (!isDown && looseState.dropKeyWasDown) {
-    const held = looseState.dropKeySeconds;
-    if (held < TUNING.looseThrowTapSeconds) releaseHeldLooseObject(0);
-    else releaseHeldLooseObject(clampNumber(held / TUNING.looseThrowChargeSeconds, 0.25, 1));
-    looseState.dropKeySeconds = 0;
-  }
-  looseState.dropKeyWasDown = isDown;
+  if (!looseState.held || !looseState.isLettingGo) { looseState.isLettingGo = false; looseState.lettingGoSeconds = 0; return; }
+  const isDown = input.keysDown.has('KeyE') || input.touchUseHeld;
+  if (isDown) { looseState.lettingGoSeconds += dt; return; }
+  // The key is up. (A tap shorter than one frame arrives here with no time counted at all: that is a tap.)
+  const held = looseState.lettingGoSeconds;
+  if (held < TUNING.looseThrowTapSeconds) releaseHeldLooseObject(0);
+  else releaseHeldLooseObject(clampNumber(held / TUNING.looseThrowChargeSeconds, 0.25, 1));
 }
 
 // How far the throw is wound up, 0 to 1, for the screen. 0 while the key is only being tapped.
 function getThrowWindUp() {
-  if (!looseState.held || looseState.dropKeySeconds < TUNING.looseThrowTapSeconds) return 0;
-  return clampNumber(looseState.dropKeySeconds / TUNING.looseThrowChargeSeconds, 0.25, 1);
+  if (!looseState.held || !looseState.isLettingGo || looseState.lettingGoSeconds < TUNING.looseThrowTapSeconds) return 0;
+  return clampNumber(looseState.lettingGoSeconds / TUNING.looseThrowChargeSeconds, 0.25, 1);
 }
 
 // The loose object you are looking at and can reach, with how well it is lined up (0 to 1), or null.
@@ -1067,6 +1185,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   // How far you walked since the last frame, before anything you carry has had its say.
   let walkedX = player.x - looseState.playerLastX, walkedZ = player.z - looseState.playerLastZ;
   if (!looseState.playerWasThere || walkedX * walkedX + walkedZ * walkedZ > 1) { walkedX = 0; walkedZ = 0; }
+  looseState.playerStrideX = dt > 0 ? walkedX / dt : 0; looseState.playerStrideZ = dt > 0 ? walkedZ / dt : 0;
 
   // How fast the Hollow is moving, from where it was a frame ago: it kicks what lies in its way.
   if (hollow.isActive) {
@@ -1085,6 +1204,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     if (hollow.isActive) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
   }
 
+  looseState.shoveBackDepth = 0;
   looseState.accumulator = Math.min(looseState.accumulator + dt, TUNING.looseStepSeconds * 8);
   while (looseState.accumulator >= TUNING.looseStepSeconds) {
     looseState.accumulator -= TUNING.looseStepSeconds;
@@ -1101,6 +1221,13 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
       looseState.statistics.lostDownThePit++;
       removeLooseObject(object);
     }
+  }
+
+  // Something heavy on the floor that you walked into gives you back what it did not take.
+  if (looseState.shoveBackDepth > 0) {
+    const resolved = resolveBodyCollision(player.x + looseState.shoveBackX * looseState.shoveBackDepth, player.z + looseState.shoveBackZ * looseState.shoveBackDepth,
+      TUNING.playerRadius, player.isCrouching ? 1.0 : 1.7, getFloorHeightAt(player.x, player.z));
+    player.x = resolved.x; player.z = resolved.z;
   }
 
   const held = looseState.held;
@@ -1126,7 +1253,11 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   // Left too far behind (round a door frame, under a lintel, on the other side of you): it comes out of your hands.
   if (held) {
     const deltaX = looseState.holdTargetX - held.x, deltaY = looseState.holdTargetY - held.y, deltaZ = looseState.holdTargetZ - held.z;
-    if (deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ > TUNING.looseHoldBreakDistance * TUNING.looseHoldBreakDistance) {
+    // Only something that is caught on the station can be lost this way. In open air it is merely behind, however
+    // fast you turn, and catches up; unless it is so far behind that it cannot be yours any more.
+    const gapSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+    const breakDistance = held.touchedThisStep ? TUNING.looseHoldBreakDistance : TUNING.looseHoldBreakDistance * 2.5;
+    if (gapSquared > breakDistance * breakDistance) {
       looseState.holdBreakTimer += dt;
       if (looseState.holdBreakTimer >= TUNING.looseHoldBreakSeconds) {
         releaseHeldLooseObject(0);

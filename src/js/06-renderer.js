@@ -547,7 +547,8 @@ function uploadWorldOccluderMesh(vertices) {
 
 // Stores one scanner return. `lifeCode` 0 keeps the point forever; otherwise it fades
 // after lifeCode * 0.25 seconds.
-function addScanPoint(x, y, z, intensity, surfaceClass, lifeCode) {
+// `isOffTheMap`: the point is on something that moves about, and is left off the map.
+function addScanPoint(x, y, z, intensity, surfaceClass, lifeCode, isOffTheMap) {
   const index = pointCloud.writeIndex;
   const floatOffset = index * POINT_STRIDE_FLOATS;
   pointCloud.floatView[floatOffset] = x;
@@ -563,7 +564,7 @@ function addScanPoint(x, y, z, intensity, surfaceClass, lifeCode) {
   if (pointCloud.storedCount < pointCloud.capacity) pointCloud.storedCount++;
   pointCloud.pendingUploadCount++;
   pointCloud.totalReturns++;
-  plotPointOnMap(x, z, surfaceClass);
+  if (!isOffTheMap) plotPointOnMap(x, z, surfaceClass);
 }
 
 let currentPointTime = 0;
@@ -607,6 +608,35 @@ function fadePointsInsideBox(minimumX, minimumY, minimumZ, maximumX, maximumY, m
     fadedAny = true;
   }
   if (fadedAny) pointCloud.needsFullUpload = true;
+}
+
+// Like the two above, for points that lie on one particular thing: only points of `surfaceClass` inside the box
+// for which `isOnIt(x, y, z)` says yes are touched, so that the floor under a crate keeps its points when the
+// crate is taken away. `lifeCode` 0 removes them at once; anything else lets them fade over that time.
+function changePointsOnShape(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ, surfaceClass, lifeCode, isOnIt) {
+  const floats = pointCloud.floatView, bytes = pointCloud.byteView;
+  let changedAny = false;
+  for (let index = 0; index < pointCloud.storedCount; index++) {
+    const offset = index * POINT_STRIDE_FLOATS;
+    const x = floats[offset];
+    if (x < minimumX || x > maximumX) continue;
+    const z = floats[offset + 2];
+    if (z < minimumZ || z > maximumZ) continue;
+    const y = floats[offset + 1];
+    if (y < minimumY || y > maximumY) continue;
+    if (floats[offset + 3] === DEAD_POINT_BIRTH_TIME) continue;
+    const byteOffset = index * POINT_STRIDE_BYTES + 16;
+    if (bytes[byteOffset + 1] !== surfaceClass || !isOnIt(x, y, z)) continue;
+    if (lifeCode === 0) {
+      floats[offset + 3] = DEAD_POINT_BIRTH_TIME;
+    } else {
+      if (bytes[byteOffset + 2] !== 0) continue; // already fading: it keeps its own time
+      floats[offset + 3] = currentPointTime;
+      bytes[byteOffset + 2] = lifeCode;
+    }
+    changedAny = true;
+  }
+  if (changedAny) pointCloud.needsFullUpload = true;
 }
 
 function flushPointUploads() {
@@ -707,15 +737,17 @@ function drawLooseObjectShape(isStationLit, vertexArray, vertexCount) {
   gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
 }
 
-// Loose objects hide the points behind them, like everything else that is solid. They are never seen
-// themselves: what you see of one is the points your scanner leaves on it, and the hole it makes in the rest.
-// (With "Light the station" on in debug mode they are drawn, in the colour of things you can pick up.)
+// A loose object that has points on it hides the points behind it, so that it reads as a solid thing and not
+// as a cloud you can see through. One that has not been scanned hides nothing: until your scanner has found it,
+// it is not there to your eyes, and a black shape against the points behind would give it away.
+// (With "Light the station" on in debug mode they are all drawn, in the colour of things you can pick up.)
 function drawLooseObjectOccluders(camera, isStationLit) {
   if (looseObjects.length === 0) return;
   const gl = renderer.gl;
   if (isStationLit) gl.uniform3f(renderer.debugWorldUniforms.uColor, 0.9, 0.6, 0.12);
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
     const object = looseObjects[objectIndex];
+    if (!isStationLit && !isLooseObjectSeen(object)) continue; // nothing has been scanned onto it: it is not there to your eyes
     const deltaX = object.x - camera.x, deltaZ = object.z - camera.z;
     if (deltaX * deltaX + deltaZ * deltaZ > 60 * 60) continue; // TWEAK: further than 60 m away they are not worth drawing
     const matrix = object.matrix, parts = object.prepared.parts;
@@ -769,18 +801,36 @@ function writeViewmodelPlacementMatrix(out, aspectRatio, frameState) {
 // Moves the near end of every laser line to the place in the station that is drawn exactly behind the lens of
 // the scanner in the player's hand. The scanner is drawn with its own field of view and sways with the player's
 // steps, so a fixed offset from the eye does not land on the lens: the lines then start in the air beside it.
-function moveBeamLineOriginsToViewmodelLens(camera, eyeX, eyeY, eyeZ) {
-  const placement = renderer.viewmodelMatrix;
+// Where the lens of the scanner is, as the eye sees it: metres to the right, up, and (negative) ahead.
+// `placement` is the scanner's place in front of the eye (writeViewmodelPlacementMatrix). The scanner is drawn
+// with its own field of view, so this is the place in the station that is drawn exactly behind the lens.
+const lensInView = { x: 0, y: 0, z: 0 };
+function computeLensInView(placement, fieldOfViewDegrees) {
   const lensX = VIEWMODEL_LENS_CENTER_X * VIEWMODEL_MODEL_SCALE, lensY = VIEWMODEL_LENS_CENTER_Y * VIEWMODEL_MODEL_SCALE, lensZ = VIEWMODEL_LENS_CENTER_Z * VIEWMODEL_MODEL_SCALE;
   // The lens as the viewmodel camera sees it: x to the right, y up, z toward the eye.
   const lensViewX = placement[0] * lensX + placement[4] * lensY + placement[8] * lensZ + placement[12];
   const lensViewY = placement[1] * lensX + placement[5] * lensY + placement[9] * lensZ + placement[13];
   const lensViewZ = placement[2] * lensX + placement[6] * lensY + placement[10] * lensZ + placement[14];
   // The same place on the screen, seen with the field of view the station is drawn with.
-  const fieldOfViewRatio = Math.tan(camera.fieldOfViewDegrees * DEGREES_TO_RADIANS / 2) / Math.tan(VIEWMODEL_FIELD_OF_VIEW_DEGREES * DEGREES_TO_RADIANS / 2);
-  const originViewX = lensViewX / -lensViewZ * fieldOfViewRatio * BEAM_ORIGIN_DISTANCE;
-  const originViewY = lensViewY / -lensViewZ * fieldOfViewRatio * BEAM_ORIGIN_DISTANCE;
-  const originViewZ = -BEAM_ORIGIN_DISTANCE;
+  const fieldOfViewRatio = Math.tan(fieldOfViewDegrees * DEGREES_TO_RADIANS / 2) / Math.tan(VIEWMODEL_FIELD_OF_VIEW_DEGREES * DEGREES_TO_RADIANS / 2);
+  lensInView.x = lensViewX / -lensViewZ * fieldOfViewRatio * BEAM_ORIGIN_DISTANCE;
+  lensInView.y = lensViewY / -lensViewZ * fieldOfViewRatio * BEAM_ORIGIN_DISTANCE;
+  lensInView.z = -BEAM_ORIGIN_DISTANCE;
+  return lensInView;
+}
+
+// The same, for the game to ask: where the lens is when the scanner is held still (no sway from your steps).
+// The scanner's pulses are worked out from here when something you carry may be in their way.
+const STEADY_VIEWMODEL = { viewmodelSwayX: 0, viewmodelSwayY: 0, viewmodelKick: 0 };
+const steadyViewmodelMatrix = new Float32Array(16);
+function getSteadyLensInView(fieldOfViewDegrees) {
+  const aspectRatio = renderer.height > 0 ? renderer.width / renderer.height : 16 / 9;
+  return computeLensInView(writeViewmodelPlacementMatrix(steadyViewmodelMatrix, aspectRatio, STEADY_VIEWMODEL), fieldOfViewDegrees);
+}
+
+function moveBeamLineOriginsToViewmodelLens(camera, eyeX, eyeY, eyeZ) {
+  const lens = computeLensInView(renderer.viewmodelMatrix, camera.fieldOfViewDegrees);
+  const originViewX = lens.x, originViewY = lens.y, originViewZ = lens.z;
   // From in front of the eye to a place in the station: the view matrix holds right, up and backward in its rows.
   const view = renderer.viewMatrix;
   const originX = eyeX + view[0] * originViewX + view[1] * originViewY + view[2] * originViewZ;

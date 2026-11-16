@@ -172,11 +172,14 @@ const TUNING = {
   looseHoldSagPerKilogram: 0.003,   // metres lower in your hands per kilogram
   looseHoldStopDistance: 0.3,       // when it is against something and this far behind your hands, it starts to hold you back ...
   looseHoldStopSpeed: 3,            // ... by up to this many metres a second: enough to stop a walk (2.5), not a run (4.6)
-  looseHoldBreakDistance: 0.75,     // further than this from your hands ...
-  looseHoldBreakSeconds: 0.25,      // ... for this long, and it is pulled out of them
+  looseHoldBreakDistance: 0.75,     // caught on something and further than this from your hands ...
+  looseHoldBreakSeconds: 0.25,      // ... for this long, and it is pulled out of them. (Not caught on anything, it has to be two and a half times as far.)
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
+  // Walking into one that lies on the floor.
+  looseShoveFreeMass: 2,            // lighter than this (kg) you kick along without it slowing you
+  looseShoveBlockMass: 16,          // this heavy or heavier it does not move for your legs and stops you: pick it up. In between it slows you by its share of the way from one to the other.
   // Throwing.
-  looseThrowTapSeconds: 0.22,       // letting the drop key go sooner than this only lets go of the object
+  looseThrowTapSeconds: 0.22,       // letting E go sooner than this only lets go of the object
   looseThrowChargeSeconds: 0.9,     // holding it this long gives the hardest throw
   looseThrowSpeed: 11,              // metres per second for a full throw of something that weighs nothing ...
   looseThrowLossPerKilogram: 0.11,  // ... and what each kilogram takes off it: a 3 kg canister leaves at 8.3 m/s, an 18 kg motor at 3.7

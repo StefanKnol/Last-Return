@@ -31,7 +31,7 @@ function getElement(elementId) {
 
 function initializeInterface() {
   const elementIds = [
-    'hud', 'hud-objective', 'chip-spools', 'chip-power', 'chip-keycard', 'chip-extra', 'chip-carrying', 'touch-drop', 'minimap-canvas', 'hud-location',
+    'hud', 'hud-objective', 'chip-spools', 'chip-power', 'chip-keycard', 'chip-extra', 'chip-carrying', 'minimap-canvas', 'hud-location',
     'readout-range', 'readout-flight', 'readout-returns', 'readout-heading', 'bar-heat', 'bar-stamina',
     'bar-interference', 'meter-agitation', 'bar-agitation', 'hud-stance', 'hud-block-objective', 'hud-block-map', 'hud-block-instruments', 'hud-readouts',
     'meter-heat', 'meter-stamina', 'meter-interference', 'map-objective', 'map-status', 'reticle-ring', 'hud-prompt', 'hud-countdown', 'hud-messages', 'hud-caption',
@@ -712,7 +712,6 @@ function updateHud(realDt) {
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
     if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + carried.kind.label.toUpperCase();
-    elements['touch-drop'].hidden = carried === null; // the DROP button is only there while there is something to drop
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];

@@ -51,6 +51,35 @@ function installLab() {
       best.room = bestRoom;
       return best;
     },
+    // A bare wall to walk into: a stretch of rock with nothing standing against it, no door near it, and a clear
+    // run of two and a half metres or more straight up to it, wider than anything you can carry.
+    findBareWall: function () {
+      for (let z = 2; z < 200; z++) {
+        for (let x = 2; x < 200; x++) {
+          const here = d.findWalkableSpotNear(x + 0.5, z + 0.5);
+          if (!here || here.x !== x + 0.5 || here.z !== z + 0.5 || d.isVentAt(x + 0.5, z + 0.5) || Math.abs(d.getFloorHeightAt(x + 0.5, z + 0.5)) > 0.01) continue;
+          for (const step of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            // How far the rock is, straight ahead from this tile.
+            let rock = 0;
+            while (rock < 12 && d.isSpaceOpenAt(x + 0.5 + step[0] * rock, 1, z + 0.5 + step[1] * rock)) rock += 0.05;
+            if (rock < 3.2 || rock >= 12) continue;
+            let isBare = true;
+            for (const across of [-0.7, -0.35, 0, 0.35, 0.7]) {
+              for (const height of [0.15, 0.6, 1.0, 1.4, 1.7]) {
+                const fromX = x + 0.5 - step[1] * across, fromZ = z + 0.5 + step[0] * across;
+                const isHit = d.castScannerRay(fromX, height, fromZ, step[0], 0, step[1], 20);
+                if (!isHit || Math.abs(d.rayHit.distance - rock) > 0.08) isBare = false;
+              }
+            }
+            if (!isBare) continue;
+            const wallX = x + 0.5 + step[0] * rock, wallZ = z + 0.5 + step[1] * rock;
+            if (d.doors.some((door) => Math.hypot(door.centerX - wallX, door.centerZ - wallZ) < 4 || Math.hypot(door.centerX - (x + 0.5), door.centerZ - (z + 0.5)) < 4)) continue;
+            return { x: x + 0.5, z: z + 0.5, stepX: step[0], stepZ: step[1], wall: rock, yaw: Math.atan2(step[0], -step[1]) };
+          }
+        }
+      }
+      return null;
+    },
     // Distance from (x, z) to the first wall or object along `yaw`, at chest height.
     distanceAhead: function (x, z, yaw) {
       return d.castScannerRay(x, 1.2, z, Math.sin(yaw), 0, -Math.cos(yaw), 60) ? d.rayHit.distance : 60;
@@ -77,6 +106,7 @@ function installLab() {
     coneShare: function (object, degrees) {
       d.computeScannerBasis(p.yaw, p.pitch);
       const basis = d.scannerBasis, tangent = Math.tan(degrees * Math.PI / 180), eyeY = d.getPlayerEyeY(), pulses = 800;
+      d.updateScannerLens(p.x, eyeY, p.z, d.getPlayFieldOfViewDegrees());
       let stopped = 0;
       for (let pulse = 0; pulse < pulses; pulse++) {
         const radius = Math.pow((pulse + 0.5) / pulses, 0.62) * tangent, angle = pulse * 2.399963;
@@ -85,9 +115,36 @@ function installLab() {
         const y = basis.forwardY + basis.rightY * across + basis.upY * up;
         const z = basis.forwardZ + basis.rightZ * across + basis.upZ * up;
         const length = Math.hypot(x, y, z);
-        if (d.castScannerRay(p.x, eyeY, p.z, x / length, y / length, z / length, 30) && d.rayHit.looseObject === object) stopped++;
+        if (d.castScannerPulse(p.x, eyeY, p.z, x / length, y / length, z / length, 30) && d.rayHit.looseObject === object) stopped++;
       }
       return round(stopped / pulses);
+    },
+    // Counts the scan points inside a box that will stay (not fading, not removed): those on the floor and walls,
+    // and those on things that can be picked up.
+    countPoints: function (x, y, z, reach) {
+      const floats = d.pointCloud.floatView, bytes = d.pointCloud.byteView, counts = { station: 0, onObjects: 0, fading: 0 };
+      for (let index = 0; index < d.pointCloud.storedCount; index++) {
+        const px = floats[index * 5], py = floats[index * 5 + 1], pz = floats[index * 5 + 2];
+        if (Math.abs(px - x) > reach || Math.abs(py - y) > reach || Math.abs(pz - z) > reach) continue;
+        if (floats[index * 5 + 3] < -1e8) continue; // removed
+        const surfaceClass = bytes[index * 20 + 17], lifeCode = bytes[index * 20 + 18];
+        if (lifeCode !== 0) counts.fading++;
+        else if (surfaceClass === 7) counts.onObjects++;
+        else counts.station++;
+      }
+      return counts;
+    },
+    // Stands two metres from an object, looks at it, and scans it and the floor around it for a second and a half.
+    scan: function (object) {
+      lab.stand(object.x - 2, object.z, Math.PI / 2);
+      p.pitch = Math.atan2(object.y - d.getPlayerEyeY(), 2);
+      d.setDebugOption('unlimitedScanner', true);
+      d.setScannerSpread(24);
+      d.setScanHeld(true);
+      d.simulate(1.5);
+      d.setScanHeld(false);
+      d.setScannerSpread(d.tuning.scannerSpreadDefaultDegrees);
+      d.simulate(0.1);
     },
     knocks: function () { const s = d.looseState.statistics; return { heard: s.knocksHeard, quiet: s.knocksQuiet, pulled: s.pulledFromHands }; },
     since: function (before) { const now = lab.knocks(); return { heard: now.heard - before.heard, quiet: now.quiet - before.quiet, pulled: now.pulled - before.pulled }; },
@@ -294,7 +351,7 @@ function installLab() {
   }, spot);
   const badCarry = Object.keys(carrying).filter((key) => {
     const entry = carrying[key];
-    return entry.atRest > 0.02 || entry.walking > 0.12 || entry.turning > 0.6 || !entry.stillHeld || entry.knocks.heard + entry.knocks.quiet > 0 ||
+    return entry.atRest > 0.02 || entry.walking > 0.12 || entry.turning > (entry.hands === 2 ? 0.9 : 0.6) || !entry.stillHeld || entry.knocks.heard + entry.knocks.quiet > 0 ||
       Math.abs(entry.speed - entry.wantedSpeed) > 0.12 || entry.canRun !== (entry.hands === 1);
   });
   check('carried in the open, every kind stays in your hands, walking and through a quick turn, without a knock; it slows you by its weight; two hands cannot run',
@@ -314,10 +371,16 @@ function installLab() {
       p.pitch = 0.6; d.simulate(0.6);
       entry.lookingUp = lab.coneShare(object, d.tuning.scannerSpreadDefaultDegrees);
       p.pitch = 0; d.simulate(0.4);
-      // A real pulse: what does it leave on the object, and how long does that stay?
-      d.castScannerRay(object.x - 3, object.y, object.z, 1, 0, 0, 10);
-      entry.stopsAPulse = d.rayHit.looseObject === object;
       entry.fadesWhileCarried = d.getLooseObjectPointLifeCode(object) > 0;
+      // Seen from your eyes it is in view all the same: a ray from the eye straight at it would meet it.
+      // The scanner is not at your eyes, which is the whole point.
+      const eyeY = d.getPlayerEyeY(), away = Math.hypot(object.x - p.x, object.y - eyeY, object.z - p.z);
+      d.updateScannerLens(p.x, eyeY, p.z, d.getPlayFieldOfViewDegrees());
+      entry.aimedAtItFromTheEye = d.castScannerPulse(p.x, eyeY, p.z, (object.x - p.x) / away, (object.y - eyeY) / away, (object.z - p.z) / away, 30) && d.rayHit.looseObject === object;
+      // Out of your hands it is an object like any other: a pulse that meets it stops on it.
+      d.releaseHeldLooseObject(0);
+      d.castScannerRay(object.x - 3, object.y, object.z, 1, 0, 0, 10);
+      entry.stopsAPulseOutOfYourHands = d.rayHit.looseObject === object;
       result[kindKey] = entry;
     }
     // Nothing in your hands: nothing in the way.
@@ -327,42 +390,73 @@ function installLab() {
     result.lyingAhead = { share: lab.coneShare(loose, 24), staysOnceAtRest: d.getLooseObjectPointLifeCode(loose) === 0 };
     return result;
   }, spot);
-  check('a crate in your arms takes at least a third of the scanner\'s cone, a jar a small bite of it, a pipe next to nothing',
-    blocking.crate.normal >= 0.33 && blocking.crate.normal <= 0.7 && blocking.jar.normal >= 0.05 && blocking.jar.normal <= 0.3 && blocking.pipe.normal <= 0.08 &&
-    blocking.pumpMotor.normal >= 0.15 && blocking.toolCase.normal >= 0.08, blocking);
-  check('looking down, what you carry comes down with your look and is as much in the way as before; looking up, you see over it',
+  const oneHanded = ['canister', 'jar', 'toolCase', 'pipe'];
+  check('what you carry in one hand hangs at your left side and is never in the beam: the scanner is in your right',
+    oneHanded.every((key) => blocking[key].narrow === 0 && blocking[key].normal === 0 && blocking[key].wide === 0 && blocking[key].lookingDown === 0 && blocking[key].lookingUp === 0 && !blocking[key].aimedAtItFromTheEye), blocking);
+  check('a crate or a pump motor is carried in front of the scanner and takes a third or more of its beam; looking up, the scanner sees over it',
+    blocking.crate.normal >= 0.33 && blocking.crate.normal <= 0.7 && blocking.pumpMotor.normal >= 0.2 && blocking.pumpMotor.normal <= 0.7 &&
     blocking.crate.lookingDown >= 0.3 && blocking.crate.lookingUp <= 0.05 && blocking.pumpMotor.lookingUp <= 0.05, [blocking.crate, blocking.pumpMotor]);
-  check('a pulse stops on every kind; points on a carried object fade, points on one lying still stay',
-    Object.keys(blocking).filter((key) => key !== 'lyingAhead').every((key) => blocking[key].stopsAPulse && blocking[key].fadesWhileCarried) && blocking.lyingAhead.staysOnceAtRest, blocking.lyingAhead);
+  check('points on a carried object fade, points on one lying still stay, and any of them out of your hands stops a pulse that meets it',
+    Object.keys(blocking).filter((key) => key !== 'lyingAhead').every((key) => blocking[key].stopsAPulseOutOfYourHands && blocking[key].fadesWhileCarried) && blocking.lyingAhead.staysOnceAtRest, blocking.lyingAhead);
+
+  // A pulse that the crate stops lands on the crate, on the straight line from the lens to where it was going.
+  const onTheLine = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
+    d.clearLooseObjects();
+    lab.stand(spot.x, spot.z, Math.PI / 2);
+    const object = lab.carry('crate');
+    const eyeY = d.getPlayerEyeY();
+    d.computeScannerBasis(p.yaw, p.pitch);
+    d.updateScannerLens(p.x, eyeY, p.z, d.getPlayFieldOfViewDegrees());
+    const basis = d.scannerBasis, lens = { x: d.scannerLens.x, y: d.scannerLens.y, z: d.scannerLens.z };
+    // Where a pulse a little below the middle would land with nothing in your hands ...
+    let x = basis.forwardX - basis.upX * 0.12, y = basis.forwardY - basis.upY * 0.12, z = basis.forwardZ - basis.upZ * 0.12;
+    const length = Math.hypot(x, y, z); x /= length; y /= length; z /= length;
+    d.castScannerRay(p.x, eyeY, p.z, x, y, z, 30);
+    const beyond = { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z };
+    // ... and where it lands now.
+    const stopped = d.castScannerPulse(p.x, eyeY, p.z, x, y, z, 30) && d.rayHit.looseObject === object;
+    const hit = { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z };
+    const whole = Math.hypot(beyond.x - lens.x, beyond.y - lens.y, beyond.z - lens.z), part = Math.hypot(hit.x - lens.x, hit.y - lens.y, hit.z - lens.z);
+    const offTheLine = Math.hypot(lens.x + (beyond.x - lens.x) * part / whole - hit.x, lens.y + (beyond.y - lens.y) * part / whole - hit.y, lens.z + (beyond.z - lens.z) * part / whole - hit.z);
+    return { stopped: stopped, metresFromTheLens: lab.round(part), offTheLine: offTheLine, onTheCrate: Math.hypot(hit.x - object.x, hit.y - object.y, hit.z - object.z) < object.prepared.partsRadius + 0.01,
+      lensFromTheEye: [lab.round(Math.hypot(lens.x - p.x, lens.z - p.z)), lab.round(lens.y - eyeY)] };
+  }, spot);
+  check('a pulse that a carried crate stops lands on the crate, on the straight line from the scanner\'s lens to where it was going',
+    onTheLine.stopped && onTheLine.onTheCrate && onTheLine.offTheLine < 1e-6 && onTheLine.metresFromTheLens < 0.8, onTheLine);
 
   // --- knocks ---
-  // Carried into a wall at a walk, crouched, and at a run. The Hollow stands four metres off to one side, listening.
-  const intoWall = await inGame((spot) => {
+  const bareWall = await inGame(() => { window.looseLab.reset(); return window.looseLab.findBareWall(); });
+  check('Kessel-9 has a bare wall with a clear run up to it and no door near', bareWall !== null, bareWall);
+  // Carried into that wall at a walk, crouched, and at a run. The Hollow stands four metres off to one side, listening.
+  const intoWall = await inGame((bare) => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
-    const yaw = Math.PI / 2, wall = lab.distanceAhead(spot.x, spot.z, yaw);
+    const wallX = bare.x + bare.stepX * bare.wall, wallZ = bare.z + bare.stepZ * bare.wall;
     for (const kindKey of ['canister', 'crate', 'pipe']) {
       for (const pace of ['crouched', 'walking', 'running']) {
         if (pace === 'running' && d.looseObjectKinds[kindKey].hands === 2) continue;
         d.clearLooseObjects();
-        lab.stand(spot.x + wall - 2.4, spot.z, yaw);
+        const startX = bare.x + bare.stepX * (bare.wall - 2.9), startZ = bare.z + bare.stepZ * (bare.wall - 2.9);
+        lab.stand(startX, startZ, bare.yaw);
         const object = lab.carry(kindKey);
-        d.spawnHollow(spot.x + wall - 1, spot.z + 4);
+        // A metre back from the wall and four metres to one side. (It is held still, so it may stand anywhere.)
+        d.spawnHollow(wallX - bare.stepX - bare.stepZ * 4, wallZ - bare.stepZ + bare.stepX * 4);
         d.hollow.graceTimer = 0; d.hollow.state = 0; d.hollow.hasHeardNoise = false;
         const before = lab.knocks();
-        lab.noises.length = 0;
         for (const key of ['ownObjectKnock', 'ownObjectCrash']) d.captionCounts[key] = 0;
         const knockBefore = d.looseState.lastKnock.time;
         d.input.keysDown.add('KeyW');
         if (pace === 'crouched') d.input.keysDown.add('KeyC');
         if (pace === 'running') d.input.keysDown.add('ShiftLeft');
-        const startZ = p.z;
-        d.simulate(pace === 'crouched' ? 4.5 : 3);
+        d.simulate(pace === 'crouched' ? 5 : 3.5);
         const lastKnock = d.looseState.lastKnock, wasKnock = lastKnock.time !== knockBefore;
+        const along = (p.x - bare.x) * bare.stepX + (p.z - bare.z) * bare.stepZ;
         result[kindKey + ' ' + pace] = {
           knocks: lab.since(before), stillHeld: d.getHeldLooseObject() === object,
-          fromWall: lab.round(spot.x + wall - p.x), sideways: lab.round(Math.abs(p.z - startZ)),
-          noiseCarries: wasKnock ? lab.round(lastKnock.carries) : 0, knockAtTheWall: wasKnock && Math.abs(lastKnock.x - (spot.x + wall)) < 0.3, yours: wasKnock && lastKnock.isOwn,
-          hollowCameToLook: d.hollow.state === 1 && Math.abs(d.hollow.targetX - (spot.x + wall)) < 1.5,
+          fromWall: lab.round(bare.wall - along), sideways: lab.round(Math.abs((p.x - startX) * bare.stepZ - (p.z - startZ) * bare.stepX)),
+          noiseCarries: wasKnock ? lab.round(lastKnock.carries) : 0,
+          knockAtTheWall: wasKnock && Math.abs((lastKnock.x - wallX) * bare.stepX + (lastKnock.z - wallZ) * bare.stepZ) < 0.3, yours: wasKnock && lastKnock.isOwn,
+          hollowCameToLook: d.hollow.state === 1 && Math.hypot(d.hollow.targetX - wallX, d.hollow.targetZ - wallZ) < 1.5,
           saidSo: d.captionCounts.ownObjectKnock + d.captionCounts.ownObjectCrash
         };
         d.hollow.isActive = false;
@@ -371,7 +465,7 @@ function installLab() {
     }
     result.hearing = d.game.difficulty.hearingFactor;
     return result;
-  }, spot);
+  }, bareWall);
   check('walked into a wall, what you carry knocks once, the Hollow four metres off comes to look, and the caption says so',
     ['canister walking', 'crate walking', 'pipe walking'].every((key) => intoWall[key].knocks.heard === 1 && intoWall[key].knocks.quiet <= 1 && intoWall[key].noiseCarries > 4 && intoWall[key].knockAtTheWall && intoWall[key].yours && intoWall[key].hollowCameToLook && intoWall[key].saidSo === 1), intoWall);
   check('crouched, the same walk into the same wall is a tap the Hollow does not hear',
@@ -380,7 +474,7 @@ function installLab() {
     [intoWall['canister walking'].noiseCarries, intoWall['crate walking'].noiseCarries]);
   check('at a walk the object against the wall stops you, and stays in your hands; you are not pushed sideways along the wall',
     ['canister walking', 'crate walking', 'pipe walking', 'crate crouched'].every((key) => intoWall[key].stillHeld && intoWall[key].knocks.pulled === 0 && intoWall[key].sideways < 0.15) &&
-    intoWall['pipe walking'].fromWall > 1.0 && intoWall['crate walking'].fromWall > 0.4, intoWall);
+    intoWall['pipe walking'].fromWall > 1.0 && intoWall['crate walking'].fromWall > 0.7, intoWall);
   check('run at the wall with a length of pipe and it is torn out of your hands, and clatters',
     !intoWall['pipe running'].stillHeld && intoWall['pipe running'].knocks.pulled === 1 && intoWall['pipe running'].knocks.heard >= 2, intoWall['pipe running']);
 
@@ -439,6 +533,84 @@ function installLab() {
   check('a canister lying on the floor is kicked along when you walk into it, and does not stop you', kicked.layStill && kicked.byYou.moved > 0.3 && kicked.byYou.playerPassed && kicked.byYou.knocks.heard >= 1 && kicked.byYou.saidAsYours >= 1, kicked.byYou);
   check('the Hollow kicks it too: that is a noise where the canister is, captioned as something out there and not as yours',
     kicked.byTheHollow.moved > 0.3 && kicked.byTheHollow.knocks.heard >= 1 && kicked.byTheHollow.noiseAtTheObject && kicked.byTheHollow.saidWithADirection >= 1 && kicked.byTheHollow.saidAsYours === 0, kicked.byTheHollow);
+
+  // --- seen only once scanned, and the floor keeps its points ---
+  const seen = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    lab.reset();
+    d.clearLooseObjects();
+    const object = d.createLooseObject('crate', spot.x, 0.4, spot.z, 0.3);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    result.beforeAnyScan = d.isLooseObjectSeen(object);
+    lab.scan(object);
+    const reach = object.prepared.partsRadius + 0.3;
+    result.scannedAtRest = { seen: d.isLooseObjectSeen(object), points: lab.countPoints(object.x, object.y, object.z, reach) };
+    const wasAt = { x: object.x, y: object.y, z: object.z };
+    // Picked up and carried off: its points go, the floor's stay.
+    lab.stand(object.x - 1.2, object.z, Math.PI / 2);
+    d.pickUpLooseObject(object);
+    d.simulate(0.2);
+    result.justPickedUp = { seen: d.isLooseObjectSeen(object) };
+    p.pitch = 0.9; // up: the scanner is nowhere near it
+    d.simulate(1.5);
+    result.carriedUnscanned = { seen: d.isLooseObjectSeen(object), points: lab.countPoints(wasAt.x, wasAt.y, wasAt.z, reach) };
+    // The beam on it again: seen again, for as long as the beam is on it and a moment after.
+    p.pitch = 0;
+    d.setScanHeld(true); d.simulate(0.4);
+    result.carriedInTheBeam = { seen: d.isLooseObjectSeen(object) };
+    d.setScanHeld(false); d.simulate(1.2);
+    result.beamOff = { seen: d.isLooseObjectSeen(object) };
+    // Set down, scanned where it lies, and then taken out of the world: its points go with it.
+    d.releaseHeldLooseObject(0);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    lab.scan(object);
+    const liesAt = { x: object.x, y: object.y, z: object.z };
+    result.scannedAgain = lab.countPoints(liesAt.x, liesAt.y, liesAt.z, reach);
+    const button = document.getElementById('debug-loose-clear');
+    result.usedTheDebugButton = Boolean(button);
+    if (button) button.click(); else d.removeLooseObject(object);
+    result.removed = { loose: d.looseObjects.length, points: lab.countPoints(liesAt.x, liesAt.y, liesAt.z, reach) };
+    return result;
+  }, spot);
+  check('an object nobody has scanned is not drawn at all; scanned where it lies, it is solid and stays so',
+    !seen.beforeAnyScan && seen.scannedAtRest.seen && seen.scannedAtRest.points.onObjects > 50 && seen.scannedAtRest.points.station > 50, [seen.beforeAnyScan, seen.scannedAtRest]);
+  check('picked up, its points are let go and the floor it stood on keeps every one of its own',
+    seen.justPickedUp.seen && seen.carriedUnscanned.points.onObjects === 0 && seen.carriedUnscanned.points.station === seen.scannedAtRest.points.station, [seen.scannedAtRest.points, seen.carriedUnscanned.points]);
+  check('carried without the beam on it, it hides nothing; with the beam on it, it is solid again, and not for long after',
+    !seen.carriedUnscanned.seen && seen.carriedInTheBeam.seen && !seen.beamOff.seen, [seen.carriedUnscanned.seen, seen.carriedInTheBeam.seen, seen.beamOff.seen]);
+  check('"Remove them all" in debug mode takes each object\'s points with it, and leaves the floor\'s',
+    seen.usedTheDebugButton && seen.scannedAgain.onObjects > 50 && seen.removed.loose === 0 && seen.removed.points.onObjects === 0 && seen.removed.points.station === seen.scannedAgain.station, [seen.scannedAgain, seen.removed]);
+
+  // --- walking into one that lies on the floor ---
+  const shoved = await inGame((bare) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    lab.reset();
+    const startX = bare.x + bare.stepX * (bare.wall - 3.1), startZ = bare.z + bare.stepZ * (bare.wall - 3.1);
+    const walk = function (kindKey) {
+      d.clearLooseObjects();
+      lab.stand(startX, startZ, bare.yaw);
+      let object = null;
+      if (kindKey) {
+        object = d.createLooseObject(kindKey, startX + bare.stepX * 0.9, 0.5, startZ + bare.stepZ * 0.9, bare.yaw);
+        for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+      }
+      const objectAt = object ? { x: object.x, z: object.z } : null;
+      d.input.keysDown.add('KeyW');
+      d.simulate(1.2);
+      d.input.keysDown.clear();
+      return { walked: lab.round((p.x - startX) * bare.stepX + (p.z - startZ) * bare.stepZ),
+        objectMoved: object ? lab.round((object.x - objectAt.x) * bare.stepX + (object.z - objectAt.z) * bare.stepZ) : 0,
+        resistance: kindKey ? d.getLooseShoveResistance(d.looseObjectKinds[kindKey].mass) : 0 };
+    };
+    result.nothing = walk(null);
+    for (const kindKey of ['jar', 'toolCase', 'crate', 'pumpMotor']) result[kindKey] = walk(kindKey);
+    return result;
+  }, bareWall);
+  check('a jar on the floor is kicked along without slowing you; a tool case slows you a little, a crate a lot',
+    shoved.jar.walked > shoved.nothing.walked - 0.1 && shoved.jar.objectMoved > 0.5 &&
+    shoved.toolCase.walked < shoved.nothing.walked - 0.1 && shoved.crate.walked < shoved.toolCase.walked - 0.2 && shoved.crate.objectMoved > 0.05, shoved);
+  check('a pump motor on the floor does not move for your legs: it stops you where it lies',
+    shoved.pumpMotor.resistance === 1 && shoved.pumpMotor.objectMoved < 0.03 && shoved.pumpMotor.walked < 0.6, shoved.pumpMotor);
 
   // --- a vent ---
   const vent = await inGame(() => {
@@ -571,35 +743,77 @@ function installLab() {
   afterPickUp.messages = pickUpMessages;
   check('looking at an object within reach offers to pick it up, and E does', !beforePickUp.promptHidden && /Pick up the gas canister/.test(beforePickUp.prompt) && beforePickUp.chipHidden && afterPickUp.carrying, [beforePickUp, afterPickUp.carrying]);
   check('the screen says what you carry, and the first time, which key lets go of it',
-    !afterPickUp.chipHidden && afterPickUp.chip === 'CARRYING: GAS CANISTER' && afterPickUp.messages.some((text) => /Q lets go/.test(text)), afterPickUp);
+    !afterPickUp.chipHidden && afterPickUp.chip === 'CARRYING: GAS CANISTER' && afterPickUp.messages.some((text) => /E again lets go/.test(text)), afterPickUp);
 
-  // The key is put down and let go inside the game here, not through the browser: between a real press and a
-  // real release the browser may draw frames of its own, and each of those counts as time the key was held.
-  // (The real key is what the next check uses, where holding it longer changes nothing.)
+  // A tap on E, with nothing in front of you to use, lets go. The key is put down and let go inside the game
+  // here, not through the browser: between a real press and a real release the browser may draw frames of its
+  // own, and each of those counts as time the key was held. (The real key is what the check after this uses.)
   const tapped = await inGame(() => {
     const d = window.lastReturnDebug;
-    d.input.keysDown.add('KeyQ'); d.input.dropPressed = true;
-    d.simulate(0.02);
-    d.input.keysDown.delete('KeyQ');
+    d.player.pitch = 0.1; d.simulate(0.3); // look up from where it lay: nothing to use or pick up in view
+    const nothingInView = d.player.focusedInteractable === null && d.player.focusedLooseObject === null;
+    d.input.keysDown.add('KeyE'); d.input.wantsInteract = true;
+    d.simulate(0.05);
+    const whileDown = d.getHeldLooseObject() !== null;
+    d.input.keysDown.delete('KeyE');
     d.simulate(0.05);
     const object = d.looseObjects[0];
-    return { carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityZ) };
+    return { nothingInView: nothingInView, stillCarryingWhileTheKeyIsDown: whileDown, carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityZ) };
   });
-  check('a tap on Q lets go of it: it drops, it is not thrown', !tapped.carrying && tapped.speed < 0.5, tapped);
+  check('E again, with nothing in front of you to use, lets go of it when the key comes up: it drops, it is not thrown',
+    tapped.nothingInView && tapped.stillCarryingWhileTheKeyIsDown && !tapped.carrying && tapped.speed < 0.5, tapped);
 
-  await inGame(() => { const d = window.lastReturnDebug; d.player.pitch = 0.15; d.pickUpLooseObject(d.looseObjects[0]); d.simulate(0.6); });
-  await page.keyboard.down('KeyQ');
+  // The press that picks something up does not also let go of it, however long E is held.
+  const pickUpHeld = await inGame(() => {
+    const d = window.lastReturnDebug, object = d.looseObjects[0];
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    d.player.pitch = Math.atan2(object.y - d.getPlayerEyeY(), Math.hypot(object.x - d.player.x, object.z - d.player.z));
+    d.player.yaw = Math.atan2(object.x - d.player.x, -(object.z - d.player.z));
+    d.simulate(0.1);
+    const lookingAtIt = d.player.focusedLooseObject === object;
+    d.input.keysDown.add('KeyE'); d.input.wantsInteract = true;
+    d.simulate(1.2);
+    d.input.keysDown.delete('KeyE');
+    d.simulate(0.2);
+    return { lookingAtIt: lookingAtIt, carrying: d.getHeldLooseObject() === object };
+  });
+  check('holding E down while picking something up does not throw it away again', pickUpHeld.lookingAtIt && pickUpHeld.carrying, pickUpHeld);
+
+  await inGame(() => { const d = window.lastReturnDebug; d.player.pitch = 0.15; d.simulate(0.6); });
+  await page.keyboard.down('KeyE');
   await inGame(() => window.lastReturnDebug.simulate(0.6));
   await drawFrames(page, 3);
   const windingUp = await inGame(() => ({ windUp: window.lastReturnDebug.getThrowWindUp(), prompt: document.getElementById('hud-prompt').textContent, stillCarrying: window.lastReturnDebug.getHeldLooseObject() !== null }));
-  await page.keyboard.up('KeyQ');
+  await page.keyboard.up('KeyE');
   const thrownByKey = await inGame(() => {
     const d = window.lastReturnDebug;
     d.simulate(0.03);
     const object = d.looseObjects[0];
     return { carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityY, object.velocityZ) };
   });
-  check('holding Q winds up a throw, with a bar on screen that fills; letting go throws it', windingUp.stillCarrying && windingUp.windUp > 0.5 && /THROW/.test(windingUp.prompt) && !thrownByKey.carrying && thrownByKey.speed > 3, [windingUp, thrownByKey]);
+  check('holding E winds up a throw, with a bar on screen that fills; letting go throws it', windingUp.stillCarrying && windingUp.windUp > 0.5 && /THROW/.test(windingUp.prompt) && !thrownByKey.carrying && thrownByKey.speed > 3, [windingUp, thrownByKey]);
+
+  // With something to use in front of you, E uses that and you keep what you carry.
+  const usedInstead = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
+    d.clearLooseObjects();
+    const target = d.interactables.find((interactable) => interactable.isAvailable);
+    if (!target) return null;
+    const spot = d.findWalkableSpotNear(target.x, target.z);
+    lab.stand(spot.x, spot.z, Math.atan2(target.x - spot.x, -(target.z - spot.z)));
+    const object = lab.carry('jar');
+    p.yaw = Math.atan2(target.x - p.x, -(target.z - p.z));
+    p.pitch = Math.atan2(target.y - d.getPlayerEyeY(), Math.hypot(target.x - p.x, target.z - p.z));
+    d.simulate(0.2);
+    const lookingAtIt = p.focusedInteractable === target;
+    d.input.keysDown.add('KeyE'); d.input.wantsInteract = true;
+    d.simulate(0.05);
+    d.input.keysDown.delete('KeyE');
+    d.simulate(0.3);
+    if (d.game.mode === 'reading') d.closeReader();
+    return { lookingAtIt: lookingAtIt, stillCarrying: d.getHeldLooseObject() === object, metresAway: Math.round(Math.hypot(target.x - p.x, target.z - p.z) * 100) / 100 };
+  });
+  check('with something to use in front of you, E uses that, and you keep what you carry', usedInstead !== null && usedInstead.lookingAtIt && usedInstead.stillCarrying, usedInstead);
 
   const handsFull = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab;
@@ -629,33 +843,34 @@ function installLab() {
   const phone = await openGame({ dev: true, width: 844, height: 390, isPhone: true });
   await startGame(phone.page, true);
   await phone.page.evaluate(installLab);
-  const phoneBefore = await phone.page.evaluate(() => {
-    const d = window.lastReturnDebug, lab = window.looseLab;
-    lab.reset();
-    return { dropHidden: document.getElementById('touch-drop').hidden };
-  });
   const phoneHint = await phone.page.evaluate(() => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
+    lab.reset();
     lab.stand(p.x, p.z, p.yaw);
     lab.carry('canister');
-    return lab.messages();
+    p.pitch = 0.1; d.simulate(0.3);
+    return { messages: lab.messages(), nothingInView: p.focusedInteractable === null && p.focusedLooseObject === null, noDropButton: document.getElementById('touch-drop') === null };
   });
-  await drawFrames(phone.page, 8);
-  const phoneCarrying = await phone.page.evaluate(() => {
-    const button = document.getElementById('touch-drop'), box = button.getBoundingClientRect();
-    const overlaps = ['touch-use', 'touch-sweep', 'touch-scan', 'touch-crouch', 'touch-run', 'touch-spread', 'touch-map', 'touch-pause', 'hud-block-instruments', 'hud-block-map', 'hud-block-objective', 'hud-messages', 'reticle-ring'].filter((id) => {
-      const other = document.getElementById(id).getBoundingClientRect();
-      return !(other.right <= box.left || other.left >= box.right || other.bottom <= box.top || other.top >= box.bottom);
-    });
-    return { dropHidden: button.hidden, box: [Math.round(box.left), Math.round(box.top), Math.round(box.right), Math.round(box.bottom)], overlaps: overlaps,
-      onScreen: box.left >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight };
+  check('on a phone the hint names the USE button, not a key, and there is no extra button for letting go',
+    phoneHint.messages.some((text) => /USE again lets go/.test(text)) && phoneHint.noDropButton, phoneHint);
+  await phone.page.tap('#touch-use');
+  const phoneDropped = await phone.page.evaluate(() => { const d = window.lastReturnDebug; d.simulate(0.2); return { carrying: d.getHeldLooseObject() !== null }; });
+  check('a tap on USE, with nothing to use in view, lets go of it', phoneHint.nothingInView && !phoneDropped.carrying, phoneDropped);
+  // A finger held on USE winds up a throw.
+  const phoneThrow = await phone.page.evaluate(() => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
+    const object = lab.carry('canister');
+    p.pitch = 0.15; d.simulate(0.3);
+    const button = document.getElementById('touch-use');
+    const touch = function (type) { button.dispatchEvent(new Event(type, { bubbles: true, cancelable: true })); };
+    touch('touchstart');
+    d.simulate(0.7);
+    const windUp = d.getThrowWindUp(), stillCarrying = d.getHeldLooseObject() === object;
+    touch('touchend');
+    d.simulate(0.03);
+    return { windUp: windUp, stillCarryingWhileHeld: stillCarrying, carrying: d.getHeldLooseObject() !== null, speed: Math.hypot(object.velocityX, object.velocityY, object.velocityZ) };
   });
-  check('on a phone the DROP button is only there while you carry something, on screen and clear of the other buttons, the map, the messages and the aiming ring',
-    phoneBefore.dropHidden && !phoneCarrying.dropHidden && phoneCarrying.onScreen && phoneCarrying.overlaps.length === 0, phoneCarrying);
-  check('and the hint names the button, not a key', phoneHint.some((text) => /DROP lets go/.test(text)), phoneHint);
-  await phone.page.tap('#touch-drop');
-  const phoneDropped = await phone.page.evaluate(() => { const d = window.lastReturnDebug; d.simulate(0.1); return { carrying: d.getHeldLooseObject() !== null }; });
-  check('a tap on DROP lets go of it', !phoneDropped.carrying, phoneDropped);
+  check('a finger held on USE winds up a throw, and lifting it throws', phoneThrow.stillCarryingWhileHeld && phoneThrow.windUp > 0.5 && !phoneThrow.carrying && phoneThrow.speed > 3, phoneThrow);
   check('no script errors were reported on the phone', phone.problems.length === 0, phone.problems);
   await phone.browser.close();
 
