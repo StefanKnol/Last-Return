@@ -171,8 +171,10 @@ body.is-touch #hud-caption.is-side-column .hud-caption-where { margin-left: 0; m
   body.is-touch .touch-top-buttons { top: calc(14px + env(safe-area-inset-top, 0px)); right: calc(var(--gutter-right) + 116px); }
   body.is-touch #hud-messages { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: min(400px, 44%); }
   body.is-touch .hud-message { font-size: 12px; padding: 5px 9px; }
-  /* The work order is kept narrow here so that a long sentence wraps and stays clear of MAP and PAUSE. */
-  body.is-touch .hud-top-left { max-width: 280px; }
+  /* The work order ends short of MAP here, so that a long sentence wraps and does not run under MAP and PAUSE.
+     (The buttons and the minimap take 248 px at the right. Narrower than this and the chips take a second row
+     in a wider font, and the work order grows down into the room the captions need.) */
+  body.is-touch .hud-top-left { max-width: calc(100% - 300px); }
 }
 
 /* ---------- map overlay ---------- */
