@@ -1308,17 +1308,21 @@ function updateScanGrenade(object, dt) {
   object.burstBudget += pulsesInAll * Math.min(dt, TUNING.scanGrenadeBurstSeconds - object.burstSeconds) / TUNING.scanGrenadeBurstSeconds;
   const pulses = Math.min(4000, Math.floor(object.burstBudget));
   object.burstBudget -= pulses;
-  // How far down its light should go depends on how high it is above whatever is under it. Lying on the floor,
-  // everything steeper than a few degrees lands within a hand of it and is wasted. Held up in the beam, or in
-  // the air, nearly straight down is still a metre or more of floor away and worth lighting.
-  const clearBelow = castRayAgainstWorld(object.x, object.y + 0.03, object.z, 0, -1, 0, 30) ? rayHit.distance : 30;
-  const lowest = -clearBelow / Math.sqrt(clearBelow * clearBelow + TUNING.scanGrenadePatchMetres * TUNING.scanGrenadePatchMetres);
   looseRaySkipped = object; // its own light does not stop on its own case
   for (let pulse = 0; pulse < pulses; pulse++) {
-    // Evenly over the sphere, less the cap that would only light the patch right under it: a height between
-    // `lowest` and straight up, and a turn round the upright. (Evenly in height is evenly over a sphere.)
-    const height = lowest + Math.random() * (1 - lowest), turn = Math.random() * TWO_PI, across = Math.sqrt(1 - height * height);
-    if (fireScanPulse(object.x, object.y + 0.03, object.z, Math.cos(turn) * across, height, Math.sin(turn) * across, false) && rayHit.figure === hollow.figure) object.burstHitsOnHollow++;
+    // Evenly over the whole sphere: a height between pole and pole, and a turn round the upright. But not onto
+    // whatever it is lying against. A pulse that would land within a hand of it (on the floor under it, on
+    // the wall it has rolled up to, on the ceiling of a duct) is not fired; another direction is drawn instead,
+    // a few times over. So its light goes away from whatever it is up against, whichever way that is, and a
+    // grenade that goes off in mid-air lights everything round it, the floor below included.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const height = Math.random() * 2 - 1, turn = Math.random() * TWO_PI, across = Math.sqrt(1 - height * height);
+      const landed = fireScanPulseBeyond(object.x, object.y + 0.03, object.z, Math.cos(turn) * across, height, Math.sin(turn) * across,
+        attempt < 7 ? TUNING.scanGrenadePatchMetres : 0); // shut in on every side, it lights what there is
+      if (landed === -1) continue;
+      if (landed === 1 && rayHit.figure === hollow.figure) object.burstHitsOnHollow++;
+      break;
+    }
   }
   looseRaySkipped = null;
   if (object.burstHitsOnHollow >= TUNING.scanGrenadeStunHits && !object.hasStunned) object.hasStunned = stunHollow(TUNING.scanGrenadeStunSeconds);

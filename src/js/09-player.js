@@ -556,6 +556,18 @@ function fireScanPulse(originX, originY, originZ, directionX, directionY, direct
   return true;
 }
 
+// The same, for something that scans from where it lies and should not waste its light on whatever it is lying
+// against: a pulse that would land on the station nearer than `nearestMetres` is not fired at all. Returns 1 if
+// the pulse landed, 0 if it met nothing, and -1 if it was held back for landing too near (try another direction).
+// A creature or a loose object is never too near: light on those always counts.
+function fireScanPulseBeyond(originX, originY, originZ, directionX, directionY, directionZ, nearestMetres) {
+  scanSource.x = originX; scanSource.z = originZ;
+  if (!castScannerRay(originX, originY, originZ, directionX, directionY, directionZ, TUNING.scannerMaximumRange)) return 0;
+  if (rayHit.distance < nearestMetres && rayHit.figure === null && rayHit.looseObject === null) return -1;
+  recordScanHit(false);
+  return 1;
+}
+
 // The player's scanner: where you aim from, and where the light leaves it.
 const scanEmitter = {
   x: 0, y: 0, z: 0,             // where the light leaves: the lens, or the eye when there is no scanner in a hand
