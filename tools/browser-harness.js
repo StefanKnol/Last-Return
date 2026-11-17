@@ -21,11 +21,11 @@ const { chromium } = require('playwright');
 //
 // Two things to know before putting one in:
 //   - The game may run a frame of its own in such a pause, as it may between any two steps of a test. So
-//     pause where nothing is going on: between two chases, never in the middle of one.
-//   - A pause takes time, more on a machine that draws slowly. Thirteen cost nothing to speak of. Tried
-//     before every station that quests-test.js and generators-test.js build (they hold 2.4 GB at the most,
-//     stations waiting to be cleared away), a few hundred pauses took a gigabyte off and added up to a
-//     minute, which is why those two have none.
+//     pause where nothing is going on: between two chases or two stations, never in the middle of one.
+//   - A pause takes time: in most of them the game draws a frame or two of its own, and drawing is slow in
+//     these tests. Thirteen cost nothing to speak of. generators-test.js takes one before each of its 64
+//     stations (2.3 GB down to 1.1 to 1.5) and is no slower for it. quests-test.js takes 286, one before
+//     every station it builds: its page went from 2.6 GB to 1.1, and its run from two minutes to three.
 // To see what a suite holds at the most: `node tools/measure-memory.js tools/<suite>-test.js`.
 // Every page `openGame` opens has the function, also after the page is loaded again.
 function installLetTheBrowserCatchUp() {
