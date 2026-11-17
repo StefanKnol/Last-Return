@@ -93,7 +93,6 @@ body {
   color: var(--instrument); font-size: 12px; letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
   background: rgba(8, 10, 12, 0.55); border-bottom: 1px solid var(--instrument);
 }
-.loose-marker.is-focused { font-size: 13px; background: var(--panel); border: 1px solid var(--instrument); }
 #hud-prompt {
   position: absolute; left: 50%; top: calc(50% + 64px); transform: translateX(-50%);
   padding: 6px 12px; background: var(--panel); border: 1px solid var(--instrument);

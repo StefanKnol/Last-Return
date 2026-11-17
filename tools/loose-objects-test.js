@@ -1581,7 +1581,7 @@ function installLab() {
   await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab;
     lab.reset();
-    d.looseState.hasPickedUpOnce = false; // the line that says how to pick a thing up is due
+    d.settings.hasPickedSomethingUp = false; // the line that says how to pick a thing up is due
     lab.stand(spot.x, spot.z, Math.PI / 2);
     const object = d.createLooseObject('canister', spot.x + 1, 0.3, spot.z, 0);
     for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
@@ -1595,9 +1595,11 @@ function installLab() {
     const d = window.lastReturnDebug, object = d.looseObjects[0], prompt = document.getElementById('hud-prompt');
     const markers = Array.from(document.querySelectorAll('.loose-marker')).filter((element) => !element.hidden).map((element) => {
       const box = element.getBoundingClientRect();
-      return { text: element.textContent, isFocused: element.classList.contains('is-focused'), across: Math.round((box.left + box.width / 2) / window.innerWidth * 100) / 100, down: Math.round(box.bottom / window.innerHeight * 100) / 100 };
+      return { text: element.textContent, across: Math.round((box.left + box.width / 2) / window.innerWidth * 100) / 100, down: Math.round(box.bottom / window.innerHeight * 100) / 100 };
     });
-    return { prompt: prompt.hidden ? '' : prompt.textContent, markers: markers, worth: object ? d.getLooseObjectWorth(object) : 0, pulses: object ? object.scanHits : 0, chip: document.getElementById('chip-carrying').hidden ? '' : document.getElementById('chip-carrying').textContent };
+    let remembered = false;
+    try { remembered = JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').hasPickedSomethingUp === true; } catch (error) { /* no storage */ }
+    return { prompt: prompt.hidden ? '' : prompt.textContent, markers: markers, inReach: d.player.focusedLooseObject === object, remembered: remembered, worth: object ? d.getLooseObjectWorth(object) : 0, pulses: object ? object.scanHits : 0, chip: document.getElementById('chip-carrying').hidden ? '' : document.getElementById('chip-carrying').textContent };
   });
   const unread = await readScreen();
   // Scanned where it lies, from where you stand: a second and a half of the ordinary beam.
@@ -1624,8 +1626,8 @@ function installLab() {
   await inGame(() => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects[0], false); d.simulate(0.3); });
   await drawFrames(page, 4);
   const carried = await readScreen();
-  // Set down and looked at again. You have picked something up now, so the screen no longer says how: the
-  // thing's name floats at it instead. Not what it is worth: its last scan is too long ago, until it is scanned again.
+  // Set down and looked at again. You have picked something up now, so the screen no longer says how, and
+  // nothing floats at the thing for being in reach. Scanned again, its worth shows again, as for any other.
   const lookAtIt = () => inGame(() => {
     const d = window.lastReturnDebug, p = d.player, object = d.looseObjects[0];
     p.yaw = Math.atan2(object.x - p.x, -(object.z - p.z));
@@ -1651,19 +1653,19 @@ function installLab() {
   await inGame(() => { const d = window.lastReturnDebug; d.player.yaw += Math.PI; d.player.pitch = 0; d.simulate(0.3); });
   await drawFrames(page, 4);
   const lookedAway = await readScreen();
-  await inGame(() => { window.lastReturnDebug.looseState.hasPickedUpOnce = false; });
+  await inGame(() => { window.lastReturnDebug.settings.hasPickedSomethingUp = false; });
   check('what floats at a thing is there for a few seconds after a scan and then gone; scanned again, it is there again',
     aWhileLater.markers.length === 0 && aWhileLater.worth === 25 && rescanned.markers.length === 1 && rescanned.markers[0].text === '25', { aWhileLater: aWhileLater, rescanned: rescanned });
   check('what a thing is worth is not on screen until the scanner has read it; then it floats at the thing, as a number, and the line that says how to pick it up does not mention it',
     /Pick up the gas canister$/.test(unread.prompt) && unread.worth === 0 && unread.markers.length === 0 && read.pulses >= read.needed && read.worth === read.really && read.really > 0 &&
     read.messages.some((text) => /The scanner has read what that is: gas canister, worth 25/.test(text)) && /Pick up the gas canister$/.test(readOnScreen.prompt) &&
-    readOnScreen.markers.length === 1 && readOnScreen.markers[0].text === '25' && !readOnScreen.markers[0].isFocused &&
+    readOnScreen.markers.length === 1 && readOnScreen.markers[0].text === '25' &&
     Math.abs(readOnScreen.markers[0].across - 0.5) < 0.08 && readOnScreen.markers[0].down > 0.25 && readOnScreen.markers[0].down < 0.55,
     { unread: unread, read: read, onScreen: readOnScreen });
   check('in the beam a thing has no marker, and the status line says what it is worth', carried.markers.length === 0 && carried.chip === 'CARRYING: GAS CANISTER · 25', carried);
-  check('once you have picked something up the screen no longer says how: the name of the thing you would take floats at it, with what it is worth for a few seconds once it is scanned again',
-    setDown.prompt === '' && setDown.markers.length === 1 && setDown.markers[0].text === 'gas canister' && setDown.markers[0].isFocused &&
-    scannedAgain.prompt === '' && scannedAgain.markers.length === 1 && scannedAgain.markers[0].text === 'gas canister · 25' && lookedAway.markers.length === 0,
+  check('how to pick a thing up is a tutorial: once you have done it the screen never says it again, and nothing floats at a thing for being in reach; its worth shows when it is scanned, as before',
+    setDown.prompt === '' && setDown.markers.length === 0 && setDown.inReach && setDown.remembered &&
+    scannedAgain.prompt === '' && scannedAgain.markers.length === 1 && scannedAgain.markers[0].text === '25' && lookedAway.markers.length === 0,
     { setDown: setDown, scannedAgain: scannedAgain, lookedAway: lookedAway });
 
   // --- what it costs ---
@@ -1717,7 +1719,7 @@ function installLab() {
     d.simulate(0.1);
     // The hint about the keys is given once a descent, and this descent has had it. Make it due again.
     d.looseState.hasShownCarryHint = false;
-    d.looseState.hasPickedUpOnce = false; // and so is the line that says how to pick a thing up
+    d.settings.hasPickedSomethingUp = false; // and so is the line that says how to pick a thing up
     d.clearMessages();
   }, spot);
   await drawFrames(page, 3);

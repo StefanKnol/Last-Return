@@ -148,7 +148,6 @@ const looseState = {
   lettingGoSeconds: 0,     // ... and has been held this long. A tap lets go, a hold winds up a throw.
   hasShownCarryHint: false,
   hasShownKnockHint: false,
-  hasPickedUpOnce: false,      // from then on the screen no longer says how to pick a thing up
   hollowLastX: 0, hollowLastZ: 0, hollowVelocityX: 0, hollowVelocityZ: 0, hollowWasActive: false,
   // How fast you are really moving, from where you were a frame ago. (`player.velocityX` is how fast your legs
   // are trying to go, which is not the same thing with a wall in front of you.)
@@ -405,7 +404,6 @@ function resetLooseObjectsForNewRun() {
   spawnStationLooseObjects(); // clears whatever was loose, and puts the station's own things back where they lay
   looseState.hasShownCarryHint = false;
   looseState.hasShownKnockHint = false;
-  looseState.hasPickedUpOnce = false;
   looseState.hasShownAppraisalHint = false;
   const statistics = looseState.statistics;
   statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0; statistics.putBack = 0; statistics.grenadesSpent = 0; statistics.flungBack = 0; statistics.worthLost = 0; statistics.shattered = 0;
@@ -1441,7 +1439,8 @@ function pickUpLooseObject(object, isByButton) {
   object.lastHandledTime = game.time;
   object.wasHandled = true; object.isIgnoredByHollow = false;
   looseState.held = object;
-  looseState.hasPickedUpOnce = true;
+  // The line that says how to pick a thing up has done its work: it is not shown again, in this descent or any other.
+  if (!settings.hasPickedSomethingUp) { settings.hasPickedSomethingUp = true; saveSettings(); }
   looseState.holdLength = TUNING.looseHoldDistance;
   gripLooseObject(object); // as it lies: the beam does not straighten it
   looseState.isHeldByButton = Boolean(isByButton);

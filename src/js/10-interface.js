@@ -633,14 +633,14 @@ function getExtraJobStatusText() {
 // What a thing is worth, floating at the thing
 //
 // Once the scanner has read a loose thing, what it is worth shows as a small number just above it for a few
-// seconds after a pulse last landed on it, then fades. Scan it again and it shows again. The thing you would
-// pick up shows its name there too, once the screen has stopped saying how.
+// seconds after a pulse last landed on it, then fades. Scan it again and it shows again. Nothing else floats
+// at a thing: not its name, and nothing for a thing merely because it is in reach.
 // ---------------------------------------------------------------------------
 
 const looseMarkers = {
   container: null,
   elements: [],     // one per marker that can be on screen at once
-  chosen: [],       // { object, isFocused, showsWorth }: which things have one just now
+  chosen: [],       // { object, offCentre }: which things have one just now
   chooseTimer: 0,
   screen: { x: 0, y: 0, isInFront: false }
 };
@@ -663,25 +663,20 @@ function projectPointToScreen(x, y, z, result) {
 function chooseLooseMarkers() {
   const markers = looseMarkers, screen = markers.screen, candidates = [];
   const width = renderer.canvas.clientWidth, height = renderer.canvas.clientHeight;
-  const focused = getHeldLooseObject() === null && looseState.hasPickedUpOnce ? player.focusedLooseObject : null;
   for (const object of looseObjects) {
-    if (object.isHeld || object.isRemoved) continue;
-    const isFocused = object === focused;
-    const showsWorth = object.isAppraised && getLooseObjectValue(object) > 0 && getSecondsSinceLooseObjectScanned(object) < TUNING.looseMarkerSeconds;
-    if (!isFocused && !showsWorth) continue;
-    const distance = distanceBetweenPoints(object.x, object.z, player.x, player.z);
-    if (!isFocused && distance > TUNING.looseMarkerMetres) continue;
+    if (object.isHeld || object.isRemoved || !object.isAppraised || getLooseObjectValue(object) <= 0) continue;
+    if (getSecondsSinceLooseObjectScanned(object) >= TUNING.looseMarkerSeconds) continue;
+    if (distanceBetweenPoints(object.x, object.z, player.x, player.z) > TUNING.looseMarkerMetres) continue;
     projectPointToScreen(object.x, object.y, object.z, screen);
     if (!screen.isInFront || screen.x < 0 || screen.y < 0 || screen.x > width || screen.y > height) continue;
-    // How far from the middle of the view, as a share of its height: the thing you would pick up comes first.
-    const offCentre = isFocused ? -1 : Math.hypot(screen.x - width / 2, screen.y - height / 2) / height;
-    candidates.push({ object: object, isFocused: isFocused, showsWorth: showsWorth, offCentre: offCentre });
+    // How far from the middle of the view, as a share of its height.
+    candidates.push({ object: object, offCentre: Math.hypot(screen.x - width / 2, screen.y - height / 2) / height });
   }
   candidates.sort(function (first, second) { return first.offCentre - second.offCentre; });
   markers.chosen.length = 0;
   for (const candidate of candidates) {
     if (markers.chosen.length >= TUNING.looseMarkersAtOnce) break;
-    if (!candidate.isFocused && !canPlayerSeePoint(candidate.object.x, candidate.object.y, candidate.object.z)) continue; // behind a wall, a crate, a shelf
+    if (!canPlayerSeePoint(candidate.object.x, candidate.object.y, candidate.object.z)) continue; // behind a wall, a crate, a shelf
     markers.chosen.push(candidate);
   }
 }
@@ -699,12 +694,11 @@ function updateLooseMarkers(realDt) {
   for (const marker of markers.chosen) {
     const object = marker.object;
     if (object.isRemoved || object.isHeld) continue;
-    const screen = projectPointToScreen(object.x, getLooseObjectTopY(object) + 0.06, object.z, markers.screen);
-    if (!screen.isInFront) continue;
     // The few seconds may run out between two looks at which things have a marker.
     const secondsLeft = TUNING.looseMarkerSeconds - getSecondsSinceLooseObjectScanned(object);
-    const worth = marker.showsWorth && secondsLeft > 0 ? String(getLooseObjectValue(object)) : '';
-    if (worth === '' && !marker.isFocused) continue;
+    if (secondsLeft <= 0) continue;
+    const screen = projectPointToScreen(object.x, getLooseObjectTopY(object) + 0.06, object.z, markers.screen);
+    if (!screen.isInFront) continue;
     if (shown === markers.elements.length) {
       const created = document.createElement('div');
       created.className = 'loose-marker';
@@ -712,13 +706,12 @@ function updateLooseMarkers(realDt) {
       markers.elements.push(created);
     }
     const element = markers.elements[shown++];
-    const text = marker.isFocused ? getLooseObjectLabel(object) + (worth ? ' \u00B7 ' + worth : '') : worth;
+    const text = String(getLooseObjectValue(object));
     if (element.textContent !== text) element.textContent = text;
-    element.classList.toggle('is-focused', marker.isFocused);
     // Fainter the further off it is, and fading out as its few seconds end.
     const distance = distanceBetweenPoints(object.x, object.z, player.x, player.z);
     const fade = clampNumber(secondsLeft / TUNING.looseMarkerFadeSeconds, 0, 1);
-    element.style.opacity = marker.isFocused ? '1' : ((1 - 0.6 * clampNumber(distance / TUNING.looseMarkerMetres, 0, 1)) * fade).toFixed(2);
+    element.style.opacity = ((1 - 0.6 * clampNumber(distance / TUNING.looseMarkerMetres, 0, 1)) * fade).toFixed(2);
     element.style.transform = 'translate(' + screen.x.toFixed(1) + 'px, ' + screen.y.toFixed(1) + 'px) translate(-50%, -100%)';
     element.hidden = false;
   }
@@ -869,8 +862,8 @@ function updateHud(realDt) {
       const filled = Math.round(getThrowWindUp() * 8);
       prompt.hidden = false;
       prompt.textContent = 'THROW  ' + '\u25AE'.repeat(filled) + '\u25AF'.repeat(8 - filled);
-    } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject && !looseState.hasPickedUpOnce) {
-      // How to pick a thing up is said until you have done it once. After that its name floats at it (below).
+    } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject && !settings.hasPickedSomethingUp) {
+      // A tutorial: how to pick a thing up is said until you have done it once, and never again.
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject);
     } else if (game.mode === 'playing' && focused) {
