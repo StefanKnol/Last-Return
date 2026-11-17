@@ -1033,7 +1033,7 @@ function installLab() {
     }
     if (!mouth) return null;
     result.mouth = mouth;
-    for (const kindKey of ['jar', 'crate']) {
+    for (const kindKey of ['jar', 'crate', 'pumpMotor', 'pipe', 'toolCase']) {
       d.clearLooseObjects();
       lab.stand(mouth.x - mouth.stepX * 1.6, mouth.z - mouth.stepZ * 1.6, Math.atan2(mouth.stepX, -mouth.stepZ));
       d.input.keysDown.add('KeyC');
@@ -1043,14 +1043,18 @@ function installLab() {
       d.input.keysDown.add('KeyW');
       let objectInVent = false;
       for (let step = 0; step < 150; step++) { d.simulate(1 / 30); if (d.isVentAt(object.x, object.z)) objectInVent = true; }
-      result[kindKey] = { playerInVent: d.isVentAt(p.x, p.z), objectInVent: objectInVent, stillHeld: d.getHeldLooseObject() === object, knocks: lab.since(before), messages: lab.messages() };
+      result[kindKey] = { playerInVent: d.isVentAt(p.x, p.z), objectInVent: objectInVent, objectInVentAtTheEnd: d.isVentAt(object.x, object.z), stillHeld: d.getHeldLooseObject() === object, knocks: lab.since(before), messages: lab.messages(),
+        metresIn: lab.round((p.x - mouth.x) * mouth.stepX + (p.z - mouth.z) * mouth.stepZ) };
       d.input.keysDown.clear();
     }
     return result;
   });
-  check('a jar goes into a vent ahead of you; with a crate in the beam you cannot crawl in, and are told why',
-    vent !== null && vent.jar.playerInVent && vent.jar.objectInVent && vent.jar.stillHeld && !vent.crate.playerInVent && vent.crate.stillHeld &&
-    vent.crate.messages.some((text) => /crate will not go in there/.test(text)), vent);
+  // No rule says what may go into a vent: a thing goes where it fits. A vent is a metre wide and 1.15 m high.
+  check('a jar, a tool case, a crate and a pump motor each go into a vent ahead of you, still in the beam',
+    vent !== null && ['jar', 'toolCase', 'crate', 'pumpMotor'].every((key) => vent[key].playerInVent && vent[key].objectInVent && vent[key].stillHeld), vent);
+  check('a pipe hangs across the beam and is wider than the vent: it jams at the mouth and stops you there, and nothing but the pipe says so',
+    vent !== null && !vent.pipe.playerInVent && vent.pipe.stillHeld && vent.pipe.metresIn < -0.3 &&
+    ['jar', 'toolCase', 'crate', 'pumpMotor', 'pipe'].every((key) => !vent[key].messages.some((text) => /will not go in|no room in here/.test(text))), vent ? vent.pipe : null);
 
   // --- the pit, and a new descent ---
   const housekeeping = await inGame((spot) => {

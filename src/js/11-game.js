@@ -592,6 +592,15 @@ function updateGameProgress(dt) {
     fireGameEvent('leftLift');
   }
 
+  // The car's door never comes down on you. Step out and dart back in while it is closing, and it goes up
+  // again; it shuts when you are clear of it. (Once it is down it stays down: the car has gone up.)
+  // A salvage bay's door keeps the same rule (updateHaulBays in 08-loose-objects.js).
+  if (flags.hasLeftLift && !flags.liftArrived) {
+    const isInTheWay = distanceOutsideLiftCar(player.x, player.z) < 1.2; // in the car, or in its doorway
+    if (isInTheWay && liftDoor.openFraction > 0) liftDoor.forcedState = true;
+    else if (!isInTheWay && liftDoor.forcedState === true) liftDoor.forcedState = false;
+  }
+
   if (flags.uploadStarted && !flags.liftArrived) {
     game.liftCountdown -= dt;
     if (updateLiftBell(true, game.time)) showCaption('liftBell', LIFT_POSITION);
@@ -891,7 +900,7 @@ function startApplication() {
     doQuest: function (key) {
       const instance = findQuest(key);
       if (!instance) return false;
-      if (instance.definition.kind === 'haul') fillHaulBay();
+      if (instance.definition.kind === 'haul') fillHaulBays();
       for (const object of instance.objects) {
         if (object.needsItem && !object.isSupplied && getCarriedCount(instance.definition.requires.item) < 1) useInteractable(findInteractableByObjectId(object.itemObjectId));
         if (object.objectId > 0 && !object.isDone) useInteractable(findInteractableByObjectId(object.objectId));
@@ -911,7 +920,7 @@ function startApplication() {
     playDoorBang: playDoorBang, playDoorBreak: playDoorBreak,
     // Noisy things on the floor: where they are, how often they have been set off, and a check of their placing.
     noisyFloorPatches: noisyFloorPatches, noisyFloorCounts: noisyFloorCounts, auditNoisyFloor: auditNoisyFloor, playNoisyFloorSound: playNoisyFloorSound,
-    doorKinds: { automatic: DOOR_KIND_AUTOMATIC, powered: DOOR_KIND_POWERED, keycard: DOOR_KIND_KEYCARD, lift: DOOR_KIND_LIFT },
+    doorKinds: { automatic: DOOR_KIND_AUTOMATIC, powered: DOOR_KIND_POWERED, keycard: DOOR_KIND_KEYCARD, lift: DOOR_KIND_LIFT, bay: DOOR_KIND_BAY },
     canHollowOpenDoor: canHollowOpenDoor, isDoorPassableToHollow: isDoorPassableToHollow, isHollowInCrawlspace: isHollowInCrawlspace,
     getHollowPartAt: function (x, z) { return isInsideGrid(Math.floor(x), Math.floor(z)) ? tileHollowPart[tileIndexAt(Math.floor(x), Math.floor(z))] : 0; },
     getHollowPartCount: function () { return hollowPartCount; },
@@ -953,7 +962,7 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     stationLooseObjects: stationLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
-    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBay: fillHaulBay, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getLooseObjectWorth: getLooseObjectWorth,
+    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth,
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
     wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
     fireScanPulse: fireScanPulse, fireScanPulseBeyond: fireScanPulseBeyond, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateScanEmitterAtEye: updateScanEmitterAtEye, castScannerPulse: castScannerPulse, castRayAgainstThings: castRayAgainstThings,

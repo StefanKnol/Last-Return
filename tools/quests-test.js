@@ -169,106 +169,205 @@ function check(description, condition, detail) {
   check('that made-up quest plays without another line of code: the terminal refuses for it, it can be done, and then the upload goes through',
     added.notRefused.length === 0 && added.notDone.length === 0 && added.goneAgain, added);
 
-  // --- salvage: a 'haul' quest. It asks for a sum's worth of what the station has lying about, in a bay by the lift ---
+  // --- salvage: a 'haul' quest. It asks for a sum's worth of what the station has lying about, sealed into bays ---
   const salvagePlaces = await inGame(() => {
-    const d = window.lastReturnDebug, lab = window.lab, result = { stations: 0, withIt: 0, wrong: [], moved: [], targets: [] };
+    const d = window.lastReturnDebug, lab = window.lab, result = { stations: 0, withIt: 0, wrong: [], moved: [], bays: {}, targets: [], alsoTheSame: { otherQuestsToTheTile: 0, hatches: 0, noisyFloor: 0, looseThings: 0 } };
     const definition = d.quests.filter((quest) => quest.key === 'haul')[0], place = d.quests.indexOf(definition);
-    // Everything about a station that the quest must leave alone: the other quests' things, the ceiling hatches,
-    // the noisy floor, and every loose thing.
+    // What the quest must leave alone: every door but those of its own bays (and so every room), and which
+    // other quests the station has, each with as many things. (Where those things stand may shift by a tile or
+    // two: a bay's door needs its doorstep clear, and so may the noisy floor and the litter near it.)
     const describe = function () {
-      return lab.describeQuests('haul') + ' # ' + d.hollowHatches.map((hatch) => hatch.index).join(',') + ' # ' +
-        d.noisyFloorPatches.map((patch) => patch.index).join(',') + ' # ' + JSON.stringify(d.stationLooseObjects) + ' # ' + d.doors.length;
+      return d.level.quests.filter((quest) => quest.key !== 'haul').map((quest) => quest.key + ' ' + quest.total).join(',') + ' # ' +
+        d.doors.filter((door) => door.kind !== d.doorKinds.bay).map((door) => door.tileX + '.' + door.tileZ + '.' + door.kind).join(',');
     };
+    const places = () => lab.describeQuests('haul');
+    const hatches = () => d.hollowHatches.map((hatch) => hatch.index).join(','), noisy = () => d.noisyFloorPatches.map((patch) => patch.index).join(','), loose = () => JSON.stringify(d.stationLooseObjects);
     for (const size of ['small', 'large']) {
+      const allowed = d.sizePresets[size].salvageBays;
       for (let seed = 1; seed <= 14; seed++) {
         const station = ['generated', seed, size, ['mixed', 'tight', 'sparse'][seed % 3], seed % 2 ? 'one' : 'two'], name = size + ' ' + seed;
         lab.fresh.apply(null, station);
         result.stations++;
-        if (!d.findQuest('haul')) continue;
+        const quest = d.findQuest('haul');
+        if (!quest) continue;
         result.withIt++;
-        const state = d.haulState, progress = d.getHaulProgress(), withIt = describe();
+        const state = d.haulState, bays = state.bays, progress = d.getHaulProgress(), withIt = describe(), others = [hatches(), noisy(), loose(), places()];
         let all = 0;
         for (const item of d.stationLooseObjects) all += d.looseObjectKinds[item.kindKey].value;
         result.targets.push(state.target);
-        if (!(state.isActive && state.target >= 10 && state.target % 10 === 0 && state.target <= state.withinWalk && state.withinWalk <= all)) result.wrong.push(name + ': asks for ' + state.target + ' of ' + state.withinWalk + ' within walking reach, ' + all + ' in all');
+        result.bays[size + ' ' + bays.length] = (result.bays[size + ' ' + bays.length] || 0) + 1;
+        if (bays.length < 1 || bays.length > allowed[1] || quest.total !== bays.length) result.wrong.push(name + ': ' + bays.length + ' bays, ' + quest.total + ' in the quest, at most ' + allowed[1] + ' allowed');
+        if (!(state.target >= 10 && state.target % 10 === 0 && state.target <= state.withinWalk && state.withinWalk <= all)) result.wrong.push(name + ': asks for ' + state.target + ' of ' + state.withinWalk + ' within walking reach, ' + all + ' in all');
+        if (bays.length > 0 && bays[0].quota * bays.length < state.target) result.wrong.push(name + ': the bays together take less than is asked');
         if (progress.done !== 0 || progress.total !== state.target) result.wrong.push(name + ': starts at ' + progress.done + ' of ' + progress.total);
-        // The bay: four tiles of the lobby's own floor, nothing standing on them but its paint, nothing lying in it yet.
-        const lobby = d.getZoneAt(d.findInteractable(1).x, d.findInteractable(1).z);
-        for (const corner of [[0.5, 0.5], [1.5, 0.5], [0.5, 1.5], [1.5, 1.5]]) {
-          const x = state.minimumX + corner[0], z = state.minimumZ + corner[1], spot = d.findWalkableSpotNear(x, z);
-          if (d.getZoneAt(x, z) !== lobby || !spot || spot.x !== x || spot.z !== z) result.wrong.push(name + ': the bay is not all lobby floor you can stand on');
-        }
-        if (d.looseObjects.some((object) => d.isLooseObjectInHaulBay(object))) result.wrong.push(name + ': something lies in the bay before you have brought anything');
-        const found = d.auditLayout().concat(d.auditProgression()).concat(d.auditHollowRoutes()).concat(d.auditStationLooseObjects());
+        bays.forEach((bay, index) => {
+          const what = name + ' bay ' + (index + 1) + ': ';
+          if (!bay.door || bay.door.kind !== d.doorKinds.bay || bay.door.openFraction !== 0 || bay.state !== 'shut') result.wrong.push(what + 'its door is not a bay door standing shut');
+          if ((bay.maximumX - bay.minimumX) * (bay.maximumZ - bay.minimumZ) !== 2) result.wrong.push(what + 'is not two tiles of floor');
+          for (let z = bay.minimumZ; z < bay.maximumZ; z++) for (let x = bay.minimumX; x < bay.maximumX; x++) {
+            const spot = d.findWalkableSpotNear(x + 0.5, z + 0.5);
+            if (!spot || spot.x !== x + 0.5 || spot.z !== z + 0.5) result.wrong.push(what + 'has floor you cannot stand on');
+          }
+          if (d.looseObjects.some((object) => d.isLooseObjectInHaulBay(object, bay))) result.wrong.push(what + 'something lies in it before you have brought anything');
+          if (!bay.interactable || bay.interactable.props.length !== 1 || !/^Open salvage bay/.test(bay.interactable.prompt)) result.wrong.push(what + 'has no panel beside its door');
+          for (const other of bays) if (other !== bay && Math.abs(other.doorwayX - bay.doorwayX) + Math.abs(other.doorwayZ - bay.doorwayZ) < 10) result.wrong.push(what + 'is less than ten tiles from another bay');
+        });
+        const found = d.auditLayout().concat(d.auditProgression()).concat(d.auditHollowRoutes()).concat(d.auditNoisyFloor()).concat(d.auditStationLooseObjects());
         if (found.length > 0) result.wrong.push(name + ': ' + found[0]);
-        // Without the quest, the same station has everything else exactly where it was.
+        // Without the quest, the same station has the same rooms and doors and the same other quests.
         d.quests.splice(place, 1);
-        try { lab.fresh.apply(null, station); if (d.findQuest('haul') || describe() !== withIt) result.moved.push(name); } finally { d.quests.splice(place, 0, definition); }
+        try {
+          lab.fresh.apply(null, station);
+          if (d.findQuest('haul') || describe() !== withIt) result.moved.push(name);
+          if (places() === others[3]) result.alsoTheSame.otherQuestsToTheTile++;
+          if (hatches() === others[0]) result.alsoTheSame.hatches++;
+          if (noisy() === others[1]) result.alsoTheSame.noisyFloor++;
+          if (loose() === others[2]) result.alsoTheSame.looseThings++;
+        } finally { d.quests.splice(place, 0, definition); }
       }
     }
     return result;
   });
-  check('salvage: about half the stations have it; each asks for a round sum that is no more than what lies within walking reach of the bay, and the bay is clear lobby floor',
+  check('salvage: about half the stations have it; each asks for a round sum that is no more than what lies within walking reach, and has as many bays as its size allows: two tiles each behind a shut door of their own, a panel beside it, empty, and well apart',
     salvagePlaces.withIt >= 6 && salvagePlaces.withIt <= salvagePlaces.stations - 6 && salvagePlaces.wrong.length === 0, salvagePlaces);
-  check('salvage: a station with it has every other quest, every hatch, the noisy floor and every loose thing exactly where the same station has them without it', salvagePlaces.moved.length === 0, salvagePlaces.moved);
+  check('salvage: a station with it has the same rooms, the same other doors and the same other quests as the same station without it', salvagePlaces.moved.length === 0, [salvagePlaces.moved, salvagePlaces.alsoTheSame]);
 
   const salvage = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, result = {};
     for (let seed = 1; seed < 300 && !result.seed; seed++) {
       lab.fresh('generated', seed, 'medium', 'mixed', 'one');
-      if (d.findQuest('haul') && d.level.quests.every((quest) => ['spools', 'haul', 'generators', 'fuel'].indexOf(quest.key) >= 0)) result.seed = seed;
+      if (d.findQuest('haul') && d.haulState.bays.length >= 2 && d.level.quests.every((quest) => ['spools', 'haul', 'generators', 'fuel'].indexOf(quest.key) >= 0)) result.seed = seed;
     }
     if (!result.seed) return result;
     d.setDebugOption('freezeCreatures', true);
-    const state = d.haulState, target = state.target;
-    result.target = target;
+    d.settings.captions = 'all';
+    const state = d.haulState, target = state.target, quest = d.findQuest('haul'), bay = state.bays[0];
+    result.target = target; result.quota = bay.quota;
     d.grantPower(); d.doQuest('generators'); d.hollow.isActive = false;
     result.objectiveWithSpools = d.game.objectiveText;
     d.grantSpools(); d.grantKeycard();
     result.objectiveAlone = d.game.objectiveText;
     result.chipBefore = d.getQuestChips().join(' · ');
     d.use(1);
-    result.refused = { started: d.game.flags.uploadStarted, said: lab.messages().indexOf('manifest short. Salvage in the bay: 0 of ' + target) >= 0 };
-    // One thing carried in: it counts once it lies there, and the screen says so. Taken out again, it no longer counts.
-    const first = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value)[0];
-    const wasAt = { x: first.x, y: first.y, z: first.z };
-    const putAt = function (object, x, y, z) { d.pickUpLooseObject(object, false); d.releaseHeldLooseObject(0); object.x = x; object.y = y; object.z = z; object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; d.wakeLooseObject(object); };
-    d.teleport(state.minimumX - 3, state.minimumZ + 1, 0);
-    putAt(first, state.minimumX + 1, state.floorY + 0.5, state.minimumZ + 1);
-    for (let step = 0; step < 240 && !first.isAsleep; step++) d.simulate(1 / 30);
-    d.simulate(1.2);
-    result.afterOne = { worth: first.kind.value, progress: d.getHaulProgress(), atRest: first.isAsleep, said: lab.messages().indexOf('Salvage in the bay: ' + Math.min(first.kind.value, target) + ' of ' + target) >= 0, chip: d.getQuestChips().join(' · ') };
-    putAt(first, wasAt.x, wasAt.y + 0.05, wasAt.z);
-    d.simulate(2);
-    result.takenOutAgain = d.getHaulProgress();
-    // Enough of it brought: the terminal takes the upload.
-    result.carriedIn = d.fillHaulBay();
-    for (let step = 0; step < 300 && !d.looseObjects.every((object) => object.isAsleep); step++) d.simulate(1 / 30);
-    d.simulate(1.2);
-    result.afterAll = { progress: d.getHaulProgress(), said: /That is what they asked for/.test(lab.messages()), objective: d.game.objectiveText, chip: d.getQuestChips().join(' · ') };
+    result.refused = { started: d.game.flags.uploadStarted, said: lab.messages().indexOf('manifest short. Salvage in the bays: 0 of ' + target) >= 0 };
+
+    // Opening a bay: its door goes up, its lamp lights the floor in front of it and pings, and it is on the map.
+    d.teleport(bay.spotX, bay.spotZ, 0);
+    d.captionCounts.salvageBayPing = 0;
+    let points = d.pointCloud.totalReturns;
+    const wasOnMap = bay.interactable.isDiscovered, wasWanted = d.isInteractableWantedNow(bay.interactable);
+    d.use(quest.objects[0].objectId);
+    d.simulate(1.5);
+    result.opened = { state: bay.state, door: bay.door.openFraction, lampPoints: d.pointCloud.totalReturns - points, pings: d.captionCounts.salvageBayPing, wasOnMap: wasOnMap, onMap: bay.interactable.isDiscovered, wasWanted: wasWanted,
+      said: lab.messages().indexOf('Salvage bay 1 open. It wants ' + bay.quota + ' worth.') >= 0 };
+    // A minute later the lamp does it again.
+    points = d.pointCloud.totalReturns;
+    d.simulate(d.tuning.haulBayPulseSeconds + 1);
+    result.aMinuteLater = { lampPoints: d.pointCloud.totalReturns - points, pings: d.captionCounts.salvageBayPing };
+    // One bay at a time.
+    d.use(quest.objects[1].objectId);
+    result.secondMeanwhile = { state: state.bays[1].state, said: /bay 1 is still open\. One at a time/.test(lab.messages()) };
+
+    // What it wants carried in, with you standing in it: it counts, and the door stays up.
+    const dearestFirst = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
+    const isAlongX = bay.maximumX - bay.minimumX > 1;
+    let carried = 0;
+    for (const object of dearestFirst) {
+      if (d.getHaulBayValue(bay) >= bay.quota) break;
+      d.pickUpLooseObject(object, false); d.releaseHeldLooseObject(0);
+      object.x = bay.minimumX + 0.5 + (isAlongX ? carried % 2 : 0); object.z = bay.minimumZ + 0.5 + (isAlongX ? 0 : carried % 2); object.y = bay.floorY + 0.4 + Math.floor(carried / 2) * 0.6;
+      object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; d.wakeLooseObject(object);
+      carried++;
+    }
+    const looseBefore = d.looseObjects.length;
+    d.teleport(bay.minimumX + 0.5, bay.minimumZ + 0.5, 0);
+    d.simulate(6);
+    result.withYouInside = { state: bay.state, door: bay.door.openFraction, holds: d.getHaulBayValue(bay), progress: d.getHaulProgress(), chip: d.getQuestChips().join(' · '),
+      said: lab.messages().indexOf('Salvage bay 1: ' + d.getHaulBayValue(bay) + ' of ' + bay.quota) >= 0 };
+    // You step out: it starts to seal. You dart back under the door: it goes up again, and stays up while you stand there.
+    d.teleport(bay.spotX, bay.spotZ, 0);
+    d.simulate(0.7);
+    result.steppedOut = bay.state;
+    d.teleport(bay.doorwayX, bay.doorwayZ, 0);
+    d.simulate(2.5);
+    result.dartedBack = { state: bay.state, door: bay.door.openFraction };
+    // Out for good: the door comes down, and what was inside is taken.
+    d.teleport(bay.spotX, bay.spotZ, 0);
+    const holds = d.getHaulBayValue(bay);
+    d.simulate(4);
+    result.sealed = { state: bay.state, door: bay.door.openFraction, taken: state.taken, held: holds, thingsGone: looseBefore - d.looseObjects.length, carried: carried, progress: d.getHaulProgress(),
+      panelGone: bay.interactable.isAvailable === false, said: /Salvage bay 1 sealed: [0-9]+ taken\. [0-9]+ of [0-9]+\. Find the next bay\./.test(lab.messages()) };
+    d.use(quest.objects[1].objectId);
+    d.simulate(1);
+    result.nextBay = state.bays[1].state;
+    // The rest of it: the terminal takes the upload.
+    d.fillHaulBays();
+    result.afterAll = { progress: d.getHaulProgress(), states: state.bays.map((each) => each.state).join(','), said: /That is what they asked for/.test(lab.messages()), objective: d.game.objectiveText, chip: d.getQuestChips().join(' · ') };
     d.use(1);
     result.accepted = d.game.flags.uploadStarted === true;
-    // If so much is lost that what is left is worth less than was asked, what is left is all that is asked.
+    // A new descent: every bay shut and empty again, and everything back where it lay.
     lab.fresh('generated', result.seed, 'medium', 'mixed', 'one');
-    const dearestFirst = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
+    result.newDescent = { states: state.bays.map((each) => each.state).join(','), taken: state.taken, progress: d.getHaulProgress(), things: d.looseObjects.length === d.stationLooseObjects.length,
+      doorsShut: state.bays.every((each) => each.door.openFraction === 0), panelsBack: state.bays.every((each) => each.interactable.isAvailable) };
+    // If so much is lost that what is left is worth less than was asked, what is left is all that is asked.
+    const byWorth = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
     let left = 0;
-    for (const object of dearestFirst) { if (dearestFirst.indexOf(object) < dearestFirst.length - 6) d.removeLooseObject(object); else left += object.kind.value; }
+    for (const object of byWorth) { if (byWorth.indexOf(object) < byWorth.length - 6) d.removeLooseObject(object); else left += object.kind.value; }
     result.withLittleLeft = { left: left, asked: d.getHaulProgress().total, wasAsked: d.haulState.target };
     d.doQuest('haul');
     result.withLittleLeft.done = d.getHaulProgress().done;
     d.hollow.isActive = false;
     return result;
   });
-  check('salvage: the objective and the screen say what is asked and how much lies in the bay; the terminal refuses the upload until it is there',
+  check('salvage: the objective and the screen say what is asked and how much is in; the terminal refuses the upload until it is',
     salvage.seed > 0 && salvage.target >= 10 && /spools.*Salvage also wants/.test(salvage.objectiveWithSpools) && salvage.objectiveAlone.indexOf('Salvage still wants ' + salvage.target + ' worth') === 0 &&
     salvage.chipBefore.indexOf('SALVAGE 0/' + salvage.target) >= 0 && !salvage.refused.started && salvage.refused.said, salvage);
-  check('salvage: a thing counts once it lies in the bay, the screen says so, and it stops counting when it is taken out again',
-    salvage.afterOne.atRest && salvage.afterOne.progress.done === Math.min(salvage.afterOne.worth, salvage.target) && salvage.afterOne.said && salvage.afterOne.chip.indexOf('SALVAGE ' + salvage.afterOne.progress.done + '/') >= 0 &&
-    salvage.takenOutAgain.done === 0, [salvage.afterOne, salvage.takenOutAgain]);
-  check('salvage: with what was asked in the bay the screen says so and the upload goes through',
-    salvage.carriedIn >= 1 && salvage.afterAll.progress.done === salvage.target && salvage.afterAll.said && salvage.afterAll.objective === 'Return to the lift lobby and upload the spools at the terminal.' && salvage.accepted, salvage.afterAll);
+  check('salvage: a bay opens at its panel: the door goes up, a lamp puts a patch of points in front of it and pings, it is on the map from then on, and a minute later the lamp does it again',
+    salvage.opened.state === 'open' && salvage.opened.door > 0.95 && salvage.opened.lampPoints >= 300 && salvage.opened.pings === 1 && !salvage.opened.wasOnMap && salvage.opened.onMap && salvage.opened.wasWanted && salvage.opened.said &&
+    salvage.aMinuteLater.lampPoints >= 300 && salvage.aMinuteLater.pings === 2, [salvage.opened, salvage.aMinuteLater]);
+  check('salvage: one bay at a time: the second will not open while the first stands open', salvage.secondMeanwhile.state === 'shut' && salvage.secondMeanwhile.said, salvage.secondMeanwhile);
+  check('salvage: what lies in the open bay counts, and its door never comes down on you: not while you stand in it, and not if you dart back under it as it starts to seal',
+    salvage.withYouInside.state === 'open' && salvage.withYouInside.door > 0.95 && salvage.withYouInside.holds >= salvage.quota && salvage.withYouInside.progress.done === salvage.withYouInside.holds && salvage.withYouInside.said &&
+    salvage.withYouInside.chip.indexOf('SALVAGE ' + salvage.withYouInside.holds + '/') >= 0 && salvage.steppedOut === 'sealing' && salvage.dartedBack.state === 'open' && salvage.dartedBack.door > 0.95, [salvage.withYouInside, salvage.steppedOut, salvage.dartedBack]);
+  check('salvage: with you out of it, the full bay seals: the door comes down for good, what was inside is taken, and the next bay can be opened',
+    salvage.sealed.state === 'sealed' && salvage.sealed.door === 0 && salvage.sealed.taken === salvage.sealed.held && salvage.sealed.thingsGone === salvage.sealed.carried && salvage.sealed.progress.done === salvage.sealed.taken &&
+    salvage.sealed.panelGone && salvage.sealed.said && salvage.nextBay === 'open', [salvage.sealed, salvage.nextBay]);
+  check('salvage: with what was asked sealed in, the screen says so and the upload goes through',
+    salvage.afterAll.progress.done === salvage.target && salvage.afterAll.said && salvage.afterAll.objective === 'Return to the lift lobby and upload the spools at the terminal.' && salvage.accepted, salvage.afterAll);
+  check('salvage: a new descent has every bay shut and empty again and everything back where it lay',
+    /^(shut,?)+$/.test(salvage.newDescent.states) && salvage.newDescent.taken === 0 && salvage.newDescent.progress.done === 0 && salvage.newDescent.things && salvage.newDescent.doorsShut && salvage.newDescent.panelsBack, salvage.newDescent);
   check('salvage: if less is left in the station than was asked, what is left is all that is asked, so it can always be finished',
     salvage.withLittleLeft.left < salvage.withLittleLeft.wasAsked && salvage.withLittleLeft.asked === salvage.withLittleLeft.left && salvage.withLittleLeft.done === salvage.withLittleLeft.left, salvage.withLittleLeft);
+
+  // --- the lift's door never comes down on you either ---
+  const liftDoor = await inGame(() => {
+    const d = window.lastReturnDebug, result = {};
+    d.loadStation('classic', 0);
+    d.setDebugOption('invulnerable', true); d.hollow.isActive = false;
+    const door = d.getLiftDoor(), start = d.playerStart;
+    const away = Math.hypot(door.centerX - start.x, door.centerZ - start.z), stepX = (door.centerX - start.x) / away, stepZ = (door.centerZ - start.z) / away;
+    result.atTheStart = { door: door.openFraction, left: d.game.flags.hasLeftLift };
+    // Out of the car, a good step past its door: the door starts down.
+    d.teleport(door.centerX + stepX * 2.4, door.centerZ + stepZ * 2.4, 0);
+    d.simulate(1.5);
+    result.steppedOut = { left: d.game.flags.hasLeftLift, door: door.openFraction, told: door.forcedState };
+    // Straight back under it while it is coming down: it goes up again.
+    d.teleport(door.centerX, door.centerZ, 0);
+    d.simulate(1.5);
+    result.dartedBack = { door: door.openFraction };
+    // Into the car: it stays up for as long as you are in there.
+    d.teleport(start.x, start.z, 0);
+    d.simulate(4);
+    result.backInTheCar = { door: door.openFraction, mode: d.game.mode };
+    // Out again, and clear of it: now it shuts.
+    d.teleport(door.centerX + stepX * 3, door.centerZ + stepZ * 3, 0);
+    d.simulate(4);
+    result.outForGood = { door: door.openFraction };
+    return result;
+  });
+  check('the lift door starts down when you step out, goes up again if you dart back under it, stays up while you are in the car, and shuts once you are clear',
+    liftDoor.atTheStart.door === 1 && !liftDoor.atTheStart.left && liftDoor.steppedOut.left && liftDoor.steppedOut.door < 1 && liftDoor.steppedOut.door > 0 && liftDoor.dartedBack.door > 0.95 &&
+    liftDoor.backInTheCar.door > 0.95 && liftDoor.backInTheCar.mode === 'playing' && liftDoor.outForGood.door === 0, liftDoor);
 
   // --- crew badges: a 'collect' quest ---
   const badges = await inGame(() => {

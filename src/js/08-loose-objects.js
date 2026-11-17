@@ -27,7 +27,8 @@
 //   loud       how far its knocks carry for its weight: 1 is ordinary, an empty can is more, a cardboard box less
 //   lies       how it is put out in a station: 'upright' as its parts are given, 'onItsSide' (a quarter turn over),
 //              or 'either'
-//   bulky      true for something you cannot run with, or take into a vent
+//   bulky      true for something you cannot run with. (Whether a thing goes into a vent is not a rule: it goes
+//              where it fits. A vent is a metre wide and 1.15 m high.)
 //   bounce     0 to 1: how much of its speed it keeps when it bounces. A glass jar 0.2, a steel pipe 0.35.
 //   grip       0 to 1: how much it resists sliding. Low slides like a puck, high stops and tips over.
 //   parts      its shape, in metres, as it hangs in the beam: x to your right, y up, z towards you (so -z points ahead).
@@ -378,7 +379,6 @@ function resetLooseObjectsForNewRun() {
   looseState.hasShownCarryHint = false;
   looseState.hasShownKnockHint = false;
   looseState.hasShownAppraisalHint = false;
-  haulState.announced = 0; haulState.checkTimer = 0;
   const statistics = looseState.statistics;
   statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0; statistics.putBack = 0; statistics.grenadesSpent = 0; statistics.flungBack = 0;
 }
@@ -1256,10 +1256,6 @@ function canSprintWhileCarrying() {
   return !looseState.held || !looseState.held.kind.bulky;
 }
 
-// Something bulky will not go into a vent ahead of you: a vent is closed to you until you put it down.
-function canCrawlWhileCarrying() {
-  return !looseState.held || !looseState.held.kind.bulky;
-}
 
 // Where the carried object wants to be: straight out from the scanner's lens, along the way the scanner
 // points, far enough to be clear of it, and a little lower for its weight. The scanner is in your right hand,
@@ -1279,10 +1275,6 @@ function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
 // `isByButton`: it is held for as long as the right mouse button is, and dropped when that is let go.
 function pickUpLooseObject(object, isByButton) {
   if (looseState.held || !object || object.isRemoved) return false;
-  if (object.kind.bulky && player.isInVent) {
-    showMessage('There is no room in here to lift the ' + object.kind.label + '.', 3, 'info');
-    return false;
-  }
   wakeLooseObject(object);
   wakeLooseObjectsTouching(object);
   object.isHeld = true;
@@ -1600,96 +1592,116 @@ function auditStationLooseObjects() {
 }
 
 // ---------------------------------------------------------------------------
-// Salvage: the bay by the lift, and what lies in it
+// Salvage: the bays, and what is sealed into them
 //
-// A station may have the 'haul' quest (09-quests.js): Salvage wants a sum's worth of what lies about, put in
-// a bay marked on the lobby floor beside the lift. (Not in the car: the car goes back up when you step out.)
-// Whatever lies inside the marking counts, for as long as it lies there.
+// A station may have the 'haul' quest (09-quests.js): Salvage wants a sum's worth of what lies about. It goes
+// into salvage bays: closets two tiles deep behind a door of their own, dug where a doorway was left over
+// when the station was laid out (planHaulBays in 03-levelgen.js). The first is near the lift, the rest are
+// spread through the station.
+//
+// A bay is shut until you open it at the panel beside its door. One bay is open at a time. An open bay has a
+// lamp over its door that puts a patch of scan points on the floor in front of it about once a minute, and
+// pings; it is on your map from then on. When what lies in it is worth its share, and you are out of it, its
+// door comes down for good and what is inside is taken. Then the next bay has to be found and opened.
 // ---------------------------------------------------------------------------
 
 const haulState = {
   isActive: false,
-  minimumX: 0, maximumX: 0, minimumZ: 0, maximumZ: 0, floorY: 0, // the bay
-  target: 0,           // what Salvage wants: settled once the station's things are put out (settleHaulTarget)
-  withinWalk: 0,       // what everything is worth that can be carried to the bay without crawling
-  announced: 0, checkTimer: 0
+  bays: [],            // { index, objectId, door, interactable, minimumX, maximumX, minimumZ, maximumZ, floorY, doorwayX, doorwayZ,
+                       //   lampX, lampY, lampZ, spotX, spotZ, quota, state: 'shut' | 'open' | 'sealing' | 'sealed', taken, pulseTimer }
+  target: 0,           // what Salvage wants in all: settled once the station's things are put out (settleHaulTarget)
+  withinWalk: 0,       // what everything is worth that can be carried to a bay without crawling
+  taken: 0,            // what has been sealed into bays so far
+  announced: -1, checkTimer: 0
 };
 
-function clearHaulBay() {
-  haulState.isActive = false; haulState.target = 0; haulState.withinWalk = 0; haulState.announced = 0;
+function clearHaulBays() {
+  haulState.isActive = false; haulState.bays.length = 0;
+  haulState.target = 0; haulState.withinWalk = 0; haulState.taken = 0; haulState.announced = -1;
 }
 
-// Chooses where the bay goes on the lobby floor: two tiles by two, as near the lift door as there is clear
-// floor, and against a wall if it can be. Returns its middle, or null if the lobby has no room for it.
-// (The marking itself is painted later, by paintHaulBay: see there for why.)
-function placeHaulBay() {
-  clearHaulBay();
-  if (!liftDoor) return null;
-  let best = null, bestScore = Infinity;
-  for (let tileZ = liftDoor.tileZ - 14; tileZ <= liftDoor.tileZ + 14; tileZ++) {
-    for (let tileX = liftDoor.tileX - 14; tileX <= liftDoor.tileX + 14; tileX++) {
-      if (!isInsideGrid(tileX, tileZ) || !isInsideGrid(tileX + 1, tileZ + 1)) continue;
-      const floor = tileFloorHeight[tileIndexAt(tileX, tileZ)];
-      let isClear = true, wallsBeside = 0;
-      for (let offsetZ = -1; offsetZ <= 2 && isClear; offsetZ++) {
-        for (let offsetX = -1; offsetX <= 2 && isClear; offsetX++) {
-          if (!isInsideGrid(tileX + offsetX, tileZ + offsetZ)) { isClear = false; break; }
-          const index = tileIndexAt(tileX + offsetX, tileZ + offsetZ);
-          const isOfTheBay = offsetX >= 0 && offsetX <= 1 && offsetZ >= 0 && offsetZ <= 1;
-          if (tileFlags[index] & TILE_FLAG_DOOR) isClear = false; // not in a doorway, and not on a doorstep
-          if (!isOfTheBay) { if (tileIsOpen[index] !== 1 && (offsetX === -1 || offsetX === 2) !== (offsetZ === -1 || offsetZ === 2)) wallsBeside++; continue; }
-          if (tileIsOpen[index] !== 1 || tilePropLists[index] !== null || ZONE_NAMES[tileZone[index]] !== 'LIFT LOBBY') isClear = false;
-          if (tileFlags[index] & (TILE_FLAG_VENT | TILE_FLAG_PIT | TILE_FLAG_WATER | TILE_FLAG_GRATE | TILE_FLAG_HAZARD | TILE_FLAG_DEBRIS)) isClear = false;
-          if (Math.abs(tileFloorHeight[index] - floor) > 0.01) isClear = false;
-        }
-      }
-      if (!isClear) continue;
-      const middleX = tileX + 1, middleZ = tileZ + 1;
-      let isNearSomethingToUse = false;
-      for (const interactable of interactables) if (distanceBetweenPoints(interactable.x, interactable.z, middleX, middleZ) < 2.2) isNearSomethingToUse = true;
-      if (isNearSomethingToUse) continue;
-      const score = distanceBetweenPoints(liftDoor.centerX, liftDoor.centerZ, middleX, middleZ) - (wallsBeside > 0 ? 1.5 : 0);
-      if (score < bestScore) { bestScore = score; best = { tileX: tileX, tileZ: tileZ, floor: floor }; }
-    }
+// A new descent: every bay is shut and empty again.
+function resetHaulBays() {
+  haulState.taken = 0; haulState.announced = -1; haulState.checkTimer = 0;
+  for (const bay of haulState.bays) { bay.state = 'shut'; bay.taken = 0; bay.pulseTimer = 0; bay.interactable.prompt = 'Open salvage bay ' + (bay.index + 1); }
+}
+
+// Makes one planned bay (a room of 03-levelgen.js's plan: its door hangs and its floor is dug by now) into a
+// bay you can use: the panel beside its door, and what the code below needs to know about it.
+// Returns where its panel is, for the quest and the map.
+function buildHaulBay(planned, objectId, index) {
+  const step = WALL_DIRECTIONS[planned.wall]; // from the room, through the door, into the bay
+  const sideX = -step[1], sideZ = step[0];
+  const door = doors.find(function (candidate) { return candidate.tileX === planned.doorTileX && candidate.tileZ === planned.doorTileZ; });
+  const floorY = planned.floorY;
+  const doorwayX = planned.doorTileX + 0.5, doorwayZ = planned.doorTileZ + 0.5;
+  // The panel: on the wall beside the door, on the room's side, at hand height. (If there is no wall on either
+  // side of the door to hang it on, the door itself is what you press.)
+  clearPlacement();
+  let panel = null, panelX = doorwayX - step[0] * 0.45, panelZ = doorwayZ - step[1] * 0.45;
+  for (const side of [1, -1]) {
+    const wallTileX = planned.doorTileX + sideX * side, wallTileZ = planned.doorTileZ + sideZ * side;
+    if (isTileOpenAt(wallTileX, wallTileZ) || !isTileOpenAt(wallTileX - step[0], wallTileZ - step[1])) continue;
+    panelX = wallTileX + 0.5 - step[0] * 0.53 - sideX * side * 0.22;
+    panelZ = wallTileZ + 0.5 - step[1] * 0.53 - sideZ * side * 0.22;
+    panel = addBoxProp(panelX, floorY + 1.25, panelZ, sideX !== 0 ? 0.13 : 0.03, 0.17, sideZ !== 0 ? 0.13 : 0.03,
+      { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true, objectId: objectId });
+    break;
   }
-  if (best === null) return null;
+  const interactable = registerInteractable(objectId, panelX, floorY + 1.25, panelZ, 'Open salvage bay ' + (index + 1), panel ? [panel] : [], { mapLabel: 'BAY ' + (index + 1) });
+  clearPlacement();
+  let minimumX = GRID_WIDTH, maximumX = 0, minimumZ = GRID_DEPTH, maximumZ = 0;
+  for (const tileIndex of planned.route) {
+    const tileX = tileIndex % GRID_WIDTH, tileZ = (tileIndex - tileX) / GRID_WIDTH;
+    minimumX = Math.min(minimumX, tileX); maximumX = Math.max(maximumX, tileX + 1);
+    minimumZ = Math.min(minimumZ, tileZ); maximumZ = Math.max(maximumZ, tileZ + 1);
+  }
+  // How much floor there is in front of the door: the lamp's patch goes in the middle of the first two tiles
+  // of it, or of the one tile there is if the door opens onto a narrow corridor.
+  let floorInFront = 0;
+  while (floorInFront < 2 && isTileOpenAt(planned.doorTileX - step[0] * (floorInFront + 1), planned.doorTileZ - step[1] * (floorInFront + 1))) floorInFront++;
+  const spotDistance = 0.5 + Math.max(1, floorInFront) * 0.5;
   haulState.isActive = true;
-  haulState.minimumX = best.tileX; haulState.maximumX = best.tileX + 2; haulState.minimumZ = best.tileZ; haulState.maximumZ = best.tileZ + 2;
-  haulState.floorY = best.floor;
-  return { x: best.tileX + 1, z: best.tileZ + 1 };
+  haulState.bays.push({
+    index: index, objectId: objectId, door: door, interactable: interactable || findInteractableByObjectId(objectId),
+    minimumX: minimumX, maximumX: maximumX, minimumZ: minimumZ, maximumZ: maximumZ, floorY: floorY,
+    doorwayX: doorwayX, doorwayZ: doorwayZ,
+    // The lamp: over the door on the room's side. The patch it lights: the floor a step or two in front of the door.
+    lampX: doorwayX - step[0] * 0.62, lampY: floorY + 2.25, lampZ: doorwayZ - step[1] * 0.62,
+    spotX: doorwayX - step[0] * spotDistance, spotZ: doorwayZ - step[1] * spotDistance,
+    spotRadius: Math.min(TUNING.haulBayPulseMetres, floorInFront >= 2 ? 1.1 : 0.55),
+    quota: 0, state: 'shut', taken: 0, pulseTimer: 0
+  });
+  return { x: panelX, z: panelZ };
 }
 
-// The marking: a painted square with a cross in it, in the colour of things you can use. Paint, not a kerb:
-// it is a centimetre high, and nothing trips over it.
-// It is painted last of all, after the ceiling hatches and the noisy floor have found their places: those
-// keep clear of floor that has something on it, and a station with this quest must have its hatches exactly
-// where the same station without it would.
-function paintHaulBay() {
-  if (!haulState.isActive) return;
-  clearPlacement();
-  const options = { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false };
-  const best = { tileX: haulState.minimumX, tileZ: haulState.minimumZ, floor: haulState.floorY };
-  const middleX = best.tileX + 1, middleZ = best.tileZ + 1, y = best.floor + 0.005;
-  addBoxProp(middleX, y, best.tileZ + 0.04, 1, 0.005, 0.04, options);
-  addBoxProp(middleX, y, best.tileZ + 1.96, 1, 0.005, 0.04, options);
-  addBoxProp(best.tileX + 0.04, y, middleZ, 0.04, 0.005, 1, options);
-  addBoxProp(best.tileX + 1.96, y, middleZ, 0.04, 0.005, 1, options);
-  addBoxProp(middleX, y, middleZ, 1.3, 0.005, 0.03, Object.assign({ yaw: Math.PI / 4 }, options));
-  addBoxProp(middleX, y, middleZ, 1.3, 0.005, 0.03, Object.assign({ yaw: -Math.PI / 4 }, options));
-  clearPlacement();
+function findHaulBayOfDoor(door) {
+  for (const bay of haulState.bays) if (bay.door === door) return bay;
+  return null;
 }
 
-// What Salvage asks for: a share of what everything is worth that can be got to the bay on foot. (Something
+// What 08-entities.js asks about a bay's door every frame: open while the bay is being filled, and at no other time.
+function isHaulBayDoorWantedOpen(door) {
+  const bay = findHaulBayOfDoor(door);
+  return bay !== null && bay.state === 'open';
+}
+
+function findOpenHaulBay() {
+  for (const bay of haulState.bays) if (bay.state === 'open' || bay.state === 'sealing') return bay;
+  return null;
+}
+
+// What Salvage asks for: a share of what everything is worth that can be got to a bay on foot. (Something
 // bulky does not go through a vent, so what lies where only a vent leads is left out of the sum: whatever
-// is asked for can always be brought.) Called when the station's things have been put out.
+// is asked for can always be brought.) Each bay takes an even share of it. Called when the station's things
+// have been put out.
 function settleHaulTarget() {
   if (!haulState.isActive) return;
   const field = borrowTileField('haulWalk');
   field.fill(NAVIGATION_UNREACHABLE);
   let queueHead = 0, queueTail = 0;
-  const startIndex = tileIndexAt(haulState.minimumX, haulState.minimumZ);
-  field[startIndex] = 0;
-  navigationQueue[queueTail++] = startIndex;
+  const startIndex = findNearestWalkableTileIndex(LIFT_POSITION.x, LIFT_POSITION.z);
+  if (startIndex >= 0) { field[startIndex] = 0; navigationQueue[queueTail++] = startIndex; }
   while (queueHead < queueTail) {
     const index = navigationQueue[queueHead++];
     const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
@@ -1717,64 +1729,170 @@ function settleHaulTarget() {
   }
   haulState.withinWalk = withinWalk;
   haulState.target = Math.max(10, Math.round(withinWalk * TUNING.haulShareOfValue / 10) * 10);
+  const share = Math.max(10, Math.ceil(haulState.target / haulState.bays.length / 10) * 10);
+  for (const bay of haulState.bays) bay.quota = share;
 }
 
-function isLooseObjectInHaulBay(object) {
-  return !object.isHeld && object.x > haulState.minimumX && object.x < haulState.maximumX && object.z > haulState.minimumZ && object.z < haulState.maximumZ
-    && object.y > haulState.floorY - 0.2 && object.y < haulState.floorY + 1.8;
+function isPointInHaulBay(bay, x, z, margin) {
+  return x > bay.minimumX - margin && x < bay.maximumX + margin && z > bay.minimumZ - margin && z < bay.maximumZ + margin;
 }
 
-// { done, total }: what lies in the bay is worth `done`, and Salvage wants `total`. If so much has been lost
-// (down the shaft, say) that what is left in the station is worth less than was asked, what is left is all
-// that is asked: the quest can always be finished.
+function isLooseObjectInHaulBay(object, bay) {
+  return !object.isHeld && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
+}
+
+// What lies in a bay is worth this much.
+function getHaulBayValue(bay) {
+  let value = 0;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) if (isLooseObjectInHaulBay(looseObjects[objectIndex], bay)) value += looseObjects[objectIndex].kind.value;
+  return value;
+}
+
+// { done, total }: `done` is what has been sealed into bays plus what lies in the open one, and Salvage wants
+// `total`. If so much has been lost (down the shaft, say) that what is left in the station is worth less than
+// was asked, what is left is all that is asked: the quest can always be finished.
 function getHaulProgress() {
   if (!haulState.isActive) return { done: 0, total: 0 };
-  let inBay = 0, stillThere = 0;
-  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-    const object = looseObjects[objectIndex];
-    stillThere += object.kind.value;
-    if (isLooseObjectInHaulBay(object)) inBay += object.kind.value;
-  }
-  const total = Math.min(haulState.target, stillThere);
-  return { done: Math.min(inBay, total), total: total };
+  let stillThere = 0;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) stillThere += looseObjects[objectIndex].kind.value;
+  const open = findOpenHaulBay();
+  const total = Math.min(haulState.target, haulState.taken + stillThere);
+  return { done: Math.min(haulState.taken + (open ? getHaulBayValue(open) : 0), total), total: total };
 }
 
-// Twice a second: has what lies in the bay changed? Then the screen says so, once it has come to rest.
-function updateHaulBay(dt) {
-  if (!haulState.isActive || findQuest('haul') === null) return;
-  haulState.checkTimer -= dt;
-  if (haulState.checkTimer > 0) return;
-  haulState.checkTimer = 0.5;
-  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
-    const object = looseObjects[objectIndex];
-    if (isLooseObjectInHaulBay(object) && !object.isAsleep) return; // still settling: wait until it lies
+// You press a bay's panel (09-quests.js calls this).
+function useHaulBay(index) {
+  const bay = haulState.bays[index];
+  if (!bay) return;
+  if (bay.state === 'sealed') { showMessage('SALVAGE BAY ' + (index + 1) + ': sealed.', 3, 'info'); return; }
+  if (bay.state === 'open' || bay.state === 'sealing') {
+    showMessage('SALVAGE BAY ' + (index + 1) + ': ' + getHaulBayValue(bay) + ' of ' + bay.quota + '. It seals itself when it holds enough and you are out of it.', 5, 'info');
+    return;
+  }
+  const other = findOpenHaulBay();
+  if (other !== null) {
+    playDeniedSound();
+    showMessage('SALVAGE BAY ' + (index + 1) + ': bay ' + (other.index + 1) + ' is still open. One at a time: fill that one first.', 5, 'warning');
+    return;
   }
   const progress = getHaulProgress();
-  if (progress.done === haulState.announced) return;
-  const wasEnough = haulState.announced >= progress.total;
-  haulState.announced = progress.done;
-  showMessage('Salvage in the bay: ' + progress.done + ' of ' + progress.total + '.' + (progress.done >= progress.total && !wasEnough ? ' That is what they asked for.' : ''), 4, 'info');
+  if (progress.done >= progress.total) { showMessage('SALVAGE BAY ' + (index + 1) + ': nothing more is wanted.', 3, 'info'); return; }
+  bay.state = 'open';
+  bay.pulseTimer = 0.6; // the lamp comes on a moment after the door starts up
+  bay.interactable.isDiscovered = true; // on the map from now on
+  bay.interactable.prompt = 'Salvage bay ' + (index + 1) + ': what it holds';
+  haulState.announced = progress.done; // (what it holds is said when that changes, not now)
+  playPickupSound();
+  emitNoise(bay.doorwayX, bay.doorwayZ, TUNING.noiseRadiusDoor);
+  showMessage('Salvage bay ' + (index + 1) + ' open. It wants ' + Math.min(bay.quota, progress.total - progress.done) + ' worth.', 5, 'info');
   refreshObjective();
 }
 
-// For tests and debug mode: carries what it takes to the bay, the dearest things first.
-function fillHaulBay() {
+// The lamp over an open bay's door: a patch of scan points on the floor in front of it, and a ping.
+function pulseHaulBay(bay) {
+  bay.pulseTimer = TUNING.haulBayPulseSeconds;
+  for (let ray = 0; ray < TUNING.haulBayPulseRays; ray++) {
+    const angle = Math.random() * TWO_PI, reach = Math.sqrt(Math.random()) * bay.spotRadius;
+    const directionX = bay.spotX + Math.cos(angle) * reach - bay.lampX, directionY = bay.floorY - bay.lampY, directionZ = bay.spotZ + Math.sin(angle) * reach - bay.lampZ;
+    const length = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ);
+    fireScanPulse(bay.lampX, bay.lampY, bay.lampZ, directionX / length, directionY / length, directionZ / length, false);
+  }
+  playHaulBayPing(bay.lampX, bay.lampY, bay.lampZ);
+  showCaption('salvageBayPing', { x: bay.doorwayX, z: bay.doorwayZ });
+  emitNoise(bay.doorwayX, bay.doorwayZ, TUNING.noiseRadiusHaulBayPing);
+}
+
+// The door is down: what is inside is taken.
+function finishSealingHaulBay(bay) {
+  let value = 0;
+  for (let objectIndex = looseObjects.length - 1; objectIndex >= 0; objectIndex--) {
+    const object = looseObjects[objectIndex];
+    if (!isLooseObjectInHaulBay(object, bay)) continue;
+    value += object.kind.value;
+    removeLooseObject(object);
+  }
+  bay.state = 'sealed'; bay.taken = value;
+  haulState.taken += value;
+  bay.interactable.isAvailable = false;
+  const progress = getHaulProgress();
+  haulState.announced = progress.done;
+  const isEnough = progress.done >= progress.total;
+  const isAnotherLeft = haulState.bays.some(function (other) { return other.state === 'shut'; });
+  showMessage('Salvage bay ' + (bay.index + 1) + ' sealed: ' + value + ' taken. ' + progress.done + ' of ' + progress.total + '.' +
+    (isEnough ? ' That is what they asked for.' : (isAnotherLeft ? ' Find the next bay.' : '')), 6, 'info');
+  saveCheckpoint();
+  refreshObjective();
+}
+
+function updateHaulBays(dt) {
+  if (!haulState.isActive) return;
+  const bay = findOpenHaulBay();
+  if (bay === null) return;
+  // Are you in it, or in its doorway? Then its door stays up, whatever it holds.
+  const isPlayerInTheWay = isPointInHaulBay(bay, player.x, player.z, 0.35) || distanceBetweenPoints(player.x, player.z, bay.doorwayX, bay.doorwayZ) < 0.95;
+  if (bay.state === 'sealing') {
+    if (isPlayerInTheWay) { bay.state = 'open'; return; } // back under the door before it was down: it goes up again
+    if (bay.door.openFraction <= 0) finishSealingHaulBay(bay);
+    return;
+  }
+  bay.pulseTimer -= dt;
+  if (bay.pulseTimer <= 0) pulseHaulBay(bay);
+  haulState.checkTimer -= dt;
+  if (haulState.checkTimer > 0) return;
+  haulState.checkTimer = 0.5;
+  let isSettling = false;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    if (isLooseObjectInHaulBay(looseObjects[objectIndex], bay) && !looseObjects[objectIndex].isAsleep) isSettling = true;
+  }
+  if (isSettling) return; // wait until what was put in lies still
+  const progress = getHaulProgress(), inside = getHaulBayValue(bay);
+  if (progress.done !== haulState.announced) {
+    haulState.announced = progress.done;
+    showMessage('Salvage bay ' + (bay.index + 1) + ': ' + inside + ' of ' + bay.quota + '.', 4, 'info');
+    refreshObjective();
+  }
+  // Enough in it (or enough in all): it seals, once you, the Hollow and anything in the doorway are out of the way.
+  if (inside <= 0 || (inside < bay.quota && progress.done < progress.total)) return;
+  if (isPlayerInTheWay || isLooseObjectInDoorway(bay.door)) return;
+  if (hollow.isActive && isPointInHaulBay(bay, hollow.figure.x, hollow.figure.z, 0.6)) return;
+  bay.state = 'sealing';
+}
+
+// For tests and debug mode: opens the bays one after another, carries what each one wants into it (the
+// dearest things first) and seals it, until Salvage has what it asked for. Returns how many things were moved.
+function fillHaulBays() {
   if (!haulState.isActive) return 0;
-  const byWorth = looseObjects.filter(function (object) { return !object.isHeld && !isLooseObjectInHaulBay(object); })
-    .sort(function (first, second) { return second.kind.value - first.kind.value || first.id - second.id; });
   let moved = 0;
-  for (const object of byWorth) {
-    const progress = getHaulProgress();
+  // The one that stands open first, then the rest in their order.
+  const open = findOpenHaulBay();
+  const inOrder = (open ? [open] : []).concat(haulState.bays.filter(function (bay) { return bay !== open; }));
+  for (const bay of inOrder) {
+    let progress = getHaulProgress();
     if (progress.done >= progress.total) break;
-    forgetLooseObjectInTiles(object);
-    changePointsOnLooseObject(object, 0);
-    object.x = haulState.minimumX + 0.5 + (moved % 2); object.z = haulState.minimumZ + 0.5 + (Math.floor(moved / 2) % 2);
-    object.y = haulState.floorY + object.prepared.boundsRadius + 0.02 + Math.floor(moved / 4) * 0.5;
-    object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; object.spinX = 0; object.spinY = 0; object.spinZ = 0;
-    object.lastGoodX = object.x; object.lastGoodY = object.y; object.lastGoodZ = object.z;
-    noteLooseObjectInTiles(object);
-    wakeLooseObject(object);
-    moved++;
+    if (bay.state === 'sealed') continue;
+    bay.state = 'open'; bay.interactable.isDiscovered = true; bay.pulseTimer = TUNING.haulBayPulseSeconds;
+    bay.interactable.prompt = 'Salvage bay ' + (bay.index + 1) + ': what it holds';
+    const byWorth = looseObjects.filter(function (object) { return !object.isHeld && !isLooseObjectInHaulBay(object, bay); })
+      .sort(function (first, second) { return second.kind.value - first.kind.value || first.id - second.id; });
+    let placed = 0;
+    for (const object of byWorth) {
+      progress = getHaulProgress();
+      if (getHaulBayValue(bay) >= bay.quota || progress.done >= progress.total) break;
+      forgetLooseObjectInTiles(object);
+      changePointsOnLooseObject(object, 0);
+      const along = (placed % 4 + 0.5) / 4, across = (Math.floor(placed / 4) % 2 + 0.5) / 2;
+      const isAlongX = bay.maximumX - bay.minimumX > bay.maximumZ - bay.minimumZ;
+      object.x = isAlongX ? bay.minimumX + along * (bay.maximumX - bay.minimumX) : bay.minimumX + across;
+      object.z = isAlongX ? bay.minimumZ + across : bay.minimumZ + along * (bay.maximumZ - bay.minimumZ);
+      object.y = bay.floorY + object.prepared.boundsRadius + 0.02 + Math.floor(placed / 8) * 0.6;
+      object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; object.spinX = 0; object.spinY = 0; object.spinZ = 0;
+      object.lastGoodX = object.x; object.lastGoodY = object.y; object.lastGoodZ = object.z;
+      noteLooseObjectInTiles(object);
+      wakeLooseObject(object);
+      placed++; moved++;
+    }
+    bay.door.openFraction = 0;
+    finishSealingHaulBay(bay);
   }
   return moved;
 }
@@ -1924,7 +2042,7 @@ function rememberPlayerMovement(dt) {
 
 function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   updateLooseCarryInput(dt);
-  updateHaulBay(dt);
+  updateHaulBays(dt);
   if (looseObjects.length === 0) { rememberPlayerMovement(dt); return; }
   computeLooseHoldTarget(eyeX, eyeY, eyeZ);
   // How far you walked since the last frame, before anything you carry has had its say.

@@ -137,7 +137,7 @@ function initializeInterface() {
     const isGenerated = settings.station === 'generated';
     elements['station-options'].hidden = !isGenerated;
     let description = isGenerated
-      ? 'No drawings exist. Different on every descent; the same seed gives the same station.'
+      ? 'No drawings exist. Different on every descent; the same seed gives the same station. (The game is still being built: after an update, a seed may give a different station than it did before.)'
       : 'The annex as it was built. The same every time.';
     // After a run in a generated station, say which one it was, so it can be visited again.
     if (isGenerated && level.kind === 'generated') description += ' Last descent: seed ' + level.seed + '.';
