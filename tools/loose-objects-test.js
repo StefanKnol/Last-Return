@@ -1589,18 +1589,24 @@ function installLab() {
     d.simulate(0.1);
   }, spot);
   await drawFrames(page, 3);
-  // What floats at things just now: each marker's text, whether it is the one for the thing you would pick up,
-  // and where it is on the screen as shares of the screen's width and height.
-  const readScreen = () => inGame(() => {
+  // What is on screen just now: each marker's text and where it is, as shares of the screen's width and height.
+  // What floats at a thing is there for a few seconds of the game's own clock, and a browser may run that clock
+  // on by itself between two steps of this test. So `before` is done in the same breath as the reading:
+  // 'scan' puts half a second of the beam on what you look at, 'wait' lets a marker's few seconds run out.
+  const readScreen = (before) => inGame((before) => {
     const d = window.lastReturnDebug, object = d.looseObjects[0], prompt = document.getElementById('hud-prompt');
+    if (before === 'scan') { d.setDebugOption('unlimitedScanner', true); d.setScanHeld(true); d.simulate(0.5); d.setScanHeld(false); d.simulate(0.1); }
+    if (before === 'wait') d.simulate(d.tuning.looseMarkerSeconds + 0.3);
+    d.updateLooseMarkers(1); // which things have a marker is looked at afresh, and each is put where the last drawn frame saw its thing
     const markers = Array.from(document.querySelectorAll('.loose-marker')).filter((element) => !element.hidden).map((element) => {
       const box = element.getBoundingClientRect();
       return { text: element.textContent, across: Math.round((box.left + box.width / 2) / window.innerWidth * 100) / 100, down: Math.round(box.bottom / window.innerHeight * 100) / 100 };
     });
     let remembered = false;
     try { remembered = JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').hasPickedSomethingUp === true; } catch (error) { /* no storage */ }
-    return { prompt: prompt.hidden ? '' : prompt.textContent, markers: markers, inReach: d.player.focusedLooseObject === object, remembered: remembered, worth: object ? d.getLooseObjectWorth(object) : 0, pulses: object ? object.scanHits : 0, chip: document.getElementById('chip-carrying').hidden ? '' : document.getElementById('chip-carrying').textContent };
-  });
+    return { prompt: prompt.hidden ? '' : prompt.textContent, markers: markers, inReach: d.player.focusedLooseObject === object, remembered: remembered,
+      worth: object ? d.getLooseObjectWorth(object) : 0, pulses: object ? object.scanHits : 0, chip: document.getElementById('chip-carrying').hidden ? '' : document.getElementById('chip-carrying').textContent };
+  }, before);
   const unread = await readScreen();
   // Scanned where it lies, from where you stand: a second and a half of the ordinary beam.
   const read = await inGame(() => {
@@ -1612,16 +1618,11 @@ function installLab() {
     return { worth: d.getLooseObjectWorth(object), really: object.kind.value, pulses: object.scanHits, needed: d.tuning.looseAppraiseHits, messages: window.looseLab.messages() };
   });
   await drawFrames(page, 4);
-  const readOnScreen = await readScreen();
+  const readOnScreen = await readScreen('scan');
   // Only for a few seconds after the scan: then the number is gone, though the thing and its points are still there.
-  const waitOutTheMarker = () => inGame(() => { const d = window.lastReturnDebug; d.simulate(d.tuning.looseMarkerSeconds + 0.3); });
-  await waitOutTheMarker();
-  await drawFrames(page, 4);
-  const aWhileLater = await readScreen();
+  const aWhileLater = await readScreen('wait');
   // Scanned again, it shows again.
-  await inGame(() => { const d = window.lastReturnDebug; d.setScanHeld(true); d.simulate(0.5); d.setScanHeld(false); d.simulate(0.1); });
-  await drawFrames(page, 4);
-  const rescanned = await readScreen();
+  const rescanned = await readScreen('scan');
   // Picked up: it has no marker while the beam has it, and the status line says what it is worth.
   await inGame(() => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects[0], false); d.simulate(0.3); });
   await drawFrames(page, 4);
@@ -1642,13 +1643,10 @@ function installLab() {
     for (let step = 0; step < 240 && !object.isAsleep; step++) d.simulate(1 / 30);
     d.input.keysDown.clear(); d.simulate(0.6);
   });
-  await waitOutTheMarker(); // its last scan is long enough ago
   await lookAtIt();
   await drawFrames(page, 4);
-  const setDown = await readScreen();
-  await inGame(() => { const d = window.lastReturnDebug; d.setScanHeld(true); d.simulate(1.5); d.setScanHeld(false); d.simulate(0.1); });
-  await drawFrames(page, 4);
-  const scannedAgain = await readScreen();
+  const setDown = await readScreen('wait'); // its last scan is long enough ago
+  const scannedAgain = await readScreen('scan');
   // Looked away from: nothing floats where nothing is in view.
   await inGame(() => { const d = window.lastReturnDebug; d.player.yaw += Math.PI; d.player.pitch = 0; d.simulate(0.3); });
   await drawFrames(page, 4);
