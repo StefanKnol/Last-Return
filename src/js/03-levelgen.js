@@ -1277,9 +1277,11 @@ function buildStation(kind, seed, sizeKey, layoutKey, levelsKey) {
   placeHollowHatches();
   // And the loose things on the floor that are loud to walk on. After the hatches, so that none lies under one.
   placeNoisyFloor();
+  paintHaulBay(); // the salvage bay's marking on the lobby floor, if this station has that quest (08-loose-objects.js)
   // And everything that lies loose: the cans, the litter, and the things worth carrying out.
   planStationLooseObjects();
   spawnStationLooseObjects();
+  settleHaulTarget(); // what Salvage asks for, if this station has that quest, now that it is known what lies about
   return wasBuiltAsAsked;
 }
 

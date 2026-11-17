@@ -349,6 +349,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // For a kind that does something (`use`): when it was set off, when it starts doing it, and whether it is used up.
     armedTime: -1, goesOffTime: -1, burstSeconds: 0, burstBudget: 0, burstHitsOnHollow: 0, isSpent: false,
     kickedByHollowTime: -100, chasedSince: -100, // when the Hollow last kicked it, and when it last started going after it
+    scanHits: 0, isAppraised: false,    // how many pulses have landed on it, and whether that was enough for the scanner to read what it is worth
     wasHandled: false,                  // you have had it in the beam (and the Hollow has not flung it back since): only such things interest it
     isIgnoredByHollow: false,           // the Hollow flung it: it knows that noise, and pays it no heed until you handle the thing again
     isRemoved: false
@@ -376,6 +377,8 @@ function resetLooseObjectsForNewRun() {
   spawnStationLooseObjects(); // clears whatever was loose, and puts the station's own things back where they lay
   looseState.hasShownCarryHint = false;
   looseState.hasShownKnockHint = false;
+  looseState.hasShownAppraisalHint = false;
+  haulState.announced = 0; haulState.checkTimer = 0;
   const statistics = looseState.statistics;
   statistics.knocksHeard = 0; statistics.knocksQuiet = 0; statistics.pulledFromHands = 0; statistics.lostDownThePit = 0; statistics.putBack = 0; statistics.grenadesSpent = 0; statistics.flungBack = 0;
 }
@@ -432,6 +435,20 @@ function changePointsOnLooseObject(object, seconds) {
 function noteLooseObjectScanned(object) {
   object.lastScannedTime = game.time;
   if (object.isAsleep) object.hasRestPoints = true;
+  // Enough pulses on it, and the scanner has read what it is: from then on the screen says what it is worth.
+  object.scanHits++;
+  if (!object.isAppraised && object.scanHits >= TUNING.looseAppraiseHits) {
+    object.isAppraised = true;
+    if (!looseState.hasShownAppraisalHint && object.kind.value > 0 && game.mode === 'playing') {
+      looseState.hasShownAppraisalHint = true;
+      showMessage('The scanner has read what that is: ' + object.kind.label + ', worth ' + object.kind.value + '. Scan a thing well and the screen says what it is worth.', 7, 'info');
+    }
+  }
+}
+
+// What the screen adds to a thing's name once the scanner has read it: ' (worth 25)', or nothing.
+function getLooseObjectWorth(object) {
+  return object.isAppraised && object.kind.value > 0 ? object.kind.value : 0;
 }
 
 
@@ -1583,6 +1600,186 @@ function auditStationLooseObjects() {
 }
 
 // ---------------------------------------------------------------------------
+// Salvage: the bay by the lift, and what lies in it
+//
+// A station may have the 'haul' quest (09-quests.js): Salvage wants a sum's worth of what lies about, put in
+// a bay marked on the lobby floor beside the lift. (Not in the car: the car goes back up when you step out.)
+// Whatever lies inside the marking counts, for as long as it lies there.
+// ---------------------------------------------------------------------------
+
+const haulState = {
+  isActive: false,
+  minimumX: 0, maximumX: 0, minimumZ: 0, maximumZ: 0, floorY: 0, // the bay
+  target: 0,           // what Salvage wants: settled once the station's things are put out (settleHaulTarget)
+  withinWalk: 0,       // what everything is worth that can be carried to the bay without crawling
+  announced: 0, checkTimer: 0
+};
+
+function clearHaulBay() {
+  haulState.isActive = false; haulState.target = 0; haulState.withinWalk = 0; haulState.announced = 0;
+}
+
+// Chooses where the bay goes on the lobby floor: two tiles by two, as near the lift door as there is clear
+// floor, and against a wall if it can be. Returns its middle, or null if the lobby has no room for it.
+// (The marking itself is painted later, by paintHaulBay: see there for why.)
+function placeHaulBay() {
+  clearHaulBay();
+  if (!liftDoor) return null;
+  let best = null, bestScore = Infinity;
+  for (let tileZ = liftDoor.tileZ - 14; tileZ <= liftDoor.tileZ + 14; tileZ++) {
+    for (let tileX = liftDoor.tileX - 14; tileX <= liftDoor.tileX + 14; tileX++) {
+      if (!isInsideGrid(tileX, tileZ) || !isInsideGrid(tileX + 1, tileZ + 1)) continue;
+      const floor = tileFloorHeight[tileIndexAt(tileX, tileZ)];
+      let isClear = true, wallsBeside = 0;
+      for (let offsetZ = -1; offsetZ <= 2 && isClear; offsetZ++) {
+        for (let offsetX = -1; offsetX <= 2 && isClear; offsetX++) {
+          if (!isInsideGrid(tileX + offsetX, tileZ + offsetZ)) { isClear = false; break; }
+          const index = tileIndexAt(tileX + offsetX, tileZ + offsetZ);
+          const isOfTheBay = offsetX >= 0 && offsetX <= 1 && offsetZ >= 0 && offsetZ <= 1;
+          if (tileFlags[index] & TILE_FLAG_DOOR) isClear = false; // not in a doorway, and not on a doorstep
+          if (!isOfTheBay) { if (tileIsOpen[index] !== 1 && (offsetX === -1 || offsetX === 2) !== (offsetZ === -1 || offsetZ === 2)) wallsBeside++; continue; }
+          if (tileIsOpen[index] !== 1 || tilePropLists[index] !== null || ZONE_NAMES[tileZone[index]] !== 'LIFT LOBBY') isClear = false;
+          if (tileFlags[index] & (TILE_FLAG_VENT | TILE_FLAG_PIT | TILE_FLAG_WATER | TILE_FLAG_GRATE | TILE_FLAG_HAZARD | TILE_FLAG_DEBRIS)) isClear = false;
+          if (Math.abs(tileFloorHeight[index] - floor) > 0.01) isClear = false;
+        }
+      }
+      if (!isClear) continue;
+      const middleX = tileX + 1, middleZ = tileZ + 1;
+      let isNearSomethingToUse = false;
+      for (const interactable of interactables) if (distanceBetweenPoints(interactable.x, interactable.z, middleX, middleZ) < 2.2) isNearSomethingToUse = true;
+      if (isNearSomethingToUse) continue;
+      const score = distanceBetweenPoints(liftDoor.centerX, liftDoor.centerZ, middleX, middleZ) - (wallsBeside > 0 ? 1.5 : 0);
+      if (score < bestScore) { bestScore = score; best = { tileX: tileX, tileZ: tileZ, floor: floor }; }
+    }
+  }
+  if (best === null) return null;
+  haulState.isActive = true;
+  haulState.minimumX = best.tileX; haulState.maximumX = best.tileX + 2; haulState.minimumZ = best.tileZ; haulState.maximumZ = best.tileZ + 2;
+  haulState.floorY = best.floor;
+  return { x: best.tileX + 1, z: best.tileZ + 1 };
+}
+
+// The marking: a painted square with a cross in it, in the colour of things you can use. Paint, not a kerb:
+// it is a centimetre high, and nothing trips over it.
+// It is painted last of all, after the ceiling hatches and the noisy floor have found their places: those
+// keep clear of floor that has something on it, and a station with this quest must have its hatches exactly
+// where the same station without it would.
+function paintHaulBay() {
+  if (!haulState.isActive) return;
+  clearPlacement();
+  const options = { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false };
+  const best = { tileX: haulState.minimumX, tileZ: haulState.minimumZ, floor: haulState.floorY };
+  const middleX = best.tileX + 1, middleZ = best.tileZ + 1, y = best.floor + 0.005;
+  addBoxProp(middleX, y, best.tileZ + 0.04, 1, 0.005, 0.04, options);
+  addBoxProp(middleX, y, best.tileZ + 1.96, 1, 0.005, 0.04, options);
+  addBoxProp(best.tileX + 0.04, y, middleZ, 0.04, 0.005, 1, options);
+  addBoxProp(best.tileX + 1.96, y, middleZ, 0.04, 0.005, 1, options);
+  addBoxProp(middleX, y, middleZ, 1.3, 0.005, 0.03, Object.assign({ yaw: Math.PI / 4 }, options));
+  addBoxProp(middleX, y, middleZ, 1.3, 0.005, 0.03, Object.assign({ yaw: -Math.PI / 4 }, options));
+  clearPlacement();
+}
+
+// What Salvage asks for: a share of what everything is worth that can be got to the bay on foot. (Something
+// bulky does not go through a vent, so what lies where only a vent leads is left out of the sum: whatever
+// is asked for can always be brought.) Called when the station's things have been put out.
+function settleHaulTarget() {
+  if (!haulState.isActive) return;
+  const field = borrowTileField('haulWalk');
+  field.fill(NAVIGATION_UNREACHABLE);
+  let queueHead = 0, queueTail = 0;
+  const startIndex = tileIndexAt(haulState.minimumX, haulState.minimumZ);
+  field[startIndex] = 0;
+  navigationQueue[queueTail++] = startIndex;
+  while (queueHead < queueTail) {
+    const index = navigationQueue[queueHead++];
+    const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
+    for (let direction = 0; direction < 4; direction++) {
+      const neighbourX = tileX + (direction === 0 ? 1 : direction === 1 ? -1 : 0), neighbourZ = tileZ + (direction === 2 ? 1 : direction === 3 ? -1 : 0);
+      if (!isInsideGrid(neighbourX, neighbourZ)) continue;
+      const neighbourIndex = neighbourZ * GRID_WIDTH + neighbourX;
+      if (tileIsWalkable[neighbourIndex] === 0 || field[neighbourIndex] === 0 || (tileFlags[neighbourIndex] & TILE_FLAG_VENT)) continue;
+      if (Math.abs(tileFloorHeight[neighbourIndex] - tileFloorHeight[index]) > MAXIMUM_STEP_HEIGHT) continue;
+      field[neighbourIndex] = 0;
+      navigationQueue[queueTail++] = neighbourIndex;
+    }
+  }
+  let withinWalk = 0;
+  for (const entry of stationLooseObjects) {
+    // On the floor it has walked to, or on a table that stands on the floor next to it.
+    let isWithinWalk = false;
+    for (let offsetZ = -1; offsetZ <= 1 && !isWithinWalk; offsetZ++) {
+      for (let offsetX = -1; offsetX <= 1 && !isWithinWalk; offsetX++) {
+        const tileX = Math.floor(entry.x) + offsetX, tileZ = Math.floor(entry.z) + offsetZ;
+        if (isInsideGrid(tileX, tileZ) && field[tileIndexAt(tileX, tileZ)] === 0) isWithinWalk = true;
+      }
+    }
+    if (isWithinWalk) withinWalk += LOOSE_OBJECT_KINDS[entry.kindKey].value;
+  }
+  haulState.withinWalk = withinWalk;
+  haulState.target = Math.max(10, Math.round(withinWalk * TUNING.haulShareOfValue / 10) * 10);
+}
+
+function isLooseObjectInHaulBay(object) {
+  return !object.isHeld && object.x > haulState.minimumX && object.x < haulState.maximumX && object.z > haulState.minimumZ && object.z < haulState.maximumZ
+    && object.y > haulState.floorY - 0.2 && object.y < haulState.floorY + 1.8;
+}
+
+// { done, total }: what lies in the bay is worth `done`, and Salvage wants `total`. If so much has been lost
+// (down the shaft, say) that what is left in the station is worth less than was asked, what is left is all
+// that is asked: the quest can always be finished.
+function getHaulProgress() {
+  if (!haulState.isActive) return { done: 0, total: 0 };
+  let inBay = 0, stillThere = 0;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    stillThere += object.kind.value;
+    if (isLooseObjectInHaulBay(object)) inBay += object.kind.value;
+  }
+  const total = Math.min(haulState.target, stillThere);
+  return { done: Math.min(inBay, total), total: total };
+}
+
+// Twice a second: has what lies in the bay changed? Then the screen says so, once it has come to rest.
+function updateHaulBay(dt) {
+  if (!haulState.isActive || findQuest('haul') === null) return;
+  haulState.checkTimer -= dt;
+  if (haulState.checkTimer > 0) return;
+  haulState.checkTimer = 0.5;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    if (isLooseObjectInHaulBay(object) && !object.isAsleep) return; // still settling: wait until it lies
+  }
+  const progress = getHaulProgress();
+  if (progress.done === haulState.announced) return;
+  const wasEnough = haulState.announced >= progress.total;
+  haulState.announced = progress.done;
+  showMessage('Salvage in the bay: ' + progress.done + ' of ' + progress.total + '.' + (progress.done >= progress.total && !wasEnough ? ' That is what they asked for.' : ''), 4, 'info');
+  refreshObjective();
+}
+
+// For tests and debug mode: carries what it takes to the bay, the dearest things first.
+function fillHaulBay() {
+  if (!haulState.isActive) return 0;
+  const byWorth = looseObjects.filter(function (object) { return !object.isHeld && !isLooseObjectInHaulBay(object); })
+    .sort(function (first, second) { return second.kind.value - first.kind.value || first.id - second.id; });
+  let moved = 0;
+  for (const object of byWorth) {
+    const progress = getHaulProgress();
+    if (progress.done >= progress.total) break;
+    forgetLooseObjectInTiles(object);
+    changePointsOnLooseObject(object, 0);
+    object.x = haulState.minimumX + 0.5 + (moved % 2); object.z = haulState.minimumZ + 0.5 + (Math.floor(moved / 2) % 2);
+    object.y = haulState.floorY + object.prepared.boundsRadius + 0.02 + Math.floor(moved / 4) * 0.5;
+    object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; object.spinX = 0; object.spinY = 0; object.spinZ = 0;
+    object.lastGoodX = object.x; object.lastGoodY = object.y; object.lastGoodZ = object.z;
+    noteLooseObjectInTiles(object);
+    wakeLooseObject(object);
+    moved++;
+  }
+  return moved;
+}
+
+// ---------------------------------------------------------------------------
 // The Hollow and what it kicks
 // ---------------------------------------------------------------------------
 
@@ -1727,6 +1924,7 @@ function rememberPlayerMovement(dt) {
 
 function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   updateLooseCarryInput(dt);
+  updateHaulBay(dt);
   if (looseObjects.length === 0) { rememberPlayerMovement(dt); return; }
   computeLooseHoldTarget(eyeX, eyeY, eyeZ);
   // How far you walked since the last frame, before anything you carry has had its say.

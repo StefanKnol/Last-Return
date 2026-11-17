@@ -891,6 +891,7 @@ function startApplication() {
     doQuest: function (key) {
       const instance = findQuest(key);
       if (!instance) return false;
+      if (instance.definition.kind === 'haul') fillHaulBay();
       for (const object of instance.objects) {
         if (object.needsItem && !object.isSupplied && getCarriedCount(instance.definition.requires.item) < 1) useInteractable(findInteractableByObjectId(object.itemObjectId));
         if (object.objectId > 0 && !object.isDone) useInteractable(findInteractableByObjectId(object.objectId));
@@ -952,6 +953,7 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     stationLooseObjects: stationLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
+    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBay: fillHaulBay, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getLooseObjectWorth: getLooseObjectWorth,
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
     wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
     fireScanPulse: fireScanPulse, fireScanPulseBeyond: fireScanPulseBeyond, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateScanEmitterAtEye: updateScanEmitterAtEye, castScannerPulse: castScannerPulse, castRayAgainstThings: castRayAgainstThings,

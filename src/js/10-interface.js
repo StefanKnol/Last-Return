@@ -711,7 +711,7 @@ function updateHud(realDt) {
     elements['chip-extra'].textContent = extraText;
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
-    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase();
+    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase() + (getLooseObjectWorth(carried) > 0 ? ' · ' + getLooseObjectWorth(carried) : '');
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];
@@ -762,7 +762,7 @@ function updateHud(realDt) {
       prompt.textContent = 'THROW  ' + '\u25AE'.repeat(filled) + '\u25AF'.repeat(8 - filled);
     } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject) {
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject);
+      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject) + (getLooseObjectWorth(focusedLooseObject) > 0 ? ' (worth ' + getLooseObjectWorth(focusedLooseObject) + ')' : '');
     } else if (game.mode === 'playing' && focused) {
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E]  ') + focused.prompt;

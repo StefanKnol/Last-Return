@@ -41,14 +41,15 @@ function check(description, condition, detail) {
     for (const quest of d.quests) {
       const say = (what) => wrong.push(quest.key + ': ' + what);
       if (d.quests.filter((other) => other.key === quest.key).length !== 1) say('its key is used twice');
-      if (['collect', 'activate', 'supply'].indexOf(quest.kind) < 0) say('unknown kind ' + quest.kind);
+      if (['collect', 'activate', 'supply', 'haul'].indexOf(quest.kind) < 0) say('unknown kind ' + quest.kind);
       if (['mains', 'upload', 'lift'].indexOf(quest.blocks) < 0) say('holds up nothing the game knows: ' + quest.blocks);
       if (quest.pool && !d.questPools[quest.pool]) say('its pool does not exist: ' + quest.pool);
       if (!quest.text) say('has no text');
       if (quest.tell && lines.indexOf(quest.tell.line) < 0) say('Dispatch has no line called ' + quest.tell.line);
       if (quest.releasedLine && lines.indexOf(quest.releasedLine) < 0) say('Dispatch has no line called ' + quest.releasedLine);
       if (quest.requires && !d.questItems[quest.requires.item]) say('needs an item that does not exist: ' + quest.requires.item);
-      if (quest.kind !== 'supply' && typeof quest.build !== 'function') say('has nothing to build its things with');
+      if (quest.kind !== 'supply' && quest.kind !== 'haul' && typeof quest.build !== 'function') say('has nothing to build its things with');
+      if (quest.kind === 'haul' && !(typeof quest.progress === 'function' && quest.text.refused && quest.text.objective && quest.text.chip)) say('a haul quest needs a way to say how far along it is, and the sentences refused, objective and chip');
       // (A quest that does something of its own when a thing is taken has no sentence for that, and the spools have their own place on screen.)
       if (quest.kind === 'collect' && !(quest.text.refused && quest.text.objective && (quest.text.taken || typeof quest.taken === 'function') && (quest.text.chip || quest.always))) say('a collect quest needs the sentences taken, refused, objective and chip');
       if (quest.kind === 'activate' && !(quest.text.activated && quest.text.objective && (quest.text.refused || quest.text.holding))) say('an activate quest needs the sentences activated, objective and refused (or holding)');
@@ -167,6 +168,107 @@ function check(description, condition, detail) {
   check('a quest added as one more entry turns up in every station, and not one thing of any other quest moves for it', added.missing.length === 0 && added.moved.length === 0, added);
   check('that made-up quest plays without another line of code: the terminal refuses for it, it can be done, and then the upload goes through',
     added.notRefused.length === 0 && added.notDone.length === 0 && added.goneAgain, added);
+
+  // --- salvage: a 'haul' quest. It asks for a sum's worth of what the station has lying about, in a bay by the lift ---
+  const salvagePlaces = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, result = { stations: 0, withIt: 0, wrong: [], moved: [], targets: [] };
+    const definition = d.quests.filter((quest) => quest.key === 'haul')[0], place = d.quests.indexOf(definition);
+    // Everything about a station that the quest must leave alone: the other quests' things, the ceiling hatches,
+    // the noisy floor, and every loose thing.
+    const describe = function () {
+      return lab.describeQuests('haul') + ' # ' + d.hollowHatches.map((hatch) => hatch.index).join(',') + ' # ' +
+        d.noisyFloorPatches.map((patch) => patch.index).join(',') + ' # ' + JSON.stringify(d.stationLooseObjects) + ' # ' + d.doors.length;
+    };
+    for (const size of ['small', 'large']) {
+      for (let seed = 1; seed <= 14; seed++) {
+        const station = ['generated', seed, size, ['mixed', 'tight', 'sparse'][seed % 3], seed % 2 ? 'one' : 'two'], name = size + ' ' + seed;
+        lab.fresh.apply(null, station);
+        result.stations++;
+        if (!d.findQuest('haul')) continue;
+        result.withIt++;
+        const state = d.haulState, progress = d.getHaulProgress(), withIt = describe();
+        let all = 0;
+        for (const item of d.stationLooseObjects) all += d.looseObjectKinds[item.kindKey].value;
+        result.targets.push(state.target);
+        if (!(state.isActive && state.target >= 10 && state.target % 10 === 0 && state.target <= state.withinWalk && state.withinWalk <= all)) result.wrong.push(name + ': asks for ' + state.target + ' of ' + state.withinWalk + ' within walking reach, ' + all + ' in all');
+        if (progress.done !== 0 || progress.total !== state.target) result.wrong.push(name + ': starts at ' + progress.done + ' of ' + progress.total);
+        // The bay: four tiles of the lobby's own floor, nothing standing on them but its paint, nothing lying in it yet.
+        const lobby = d.getZoneAt(d.findInteractable(1).x, d.findInteractable(1).z);
+        for (const corner of [[0.5, 0.5], [1.5, 0.5], [0.5, 1.5], [1.5, 1.5]]) {
+          const x = state.minimumX + corner[0], z = state.minimumZ + corner[1], spot = d.findWalkableSpotNear(x, z);
+          if (d.getZoneAt(x, z) !== lobby || !spot || spot.x !== x || spot.z !== z) result.wrong.push(name + ': the bay is not all lobby floor you can stand on');
+        }
+        if (d.looseObjects.some((object) => d.isLooseObjectInHaulBay(object))) result.wrong.push(name + ': something lies in the bay before you have brought anything');
+        const found = d.auditLayout().concat(d.auditProgression()).concat(d.auditHollowRoutes()).concat(d.auditStationLooseObjects());
+        if (found.length > 0) result.wrong.push(name + ': ' + found[0]);
+        // Without the quest, the same station has everything else exactly where it was.
+        d.quests.splice(place, 1);
+        try { lab.fresh.apply(null, station); if (d.findQuest('haul') || describe() !== withIt) result.moved.push(name); } finally { d.quests.splice(place, 0, definition); }
+      }
+    }
+    return result;
+  });
+  check('salvage: about half the stations have it; each asks for a round sum that is no more than what lies within walking reach of the bay, and the bay is clear lobby floor',
+    salvagePlaces.withIt >= 6 && salvagePlaces.withIt <= salvagePlaces.stations - 6 && salvagePlaces.wrong.length === 0, salvagePlaces);
+  check('salvage: a station with it has every other quest, every hatch, the noisy floor and every loose thing exactly where the same station has them without it', salvagePlaces.moved.length === 0, salvagePlaces.moved);
+
+  const salvage = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, result = {};
+    for (let seed = 1; seed < 300 && !result.seed; seed++) {
+      lab.fresh('generated', seed, 'medium', 'mixed', 'one');
+      if (d.findQuest('haul') && d.level.quests.every((quest) => ['spools', 'haul', 'generators', 'fuel'].indexOf(quest.key) >= 0)) result.seed = seed;
+    }
+    if (!result.seed) return result;
+    d.setDebugOption('freezeCreatures', true);
+    const state = d.haulState, target = state.target;
+    result.target = target;
+    d.grantPower(); d.doQuest('generators'); d.hollow.isActive = false;
+    result.objectiveWithSpools = d.game.objectiveText;
+    d.grantSpools(); d.grantKeycard();
+    result.objectiveAlone = d.game.objectiveText;
+    result.chipBefore = d.getQuestChips().join(' · ');
+    d.use(1);
+    result.refused = { started: d.game.flags.uploadStarted, said: lab.messages().indexOf('manifest short. Salvage in the bay: 0 of ' + target) >= 0 };
+    // One thing carried in: it counts once it lies there, and the screen says so. Taken out again, it no longer counts.
+    const first = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value)[0];
+    const wasAt = { x: first.x, y: first.y, z: first.z };
+    const putAt = function (object, x, y, z) { d.pickUpLooseObject(object, false); d.releaseHeldLooseObject(0); object.x = x; object.y = y; object.z = z; object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; d.wakeLooseObject(object); };
+    d.teleport(state.minimumX - 3, state.minimumZ + 1, 0);
+    putAt(first, state.minimumX + 1, state.floorY + 0.5, state.minimumZ + 1);
+    for (let step = 0; step < 240 && !first.isAsleep; step++) d.simulate(1 / 30);
+    d.simulate(1.2);
+    result.afterOne = { worth: first.kind.value, progress: d.getHaulProgress(), atRest: first.isAsleep, said: lab.messages().indexOf('Salvage in the bay: ' + Math.min(first.kind.value, target) + ' of ' + target) >= 0, chip: d.getQuestChips().join(' · ') };
+    putAt(first, wasAt.x, wasAt.y + 0.05, wasAt.z);
+    d.simulate(2);
+    result.takenOutAgain = d.getHaulProgress();
+    // Enough of it brought: the terminal takes the upload.
+    result.carriedIn = d.fillHaulBay();
+    for (let step = 0; step < 300 && !d.looseObjects.every((object) => object.isAsleep); step++) d.simulate(1 / 30);
+    d.simulate(1.2);
+    result.afterAll = { progress: d.getHaulProgress(), said: /That is what they asked for/.test(lab.messages()), objective: d.game.objectiveText, chip: d.getQuestChips().join(' · ') };
+    d.use(1);
+    result.accepted = d.game.flags.uploadStarted === true;
+    // If so much is lost that what is left is worth less than was asked, what is left is all that is asked.
+    lab.fresh('generated', result.seed, 'medium', 'mixed', 'one');
+    const dearestFirst = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
+    let left = 0;
+    for (const object of dearestFirst) { if (dearestFirst.indexOf(object) < dearestFirst.length - 6) d.removeLooseObject(object); else left += object.kind.value; }
+    result.withLittleLeft = { left: left, asked: d.getHaulProgress().total, wasAsked: d.haulState.target };
+    d.doQuest('haul');
+    result.withLittleLeft.done = d.getHaulProgress().done;
+    d.hollow.isActive = false;
+    return result;
+  });
+  check('salvage: the objective and the screen say what is asked and how much lies in the bay; the terminal refuses the upload until it is there',
+    salvage.seed > 0 && salvage.target >= 10 && /spools.*Salvage also wants/.test(salvage.objectiveWithSpools) && salvage.objectiveAlone.indexOf('Salvage still wants ' + salvage.target + ' worth') === 0 &&
+    salvage.chipBefore.indexOf('SALVAGE 0/' + salvage.target) >= 0 && !salvage.refused.started && salvage.refused.said, salvage);
+  check('salvage: a thing counts once it lies in the bay, the screen says so, and it stops counting when it is taken out again',
+    salvage.afterOne.atRest && salvage.afterOne.progress.done === Math.min(salvage.afterOne.worth, salvage.target) && salvage.afterOne.said && salvage.afterOne.chip.indexOf('SALVAGE ' + salvage.afterOne.progress.done + '/') >= 0 &&
+    salvage.takenOutAgain.done === 0, [salvage.afterOne, salvage.takenOutAgain]);
+  check('salvage: with what was asked in the bay the screen says so and the upload goes through',
+    salvage.carriedIn >= 1 && salvage.afterAll.progress.done === salvage.target && salvage.afterAll.said && salvage.afterAll.objective === 'Return to the lift lobby and upload the spools at the terminal.' && salvage.accepted, salvage.afterAll);
+  check('salvage: if less is left in the station than was asked, what is left is all that is asked, so it can always be finished',
+    salvage.withLittleLeft.left < salvage.withLittleLeft.wasAsked && salvage.withLittleLeft.asked === salvage.withLittleLeft.left && salvage.withLittleLeft.done === salvage.withLittleLeft.left, salvage.withLittleLeft);
 
   // --- crew badges: a 'collect' quest ---
   const badges = await inGame(() => {

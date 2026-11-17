@@ -1227,6 +1227,37 @@ function installLab() {
     !thrownBack.can.afterPickingItUp.ignored && thrownBack.can.afterPickingItUp.ofInterest, thrownBack.can);
   check('a gas canister is too heavy for that: it goes after it and does not throw it', thrownBack.canister.kicked && thrownBack.canister.flungAfterSeconds < 0 && !thrownBack.canister.ignored, thrownBack.canister);
 
+  // --- what a thing is worth ---
+  await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab;
+    lab.reset();
+    lab.stand(spot.x, spot.z, Math.PI / 2);
+    const object = d.createLooseObject('canister', spot.x + 1, 0.3, spot.z, 0);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    d.player.pitch = Math.atan2(object.y - d.getPlayerEyeY(), 1); // look at it
+    d.simulate(0.1);
+  }, spot);
+  await drawFrames(page, 3);
+  const unread = await inGame(() => { const d = window.lastReturnDebug, object = d.looseObjects[0]; return { prompt: document.getElementById('hud-prompt').textContent, worth: d.getLooseObjectWorth(object), pulses: object.scanHits }; });
+  // Scanned where it lies, from where you stand: a second and a half of the ordinary beam.
+  const read = await inGame(() => {
+    const d = window.lastReturnDebug, object = d.looseObjects[0];
+    d.looseState.hasShownAppraisalHint = false;
+    d.clearMessages();
+    d.setDebugOption('unlimitedScanner', true);
+    d.setScanHeld(true); d.simulate(1.5); d.setScanHeld(false); d.simulate(0.1);
+    return { worth: d.getLooseObjectWorth(object), really: object.kind.value, pulses: object.scanHits, needed: d.tuning.looseAppraiseHits, messages: window.looseLab.messages() };
+  });
+  await drawFrames(page, 3);
+  const readPrompt = await inGame(() => document.getElementById('hud-prompt').textContent);
+  await inGame(() => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects[0], false); d.simulate(0.3); });
+  await drawFrames(page, 3);
+  const readChip = await inGame(() => { const d = window.lastReturnDebug, chip = document.getElementById('chip-carrying').textContent; d.releaseHeldLooseObject(0); return chip; });
+  check('what a thing is worth is not on screen until the scanner has read it: enough pulses on it, and then the prompt and the status line say it',
+    /Pick up the gas canister$/.test(unread.prompt) && unread.worth === 0 && read.pulses >= read.needed && read.worth === read.really && read.really > 0 &&
+    read.messages.some((text) => /The scanner has read what that is: gas canister, worth 25/.test(text)) && /Pick up the gas canister \(worth 25\)$/.test(readPrompt) && readChip === 'CARRYING: GAS CANISTER · 25',
+    { unread: unread, read: read, prompt: readPrompt, chip: readChip });
+
   // --- what it costs ---
   const cost = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab;

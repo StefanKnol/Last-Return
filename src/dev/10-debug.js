@@ -457,6 +457,7 @@ function buildDebugReadout() {
     const held = getHeldLooseObject();
     lines.push('objects     ' + looseObjects.length + ' loose, ' + awake + ' moving' + (held ? '   carrying the ' + held.kind.label : ''));
     lines.push('  knocks    ' + looseState.statistics.knocksHeard + ' heard by it, ' + looseState.statistics.knocksQuiet + ' only by you');
+    if (haulState.isActive) { const salvage = getHaulProgress(); lines.push('  salvage   ' + salvage.done + ' of ' + salvage.total + ' in the bay at x ' + (haulState.minimumX + 1) + '  z ' + (haulState.minimumZ + 1) + '   (' + haulState.withinWalk + ' within walking reach)'); }
     lines.push('  worth     ' + worth + ' in all' + (held ? ', ' + held.kind.value + ' in the beam' : '') + '   handled ' + handled + '   thrown back ' + looseState.statistics.flungBack);
   }
   if (hollow.isActive) {
@@ -603,6 +604,16 @@ function initializeDebugMode() {
   looseClearButton.id = 'debug-loose-clear';
   looseClearButton.addEventListener('click', function () { debugRemoveLooseObjects(); looseClearButton.blur(); });
   looseGrid.appendChild(looseClearButton);
+  // The salvage quest (only some stations have it): put what it asks for in the bay by the lift, to try the end of it.
+  const haulButton = createDebugElement('button', 'button-quiet', 'Fill the salvage bay');
+  haulButton.type = 'button';
+  haulButton.id = 'debug-fill-salvage';
+  haulButton.addEventListener('click', function () {
+    if (!haulState.isActive) showMessage('This station has no salvage quest.', 3, 'info');
+    else fillHaulBay();
+    haulButton.blur();
+  });
+  looseGrid.appendChild(haulButton);
   panel.appendChild(looseGrid);
 
   // Apparitions: call one up of a chosen kind, now, whatever the phantom director thinks of it.
