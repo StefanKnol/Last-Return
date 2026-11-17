@@ -380,7 +380,7 @@ function checkSourcePatching() {
       const d = window.lastReturnDebug, state = d.objectWorkshop, body = state.body;
       const readout = state.readoutElement ? state.readoutElement.textContent : '';
       const priced = function (title) { const found = new RegExp(title + ' +(shatters|worth (\\d+))').exec(readout); return found ? (found[2] ? Number(found[2]) : 'shatters') : null; };
-      return { whole: priced('whole'), intoAWall: priced('into a wall'), letGoOf: priced('let go of'), thrownHard: priced('thrown hard'), saysShattered: /shattered: gone/.test(readout),
+      return { whole: priced('whole'), intoAWall: priced('into a wall'), letGoOf: priced('let go of'), thrownHard: priced('thrown hard'), saysShattered: /shattered: gone/.test(readout), saysBroken: /broken apart: gone/.test(readout),
         isGone: body.isRemoved === true, worth: body.isRemoved ? 0 : d.getLooseObjectValue(body), y: Math.round(body.y * 100) / 100, isTrying: state.isTrying,
         glass: d.noisyFloorPatches.filter((patch) => patch.isFromPlay).length, problems: state.problems.filter((problem) => /shatter/.test(problem)), kindShattersAt: body.kind.shattersAt === undefined ? null : body.kind.shattersAt };
     });
@@ -408,9 +408,11 @@ function checkSourcePatching() {
     await setNumber('workshop-object-shattersAt', 3);
     await frames(8);
     const notGlass = await knockState();
-    const droppedNotGlass = await dropUntil(hasLanded);
-    check('set to shatter but not glass: the tool says it never will, and it does not',
-      notGlass.problems.length === 1 && notGlass.kindShattersAt === null && notGlass.letGoOf === 100 && hasLanded(droppedNotGlass) && !droppedNotGlass.isGone, [notGlass, droppedNotGlass]);
+    const droppedNotGlass = await dropUntil((state) => state.isGone);
+    check('set to shatter, anything does, not only glass: of metal it breaks apart when dropped, is gone, and leaves no glass',
+      notGlass.problems.length === 0 && notGlass.kindShattersAt === 3 && notGlass.letGoOf === 'shatters' && droppedNotGlass.isGone && droppedNotGlass.glass === 0 && droppedNotGlass.saysBroken, [notGlass, droppedNotGlass]);
+    await page.click('#workshop-bench-object');
+    await frames(2);
     await page.selectOption('#workshop-object-material', 'glass');
     await frames(8);
     const glass = await knockState();

@@ -629,8 +629,101 @@ function getExtraJobStatusText() {
   return getQuestChips().join(' · ');
 }
 
+// ---------------------------------------------------------------------------
+// What a thing is worth, floating at the thing
+//
+// Once the scanner has read a loose thing, what it is worth shows as a small number just above it, for as long
+// as the scanner's points are on it: on a thing at rest until it is moved, on one that moves for under a
+// second. The thing you would pick up shows its name there too, once the screen has stopped saying how.
+// ---------------------------------------------------------------------------
+
+const looseMarkers = {
+  container: null,
+  elements: [],     // one per marker that can be on screen at once
+  chosen: [],       // { object, isFocused, showsWorth }: which things have one just now
+  chooseTimer: 0,
+  screen: { x: 0, y: 0, isInFront: false }
+};
+
+// Where a point of the world is on the screen, in the screen's own pixels, by the renderer's last view.
+function projectPointToScreen(x, y, z, result) {
+  const matrix = renderer.viewProjectionMatrix;
+  const clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+  const clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+  const clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+  result.isInFront = clipW > 0.05;
+  if (!result.isInFront) return result;
+  result.x = (clipX / clipW * 0.5 + 0.5) * renderer.canvas.clientWidth;
+  result.y = (0.5 - clipY / clipW * 0.5) * renderer.canvas.clientHeight;
+  return result;
+}
+
+// Which things have a marker: read, with their points on them, near, on screen and in sight. If there are more
+// than may show at once, those nearest to where you look. Looked at a few times a second, not every frame.
+function chooseLooseMarkers() {
+  const markers = looseMarkers, screen = markers.screen, candidates = [];
+  const width = renderer.canvas.clientWidth, height = renderer.canvas.clientHeight;
+  const focused = getHeldLooseObject() === null && looseState.hasPickedUpOnce ? player.focusedLooseObject : null;
+  for (const object of looseObjects) {
+    if (object.isHeld || object.isRemoved) continue;
+    const isFocused = object === focused;
+    const showsWorth = object.isAppraised && getLooseObjectValue(object) > 0 && doesLooseObjectShowItsPoints(object);
+    if (!isFocused && !showsWorth) continue;
+    const distance = distanceBetweenPoints(object.x, object.z, player.x, player.z);
+    if (!isFocused && distance > TUNING.looseMarkerMetres) continue;
+    projectPointToScreen(object.x, object.y, object.z, screen);
+    if (!screen.isInFront || screen.x < 0 || screen.y < 0 || screen.x > width || screen.y > height) continue;
+    // How far from the middle of the view, as a share of its height: the thing you would pick up comes first.
+    const offCentre = isFocused ? -1 : Math.hypot(screen.x - width / 2, screen.y - height / 2) / height;
+    candidates.push({ object: object, isFocused: isFocused, showsWorth: showsWorth, offCentre: offCentre });
+  }
+  candidates.sort(function (first, second) { return first.offCentre - second.offCentre; });
+  markers.chosen.length = 0;
+  for (const candidate of candidates) {
+    if (markers.chosen.length >= TUNING.looseMarkersAtOnce) break;
+    if (!candidate.isFocused && !canPlayerSeePoint(candidate.object.x, candidate.object.y, candidate.object.z)) continue; // behind a wall, a crate, a shelf
+    markers.chosen.push(candidate);
+  }
+}
+
+function updateLooseMarkers(realDt) {
+  const markers = looseMarkers;
+  if (!markers.container) markers.container = document.getElementById('hud-loose-markers');
+  if (!markers.container) return;
+  if (game.mode !== 'playing') { markers.chosen.length = 0; markers.chooseTimer = 0; }
+  else {
+    markers.chooseTimer -= realDt;
+    if (markers.chooseTimer <= 0) { markers.chooseTimer = 0.1; chooseLooseMarkers(); }
+  }
+  let shown = 0;
+  for (const marker of markers.chosen) {
+    const object = marker.object;
+    if (object.isRemoved || object.isHeld) continue;
+    const screen = projectPointToScreen(object.x, getLooseObjectTopY(object) + 0.06, object.z, markers.screen);
+    if (!screen.isInFront) continue;
+    if (shown === markers.elements.length) {
+      const created = document.createElement('div');
+      created.className = 'loose-marker';
+      markers.container.appendChild(created);
+      markers.elements.push(created);
+    }
+    const element = markers.elements[shown++];
+    const worth = marker.showsWorth ? String(getLooseObjectValue(object)) : '';
+    const text = marker.isFocused ? getLooseObjectLabel(object) + (worth ? ' \u00B7 ' + worth : '') : worth;
+    if (element.textContent !== text) element.textContent = text;
+    element.classList.toggle('is-focused', marker.isFocused);
+    // Fainter the further off it is.
+    const distance = distanceBetweenPoints(object.x, object.z, player.x, player.z);
+    element.style.opacity = marker.isFocused ? '1' : (1 - 0.6 * clampNumber(distance / TUNING.looseMarkerMetres, 0, 1)).toFixed(2);
+    element.style.transform = 'translate(' + screen.x.toFixed(1) + 'px, ' + screen.y.toFixed(1) + 'px) translate(-50%, -100%)';
+    element.hidden = false;
+  }
+  for (let index = shown; index < markers.elements.length; index++) markers.elements[index].hidden = true;
+}
+
 function updateHud(realDt) {
   const elements = interfaceState.elements;
+  updateLooseMarkers(realDt);
   const now = game.realTime;
   for (let index = interfaceState.messages.length - 1; index >= 0; index--) {
     if (now > interfaceState.messages[index].expiresAt) {
@@ -772,9 +865,10 @@ function updateHud(realDt) {
       const filled = Math.round(getThrowWindUp() * 8);
       prompt.hidden = false;
       prompt.textContent = 'THROW  ' + '\u25AE'.repeat(filled) + '\u25AF'.repeat(8 - filled);
-    } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject) {
+    } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject && !looseState.hasPickedUpOnce) {
+      // How to pick a thing up is said until you have done it once. After that its name floats at it (below).
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject) + (getLooseObjectWorth(focusedLooseObject) > 0 ? ' (worth ' + getLooseObjectWorth(focusedLooseObject) + ')' : '');
+      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject);
     } else if (game.mode === 'playing' && focused) {
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E]  ') + focused.prompt;

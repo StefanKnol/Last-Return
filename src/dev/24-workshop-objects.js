@@ -196,10 +196,7 @@ function findObjectWorkshopProblems() {
   const reach = state.body.prepared.boundsRadius;
   if (reach >= 1) problems.push('It reaches ' + reach.toFixed(2) + ' m from its middle. A loose object stays under a metre: the length of pipe, the longest there is, reaches 0.63.');
   if (reach <= 0.05) problems.push('It reaches only ' + Math.round(reach * 100) + ' cm from its middle. Under 5 cm is too small to find with the scanner.');
-  if (state.object.shattersAt > 0 && state.object.material !== 'glass') {
-    problems.push('It is set to shatter at ' + state.object.shattersAt + ' m/s but is not glass, so it never will: only glass shatters. Make it sound like glass, or set that to 0.');
-  }
-  if (state.object.shattersAt > 0 && state.object.material === 'glass' && state.object.shattersAt <= TUNING.looseKnockQuietSpeed) {
+  if (state.object.shattersAt > 0 && state.object.shattersAt <= TUNING.looseKnockQuietSpeed) {
     problems.push('It shatters at ' + state.object.shattersAt + ' m/s. Crouching, you carry things into walls at up to ' + TUNING.looseKnockQuietSpeed + ': it would break however carefully it is carried.');
   }
   const ballCount = state.body.prepared.shellCount;
@@ -244,7 +241,7 @@ function buildObjectWorkshopReadout() {
     lines.push('thrown hard ' + afterKnock(throwSpeed) + ' (leaves at ' + throwSpeed.toFixed(1) + ' m/s)');
   }
   if (state.isTrying) {
-    if (state.body.isRemoved) lines.push('now         shattered: gone, and its glass lies\n            where it hit');
+    if (state.body.isRemoved) lines.push(kind.material === 'glass' ? 'now         shattered: gone, and its glass lies\n            where it hit' : 'now         broken apart: gone, and nothing\n            left of it');
     else {
       lines.push(state.body.isAsleep ? 'now         at rest, its middle ' + state.body.y.toFixed(2) + ' m up' : 'now         moving');
       if (kind.value > 0) lines.push('            worth ' + getLooseObjectValue(state.body) + ' of ' + kind.value);
