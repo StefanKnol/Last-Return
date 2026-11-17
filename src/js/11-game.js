@@ -24,6 +24,7 @@ const game = {
   placesEntered: {},    // the rooms you have been in during this descent, by name (for lines that go with a room)
   objectiveText: '',
   liftCountdown: -1,
+  isLiftDoorClosingBehindYou: false, // from the moment you step out of the car until its door is down with you outside
   checkpoint: { x: PLAYER_START.x, z: PLAYER_START.z, yaw: PLAYER_START.yaw },
   statistics: { elapsed: 0, distanceWalked: 0, deaths: 0, bestTime: null },
   interference: 0,
@@ -132,6 +133,7 @@ function resetWorldState() {
   game.placesEntered = {};
   resetQuests();
   game.liftCountdown = -1;
+  game.isLiftDoorClosingBehindYou = false;
   game.scheduledEvents.length = 0;
   game.statistics.elapsed = 0; game.statistics.distanceWalked = 0; game.statistics.deaths = 0;
   game.interference = 0; game.danger = 0;
@@ -586,6 +588,7 @@ function updateGameProgress(dt) {
   if (!flags.hasLeftLift && distanceOutsideLiftCar(player.x, player.z) > 1.7) {
     flags.hasLeftLift = true;
     liftDoor.forcedState = false;
+    game.isLiftDoorClosingBehindYou = true;
     saveCheckpoint();
     refreshObjective();
     scheduleEvent(1.4, function () { playLiftDepartSound(); });
@@ -595,10 +598,13 @@ function updateGameProgress(dt) {
   // The car's door never comes down on you. Step out and dart back in while it is closing, and it goes up
   // again; it shuts when you are clear of it. (Once it is down it stays down: the car has gone up.)
   // A salvage bay's door keeps the same rule (updateHaulBays in 08-loose-objects.js).
-  if (flags.hasLeftLift && !flags.liftArrived) {
+  if (game.isLiftDoorClosingBehindYou) {
     const isInTheWay = distanceOutsideLiftCar(player.x, player.z) < 1.2; // in the car, or in its doorway
     if (isInTheWay && liftDoor.openFraction > 0) liftDoor.forcedState = true;
-    else if (!isInTheWay && liftDoor.forcedState === true) liftDoor.forcedState = false;
+    else if (!isInTheWay) {
+      liftDoor.forcedState = false;
+      if (liftDoor.openFraction <= 0) game.isLiftDoorClosingBehindYou = false; // down, with you outside: that is that
+    }
   }
 
   if (flags.uploadStarted && !flags.liftArrived) {
