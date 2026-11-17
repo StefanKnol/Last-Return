@@ -320,6 +320,12 @@ function checkSourcePatching() {
     // --- the object tool: a kind written as code to look at, then a new object put together from basic forms ---
     await page.click('#workshop-tab-objects');
     await frames();
+    // The creature tool's scanner view left the lights off. With them off the scanner fires every frame and its
+    // points stay, close to the camera, more of them with every frame: without a graphics card that takes many
+    // seconds a frame, and more as it goes on. The object checks need no scanner, so the lights go back on.
+    await page.keyboard.press('KeyL');
+    await frames();
+    check('L puts the lights back on', await inPage(() => window.lastReturnDebug.workshop.isLit));
     const objectState = () => inPage(() => {
       const state = window.lastReturnDebug.objectWorkshop, body = state.body;
       return {
