@@ -17,6 +17,7 @@
 // does the touching, which is what lets a box land on a corner and tip over.
 //
 // To add a kind of object: add an entry to LOOSE_OBJECT_KINDS. Nothing else needs to change.
+// Or make one in the workshop's object tool: that is a file in src/objects/ (see 08-workshop-objects.js).
 // ---------------------------------------------------------------------------
 
 // TWEAK: the objects.
@@ -236,6 +237,7 @@ function prepareLooseObjectKind(kindKey) {
     }
   }
   kind.prepared = {
+    centreX: centreX, centreY: centreY, centreZ: centreZ, // where the centre of mass is, in the coordinates the parts were given in
     partsRadius: partsRadius,
     shell: shell, shellCount: balls.length, parts: parts,
     inverseMass: 1 / kind.mass,
@@ -510,7 +512,9 @@ function intersectRayWithLooseBox(part, ray) {
   return near;
 }
 
-// Distance along a ray (in the world) to the nearest part of one object, or -1.
+// Distance along a ray (in the world) to the nearest part of one object, or -1. Which part that was is left in
+// `looseRayPartIndex` (the workshop's object tool asks).
+let looseRayPartIndex = -1;
 function intersectRayWithLooseObject(object, originX, originY, originZ, directionX, directionY, directionZ, nearerThan) {
   const toCentreX = object.x - originX, toCentreY = object.y - originY, toCentreZ = object.z - originZ;
   const projection = toCentreX * directionX + toCentreY * directionY + toCentreZ * directionZ;
@@ -542,7 +546,7 @@ function intersectRayWithLooseObject(object, originX, originY, originZ, directio
       capsule[3] = part.toX; capsule[4] = part.toY; capsule[5] = part.toZ; capsule[6] = part.radius;
       distance = intersectRayWithCapsule(capsule, 0, ray.originX, ray.originY, ray.originZ, ray.directionX, ray.directionY, ray.directionZ);
     }
-    if (distance > 0.03 && distance < nearerThan && (best < 0 || distance < best)) best = distance;
+    if (distance > 0.03 && distance < nearerThan && (best < 0 || distance < best)) { best = distance; looseRayPartIndex = partIndex; }
   }
   return best;
 }

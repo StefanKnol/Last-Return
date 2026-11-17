@@ -1,4 +1,4 @@
-// Checks the workshop (`npm run dev`): the room tool, the creature tool, saving into src/ and reloading
+// Checks the workshop (`npm run dev`): the room tool, the creature tool, the object tool, saving into src/ and reloading
 // when the source changes. It works on a copy of src/ in a temporary folder, so nothing here touches the project.
 const fs = require('fs');
 const os = require('os');
@@ -40,6 +40,9 @@ function checkSourcePatching() {
   const parsed = JSON.parse(text);
   check('a room file is valid JSON without the key, one item per line',
     parsed.key === undefined && parsed.items.length === 2 && parsed.tiers.length === 2 && text.split('\n').filter((line) => line.includes('"type"')).length === 2, text);
+  const objectText = formatRoomFile({ key: 'x', label: 'x', mass: 2, parts: [{ shape: 'box', center: [0, 0, 0], half: [0.1, 0.1, 0.1] }, { shape: 'ball', center: [0, 0.2, 0], radius: 0.05 }] });
+  check('an object file is laid out the same way, one part per line',
+    JSON.parse(objectText).parts[1].radius === 0.05 && objectText.split('\n').filter((line) => line.includes('"shape"')).length === 2, objectText);
 }
 
 (async () => {
@@ -49,9 +52,11 @@ function checkSourcePatching() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'last-return-workshop-'));
   fs.cpSync(path.join(projectRoot, 'src'), path.join(root, 'src'), { recursive: true });
   fs.rmSync(path.join(root, 'src', 'rooms'), { recursive: true, force: true }); // start without workshop rooms
+  fs.rmSync(path.join(root, 'src', 'objects'), { recursive: true, force: true }); // and without workshop objects
   fs.mkdirSync(path.join(root, 'assets'));
   const figuresPath = path.join(root, 'src', 'js', '04-figures.js');
   const roomPath = path.join(root, 'src', 'rooms', 'testRoom.json');
+  const objectPath = path.join(root, 'src', 'objects', 'testThing.json');
 
   const server = await startDevServer({ root: root, port: 0, quiet: true });
   const browser = await chromium.launch({
@@ -311,6 +316,111 @@ function checkSourcePatching() {
     const thighIn = (figureName, value) => new RegExp('FIGURE_PROPORTIONS_' + figureName + ' = \\{[^}]*thigh: ' + String(value).replace('.', '\\.') + ',').test(figuresSource);
     check('"Write to file" puts the number into FIGURE_PROPORTIONS_HOLLOW and nowhere else', thighIn('HOLLOW', longThigh) && thighIn('DUMMY', dummyThigh));
     check('after that the body is the same as the file', written.thigh === longThigh && written.fileThigh === longThigh && written.changes === 0, written);
+
+    // --- the object tool: a kind written as code to look at, then a new object put together from basic forms ---
+    await page.click('#workshop-tab-objects');
+    await frames();
+    const objectState = () => inPage(() => {
+      const state = window.lastReturnDebug.objectWorkshop, body = state.body;
+      return {
+        key: state.key, savedKey: state.savedKey, isDirty: state.isDirty, selected: state.selectedIndex, isTrying: state.isTrying,
+        label: state.object ? state.object.label : null, parts: state.object ? state.object.parts : null,
+        // Where the object's own origin hangs: wherever its parts are moved to, that stays over the bench.
+        origin: [body.x - body.prepared.centreX, body.y - body.prepared.centreY, body.z - body.prepared.centreZ].map((value) => Math.round(value * 1000) / 1000),
+        y: body.y, isAtRest: body.isAsleep
+      };
+    });
+    const objectOpened = await objectState();
+    check('the object tool opens on a kind written as code, hanging at rest over the bench',
+      objectOpened.key === 'canister' && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
+
+    await page.click('#workshop-new-object');
+    await page.selectOption('#workshop-add-shape', 'capsule');
+    await page.click('#workshop-add-part');
+    await frames();
+    const withRod = await objectState();
+    check('a new object is a box, and a capsule is added on top of it and selected',
+      withRod.parts.length === 2 && withRod.parts[0].shape === 'box' && withRod.parts[1].shape === 'capsule' && withRod.selected === 1 &&
+      withRod.parts[1].from[1] === withRod.parts[0].half[1] && withRod.isDirty, withRod);
+
+    await page.keyboard.press('Escape');
+    await page.mouse.click(middleX, middleY); // the bench is in the middle of the view, and the box is on it
+    check('clicking the box selects it', (await objectState()).selected === 0);
+    await page.mouse.move(middleX, middleY);
+    await page.mouse.down();
+    await page.mouse.move(middleX + 40, middleY + 5, { steps: 4 });
+    await page.mouse.move(middleX + 110, middleY - 30, { steps: 6 });
+    await page.mouse.up();
+    await frames();
+    const draggedPart = await objectState();
+    check('dragging moves the part (to the right and up here), and the object still hangs by its own origin',
+      draggedPart.parts[0].center[0] > 0.03 && draggedPart.parts[0].center[1] > 0.01 && draggedPart.parts[1].from.join() === withRod.parts[1].from.join() &&
+      draggedPart.origin.join() === '43.5,1.1,43.5', draggedPart);
+
+    await page.keyboard.press('KeyR');
+    const turnedPart = (await objectState()).parts[0];
+    check('R turns the box a quarter turn: its width and depth change places',
+      turnedPart.half[0] === withRod.parts[0].half[2] && turnedPart.half[2] === withRod.parts[0].half[0], turnedPart);
+    await page.keyboard.press('Control+z');
+    check('Ctrl+Z takes the turn back', (await objectState()).parts[0].half.join() === withRod.parts[0].half.join());
+    await setNumber('workshop-part-size1', 0.3);
+    check('a size typed in is the size of the box', (await objectState()).parts[0].half[1] === 0.15);
+
+    // --- trying it: let go of, it falls by the game's own steps ---
+    await page.click('#workshop-drop-object');
+    await frames(6);
+    const falling = await objectState();
+    check('"Drop it" lets go of it, and it falls', falling.isTrying && falling.y < draggedPart.y - 0.1 && falling.y > 0, { before: draggedPart.y, after: falling.y });
+    await page.click('#workshop-bench-object');
+    await frames(1);
+    check('"Back on the bench" hangs it up again', (await objectState()).origin.join() === '43.5,1.1,43.5' && (await objectState()).isAtRest);
+
+    // --- saving: a file appears, the page reloads into the saved object, and it is a kind like any other ---
+    await page.fill('#workshop-object-key', 'testThing');
+    await page.locator('#workshop-object-key').blur();
+    await page.fill('#workshop-object-label', 'test thing');
+    await setNumber('workshop-object-mass', 3);
+    await setNumber('workshop-object-onTheFloor', 10);
+    await waitForReload(() => page.click('#workshop-save-object'));
+    await frames();
+    const savedObject = fs.existsSync(objectPath) ? JSON.parse(fs.readFileSync(objectPath, 'utf8')) : null;
+    check('saving writes src/objects/testThing.json with both parts in it',
+      savedObject !== null && savedObject.label === 'test thing' && savedObject.mass === 3 && savedObject.onTheFloor === 10 &&
+      savedObject.parts.length === 2 && savedObject.parts[0].half[1] === 0.15 && savedObject.key === undefined, savedObject);
+    const afterObjectSave = await objectState();
+    afterObjectSave.kind = await inPage(() => { const kind = window.lastReturnDebug.looseObjectKinds.testThing; return kind ? { label: kind.label, mass: kind.mass, parts: kind.parts.length } : null; });
+    check('after the reload the workshop is open on the saved object, with nothing unsaved, and the game knows the kind',
+      afterObjectSave.key === 'testThing' && afterObjectSave.savedKey === 'testThing' && !afterObjectSave.isDirty &&
+      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 2, afterObjectSave);
+
+    // --- the saved object lies about in generated stations, where it should, and those can still be finished ---
+    const objectGamePage = await context.newPage();
+    objectGamePage.on('pageerror', (error) => problems.push('page error (game): ' + error.message));
+    await objectGamePage.goto(server.address + 'game');
+    await objectGamePage.waitForFunction(() => Boolean(window.lastReturnDebug));
+    const objectInStations = await objectGamePage.evaluate(() => {
+      const debug = window.lastReturnDebug;
+      const result = { lying: 0, badPlaces: [], audits: 0 };
+      for (let seed = 1; seed <= 4; seed++) {
+        if (!debug.loadStation('generated', seed, 'large', 'mixed', 'two')) continue;
+        result.lying += debug.stationLooseObjects.filter((entry) => entry.kindKey === 'testThing').length;
+        result.badPlaces = result.badPlaces.concat(debug.auditStationLooseObjects());
+        result.audits += debug.auditProgression().length;
+      }
+      return result;
+    });
+    await objectGamePage.close();
+    check('generated stations have the object lying about, in good places, and can still be finished',
+      objectInStations.lying > 0 && objectInStations.badPlaces.length === 0 && objectInStations.audits === 0, objectInStations);
+
+    // --- an unsaved change to an object survives a reload ---
+    await page.fill('#workshop-object-label', 'changed thing');
+    await waitForStoredWork('the renamed object is written to the browser\'s storage as unsaved work',
+      (storedWork) => Boolean(storedWork.objects && storedWork.objects.draft) && storedWork.objects.draft.label === 'changed thing');
+    await waitForReload(() => page.reload());
+    await frames();
+    const objectAfterReload = await objectState();
+    check('a reload keeps the tool and the unsaved object', objectAfterReload.key === 'testThing' && objectAfterReload.isDirty && objectAfterReload.label === 'changed thing', objectAfterReload);
 
     // --- leaving ---
     await waitForReload(() => page.click('#workshop-leave'));
