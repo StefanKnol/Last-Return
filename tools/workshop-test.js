@@ -70,7 +70,7 @@ function checkSourcePatching() {
   page.on('dialog', (dialog) => dialog.accept());
   const inPage = (callback, argument) => page.evaluate(callback, argument);
   // Headless Chromium only draws (and so only runs the game loop) when asked.
-  const frames = async (count) => { for (let index = 0; index < (count || 3); index++) await page.screenshot({ type: 'jpeg', quality: 5 }); };
+  const frames = async (count) => { for (let index = 0; index < (count || 3); index++) await page.screenshot({ type: 'jpeg', quality: 5, timeout: 120000 }); }; // a slow machine takes a while to draw a frame (as in browser-harness.js)
   const workshopIsReady = () => page.waitForFunction(() => Boolean(window.lastReturnDebug && window.lastReturnDebug.roomWorkshop));
   const waitForReload = async (action) => {
     await inPage(() => { window.pageMarker = true; });
@@ -375,6 +375,60 @@ function checkSourcePatching() {
     await frames(1);
     check('"Back on the bench" hangs it up again', (await objectState()).origin.join() === '43.5,1.1,43.5' && (await objectState()).isAtRest);
 
+    // --- what a knock costs: the readout prices it, and trying the object does it to the thing itself ---
+    const knockState = () => inPage(() => {
+      const d = window.lastReturnDebug, state = d.objectWorkshop, body = state.body;
+      const readout = state.readoutElement ? state.readoutElement.textContent : '';
+      const priced = function (title) { const found = new RegExp(title + ' +(shatters|worth (\\d+))').exec(readout); return found ? (found[2] ? Number(found[2]) : 'shatters') : null; };
+      return { whole: priced('whole'), intoAWall: priced('into a wall'), letGoOf: priced('let go of'), thrownHard: priced('thrown hard'), saysShattered: /shattered: gone/.test(readout),
+        isGone: body.isRemoved === true, worth: body.isRemoved ? 0 : d.getLooseObjectValue(body), y: Math.round(body.y * 100) / 100, isTrying: state.isTrying,
+        glass: d.noisyFloorPatches.filter((patch) => patch.isFromPlay).length, problems: state.problems.filter((problem) => /shatter/.test(problem)), kindShattersAt: body.kind.shattersAt === undefined ? null : body.kind.shattersAt };
+    });
+    // Lets go of it and draws frames until `isDone` says so (or for long enough that it should have), and a few
+    // more for whatever follows the landing. It hangs 1.1 m up and lies at about 0.2: under 0.45 it has landed.
+    const hasLanded = (state) => state.y < 0.45 || state.isGone;
+    const dropUntil = async (isDone) => {
+      await page.click('#workshop-drop-object');
+      let state = await knockState();
+      for (let round = 0; round < 40 && !isDone(state); round++) { await frames(3); state = await knockState(); }
+      await frames(4);
+      return knockState();
+    };
+    await setNumber('workshop-object-value', 100);
+    await setNumber('workshop-object-fragile', 1);
+    await frames(8);
+    const pricedWhole = await knockState();
+    check('the readout says what a knock would cost it: nothing whole, more let go of than walked into a wall, most thrown hard',
+      pricedWhole.whole === 100 && pricedWhole.intoAWall <= 100 && pricedWhole.letGoOf < pricedWhole.intoAWall && pricedWhole.thrownHard < pricedWhole.letGoOf && pricedWhole.thrownHard >= 10, pricedWhole);
+    const dropped = await dropUntil((state) => state.worth < 100 || state.isGone);
+    check('dropped from the bench it lands worth less than it was, and not gone', hasLanded(dropped) && !dropped.isGone && dropped.worth < 100 && dropped.worth >= 10 && dropped.glass === 0, dropped);
+    await setNumber('workshop-object-fragile', 0);
+    const droppedTough = await dropUntil(hasLanded);
+    check('with "fragile" at 0 the same drop costs it nothing', hasLanded(droppedTough) && !droppedTough.isGone && droppedTough.worth === 100, droppedTough);
+    await setNumber('workshop-object-shattersAt', 3);
+    await frames(8);
+    const notGlass = await knockState();
+    const droppedNotGlass = await dropUntil(hasLanded);
+    check('set to shatter but not glass: the tool says it never will, and it does not',
+      notGlass.problems.length === 1 && notGlass.kindShattersAt === null && notGlass.letGoOf === 100 && hasLanded(droppedNotGlass) && !droppedNotGlass.isGone, [notGlass, droppedNotGlass]);
+    await page.selectOption('#workshop-object-material', 'glass');
+    await frames(8);
+    const glass = await knockState();
+    const droppedGlass = await dropUntil((state) => state.isGone);
+    await frames(4); // the readout is brought up to date five times a second
+    const afterShatter = await knockState();
+    check('made of glass it shatters when dropped: it is gone, broken glass lies where it hit, and the readout says so',
+      glass.problems.length === 0 && glass.kindShattersAt === 3 && glass.letGoOf === 'shatters' && glass.thrownHard === 'shatters' && glass.intoAWall === 100 &&
+      droppedGlass.isGone && afterShatter.glass === 1 && afterShatter.saysShattered, [glass, droppedGlass, afterShatter]);
+    await page.click('#workshop-bench-object');
+    await frames(2);
+    const wholeAgain = await knockState();
+    check('"Back on the bench" has it whole again and the glass swept up', !wholeAgain.isGone && wholeAgain.worth === 100 && wholeAgain.glass === 0 && !wholeAgain.isTrying, wholeAgain);
+    // As it is saved below: a dull thing again, that a knock costs something.
+    await page.selectOption('#workshop-object-material', 'case');
+    await setNumber('workshop-object-shattersAt', 0);
+    await setNumber('workshop-object-fragile', 0.6);
+
     // --- saving: a file appears, the page reloads into the saved object, and it is a kind like any other ---
     await page.fill('#workshop-object-key', 'testThing');
     await page.locator('#workshop-object-key').blur();
@@ -386,12 +440,14 @@ function checkSourcePatching() {
     const savedObject = fs.existsSync(objectPath) ? JSON.parse(fs.readFileSync(objectPath, 'utf8')) : null;
     check('saving writes src/objects/testThing.json with both parts in it',
       savedObject !== null && savedObject.label === 'test thing' && savedObject.mass === 3 && savedObject.onTheFloor === 10 &&
+      savedObject.value === 100 && savedObject.fragile === 0.6 && savedObject.shattersAt === 0 && savedObject.material === 'case' &&
       savedObject.parts.length === 2 && savedObject.parts[0].half[1] === 0.15 && savedObject.key === undefined, savedObject);
     const afterObjectSave = await objectState();
-    afterObjectSave.kind = await inPage(() => { const kind = window.lastReturnDebug.looseObjectKinds.testThing; return kind ? { label: kind.label, mass: kind.mass, parts: kind.parts.length } : null; });
+    afterObjectSave.kind = await inPage(() => { const kind = window.lastReturnDebug.looseObjectKinds.testThing; return kind ? { label: kind.label, mass: kind.mass, parts: kind.parts.length, fragile: kind.fragile, shatters: kind.shattersAt !== undefined } : null; });
     check('after the reload the workshop is open on the saved object, with nothing unsaved, and the game knows the kind',
       afterObjectSave.key === 'testThing' && afterObjectSave.savedKey === 'testThing' && !afterObjectSave.isDirty &&
-      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 2, afterObjectSave);
+      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 2 &&
+      afterObjectSave.kind.fragile === 0.6 && afterObjectSave.kind.shatters === false, afterObjectSave);
 
     // --- the saved object lies about in generated stations, where it should, and those can still be finished ---
     const objectGamePage = await context.newPage();

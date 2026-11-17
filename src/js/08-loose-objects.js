@@ -1314,11 +1314,17 @@ function reportLooseObjectKnock(object) {
 // ---------------------------------------------------------------------------
 
 // Returns true if the thing was destroyed.
+// (getLooseDamageShare says how much of its present worth one knock takes; the workshop's object tool asks it too.)
+function getLooseDamageShare(kind, speed) {
+  if (!kind.fragile || speed <= TUNING.looseDamageFromSpeed) return 0;
+  return kind.fragile * clampNumber((speed - TUNING.looseDamageFromSpeed) / (TUNING.looseDamageRuinSpeed - TUNING.looseDamageFromSpeed), 0, 1);
+}
+
 function damageLooseObject(object, speed) {
   const kind = object.kind;
   if (kind.shattersAt && speed >= kind.shattersAt) { shatterLooseObject(object); return true; }
-  if (!kind.fragile || speed <= TUNING.looseDamageFromSpeed || kind.value <= 0) return false;
-  const share = kind.fragile * clampNumber((speed - TUNING.looseDamageFromSpeed) / (TUNING.looseDamageRuinSpeed - TUNING.looseDamageFromSpeed), 0, 1);
+  const share = getLooseDamageShare(kind, speed);
+  if (share <= 0 || kind.value <= 0) return false;
   const before = getLooseObjectValue(object);
   object.worth = Math.max(kind.value * TUNING.looseWorthLeastShare, object.worth * (1 - share));
   const after = getLooseObjectValue(object);

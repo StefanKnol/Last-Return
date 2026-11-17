@@ -2,6 +2,8 @@
   "label": "fire extinguisher",
   "mass": 5,
   "value": 25,
+  "fragile": 0.4,
+  "shattersAt": 0,
   "material": "metal",
   "loud": 1,
   "lies": "either",

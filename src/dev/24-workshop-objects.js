@@ -21,6 +21,10 @@ const OBJECT_WORKSHOP_STAGE_SIZE = 7;              // the test room is this many
 const OBJECT_WORKSHOP_CEILING = 3;
 const OBJECT_WORKSHOP_BENCH_HEIGHT = 1.1;          // how high the object's own origin hangs: about where the beam carries it
 const OBJECT_WORKSHOP_MANY_BALLS = 120;            // TWEAK: an object that touches with more balls than this is reported
+// TWEAK: the knocks the readout prices, in metres per second. Walking into a wall is your walking speed. A thing
+// let go of while you stand lands at about 4.5 (see looseKnockLoudSpeed in 00-config.js). A hard throw leaves
+// at what a full throw gives a thing of its weight.
+const OBJECT_WORKSHOP_DROP_SPEED = 4.5;
 const OBJECT_WORKSHOP_SHAPES = [['box', 'Box'], ['ball', 'Ball'], ['capsule', 'Capsule (a rod with round ends)']];
 const OBJECT_WORKSHOP_AXIS_NAMES = ['x: to your right', 'y: up', 'z: towards you'];
 
@@ -148,6 +152,7 @@ function rebuildObjectWorkshopBody() {
   state.needsRebuild = false;
   state.isTrying = false;
   while (looseObjects.length > 0) removeLooseObject(looseObjects[looseObjects.length - 1]); // one by one, so that each takes its points with it
+  removeBrokenGlassFromPlay(); // what a jar left on the floor when it was tried
   const kindKey = state.object ? OBJECT_WORKSHOP_DRAFT_KEY : state.key;
   if (state.object) LOOSE_OBJECT_KINDS[OBJECT_WORKSHOP_DRAFT_KEY] = createDesignedObjectKind(state.object);
   const bench = getObjectWorkshopBench();
@@ -191,6 +196,12 @@ function findObjectWorkshopProblems() {
   const reach = state.body.prepared.boundsRadius;
   if (reach >= 1) problems.push('It reaches ' + reach.toFixed(2) + ' m from its middle. A loose object stays under a metre: the length of pipe, the longest there is, reaches 0.63.');
   if (reach <= 0.05) problems.push('It reaches only ' + Math.round(reach * 100) + ' cm from its middle. Under 5 cm is too small to find with the scanner.');
+  if (state.object.shattersAt > 0 && state.object.material !== 'glass') {
+    problems.push('It is set to shatter at ' + state.object.shattersAt + ' m/s but is not glass, so it never will: only glass shatters. Make it sound like glass, or set that to 0.');
+  }
+  if (state.object.shattersAt > 0 && state.object.material === 'glass' && state.object.shattersAt <= TUNING.looseKnockQuietSpeed) {
+    problems.push('It shatters at ' + state.object.shattersAt + ' m/s. Crouching, you carry things into walls at up to ' + TUNING.looseKnockQuietSpeed + ': it would break however carefully it is carried.');
+  }
   const ballCount = state.body.prepared.shellCount;
   if (ballCount > OBJECT_WORKSHOP_MANY_BALLS) {
     problems.push('It touches the station with ' + ballCount + ' balls (B shows them). Over ' + OBJECT_WORKSHOP_MANY_BALLS + ', every one of them in a station costs time whenever it moves: fewer or smaller boxes.');
@@ -220,7 +231,25 @@ function buildObjectWorkshopReadout() {
   lines.push('            a doorway or a vent is 1 m wide');
   lines.push('touches     with ' + state.body.prepared.shellCount + ' balls' + (state.showsShell ? '' : ' (B shows them)'));
   lines.push('walked into ' + (resistance <= 0 ? 'you kick it along without feeling it' : (resistance >= 1 ? 'it stops you: pick it up' : 'it takes ' + Math.round(resistance * 100) + '% out of your stride')));
-  if (state.isTrying) lines.push(state.body.isAsleep ? 'now         at rest, its middle ' + state.body.y.toFixed(2) + ' m up' : 'now         moving');
+  // What a knock costs it, by the game's own sum (getLooseDamageShare, and `shattersAt`).
+  const throwSpeed = TUNING.looseThrowSpeed / (1 + kind.mass * TUNING.looseThrowLossPerKilogram);
+  const afterKnock = function (speed) {
+    if (kind.shattersAt && speed >= kind.shattersAt) return 'shatters';
+    return 'worth ' + Math.max(1, Math.round(Math.max(kind.value * TUNING.looseWorthLeastShare, kind.value * (1 - getLooseDamageShare(kind, speed)))));
+  };
+  if (kind.value > 0) {
+    lines.push('whole       worth ' + kind.value);
+    lines.push('into a wall ' + afterKnock(TUNING.walkSpeed) + ' (at a walk)');
+    lines.push('let go of   ' + afterKnock(OBJECT_WORKSHOP_DROP_SPEED) + ' (standing up)');
+    lines.push('thrown hard ' + afterKnock(throwSpeed) + ' (leaves at ' + throwSpeed.toFixed(1) + ' m/s)');
+  }
+  if (state.isTrying) {
+    if (state.body.isRemoved) lines.push('now         shattered: gone, and its glass lies\n            where it hit');
+    else {
+      lines.push(state.body.isAsleep ? 'now         at rest, its middle ' + state.body.y.toFixed(2) + ' m up' : 'now         moving');
+      if (kind.value > 0) lines.push('            worth ' + getLooseObjectValue(state.body) + ' of ' + kind.value);
+    }
+  }
   return lines.join('\n');
 }
 
@@ -713,7 +742,7 @@ function updateObjectWorkshop(dt) {
       looseState.accumulator -= TUNING.looseStepSeconds;
       stepLooseObjects(TUNING.looseStepSeconds);
     }
-    for (const object of looseObjects) if (object.knockSpeed > 0) reportLooseObjectKnock(object);
+    for (const object of looseObjects.slice()) if (object.knockSpeed > 0) reportLooseObjectKnock(object); // a copy: one that shatters leaves the list
   }
   placeObjectWorkshopCamera(dt);
   updateAudioListener(player.x, getPlayerEyeY(), player.z, player.yaw);
@@ -727,7 +756,7 @@ function updateObjectWorkshop(dt) {
 
 function addObjectWorkshopOverlays() {
   const state = objectWorkshop, body = state.body;
-  if (!body) return;
+  if (!body || body.isRemoved) return; // nothing there, or it shattered when it was tried
   if (state.showsShell) {
     // A small cross for each ball, as big as the ball is.
     const shell = body.prepared.shell, matrix = body.matrix;

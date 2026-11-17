@@ -190,7 +190,8 @@ function installLab() {
       const kind = d.looseObjectKinds[kindKey];
       if (!kind.label || !(kind.mass > 0) || ['metal', 'glass', 'case', 'tin', 'card'].indexOf(kind.material) < 0 || typeof kind.bulky !== 'boolean' ||
           !(kind.value >= 0) || !(kind.loud > 0) || ['upright', 'onItsSide', 'either'].indexOf(kind.lies) < 0 ||
-          !(kind.bounce >= 0 && kind.bounce < 1) || !(kind.grip >= 0 && kind.grip <= 1) || !kind.parts || kind.parts.length === 0) wrong.push(kindKey + ': incomplete');
+          !(kind.bounce >= 0 && kind.bounce < 1) || !(kind.grip >= 0 && kind.grip <= 1) || !kind.parts || kind.parts.length === 0 ||
+          (kind.fragile !== undefined && !(kind.fragile >= 0 && kind.fragile <= 1)) || (kind.shattersAt !== undefined && !(kind.shattersAt > 0 && kind.material === 'glass'))) wrong.push(kindKey + ': incomplete');
       const object = d.createLooseObject(kindKey, 0, 0, 0, 0);
       const prepared = object.prepared, shell = prepared.shell;
       counts[kindKey] = prepared.shellCount;

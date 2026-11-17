@@ -3,7 +3,7 @@
 //
 // Such an object is not written as code. It is one file in src/objects/, packed into the page by build.js,
 // and holds what an entry of LOOSE_OBJECT_KINDS (08-loose-objects.js) holds: what it is called, what it
-// weighs, what it is worth, what it sounds like, and its shape as boxes, balls and capsules. This file turns
+// weighs, what it is worth and how badly a knock costs it, what it sounds like, and its shape as boxes, balls and capsules. This file turns
 // each of them into an ordinary kind of loose object, and puts it among a station's litter or its valuables
 // if the file asks for that.
 //
@@ -22,6 +22,8 @@ const DESIGNED_OBJECT_LIMITS = { maximumParts: 16, reach: 1, minimumRadius: 0.01
 const DESIGNED_OBJECT_FIELDS = [
   numberField('mass', 'Weight (kg). Heavier swings wider, slows you more, throws shorter, knocks louder', 2, 0.05, 40, 0.05),
   numberField('value', 'Worth, in the station\'s credits. Everything loose is worth something, however little', 10, 1, 500, 1),
+  numberField('fragile', 'Fragile: how much of its worth a ruinous knock takes off (an empty can 0, a pipe 0.3, a tool case 0.7, a jar 1)', 0.4, 0, 1, 0.05),
+  numberField('shattersAt', 'Shatters when hit harder than this (m/s); 0 is never. Only glass shatters, and it leaves broken glass (a sample jar: 3.4)', 0, 0, 12, 0.1),
   choiceField('material', 'What it sounds like when it hits something', 'metal',
     [['metal', 'Metal'], ['glass', 'Glass'], ['case', 'A dull box with things in it'], ['tin', 'Tin (an empty can)'], ['card', 'Cardboard']]),
   numberField('loud', 'How far its knocks carry for its weight (1 is ordinary; over 1 it shows in the warning colour)', 1, 0.3, 2.5, 0.1),
@@ -86,6 +88,9 @@ function normalizeDesignedObject(source, key) {
 function createDesignedObjectKind(object) {
   const kind = JSON.parse(JSON.stringify(object));
   kind.isDesigned = true;
+  // Only glass shatters: what is left of it is broken glass on the floor, and that is what it sounds like.
+  // In a file, 0 means never; a kind that never shatters has no `shattersAt` at all.
+  if (!(kind.shattersAt > 0) || kind.material !== 'glass') delete kind.shattersAt;
   // Something thin (a plate, a wire) is stepped as if it were a shelf board thick, as the steel plate is:
   // nothing in a station is thinner than that for it to pass through, and finer steps slow everything that moves with it.
   let thinnest = Infinity;
