@@ -14,9 +14,17 @@ function check(description, condition, detail) {
 function installLab() {
   const d = window.lastReturnDebug, p = d.player;
   const round = (value) => Math.round(value * 1000) / 1000;
+  // Most of these checks are about how things move, and were written when nothing could break. So in this
+  // suite nothing does, unless a check asks for it: the checks under "what a knock costs" switch it on.
+  const whole = { from: d.tuning.looseDamageFromSpeed, shattersAt: {} };
+  for (const kindKey of Object.keys(d.looseObjectKinds)) whole.shattersAt[kindKey] = d.looseObjectKinds[kindKey].shattersAt;
   const lab = window.looseLab = {
     round: round,
     noises: [],
+    setBreakable: function (isBreakable) {
+      d.tuning.looseDamageFromSpeed = isBreakable ? whole.from : 1000;
+      for (const kindKey of Object.keys(d.looseObjectKinds)) d.looseObjectKinds[kindKey].shattersAt = isBreakable ? whole.shattersAt[kindKey] : undefined;
+    },
     // Starts over: Kessel-9, nothing loose, creatures held still, every noise written down.
     reset: function () {
       d.loadStation('classic', 0);
@@ -173,6 +181,7 @@ function installLab() {
   const inGame = (callback, argument) => page.evaluate(callback, argument);
   await startGame(page, false);
   await inGame(installLab);
+  await inGame(() => window.looseLab.setBreakable(false));
 
   // --- how they are described ---
   const described = await inGame(() => {
@@ -458,6 +467,62 @@ function installLab() {
   check('a pulse can be fired from anywhere, not only from the scanner: one fired straight down in mid-room leaves a point on the floor under it',
     light.fromAnywhere.landed && light.fromAnywhere.onTheFloor && light.fromAnywhere.pointsAdded === 1, light.fromAnywhere);
 
+  // --- the scanner trails a little behind where you look (issue #55) ---
+  const trailing = await inGame((bare) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, tuning = d.tuning, result = {};
+    const degrees = 180 / Math.PI;
+    d.clearLooseObjects();
+    lab.stand(bare.x + bare.stepX * (bare.wall - 3), bare.z + bare.stepZ * (bare.wall - 3), bare.yaw);
+    result.atRestDegrees = Math.abs(p.yaw - p.scannerYaw) * degrees + Math.abs(p.pitch - p.scannerPitch) * degrees;
+    const ringAtRest = d.computeHeldScannerInView();
+    result.ringAtRest = Math.hypot(ringAtRest[6], ringAtRest[7]);
+    // A small turn to the right: the scanner is behind it, to the left, and its pulses with it.
+    p.yaw += 5 / degrees;
+    d.updateHeldScannerLag(1 / 60);
+    result.behindAfterOneStepDegrees = (p.yaw - p.scannerYaw) * degrees;
+    const ring = d.computeHeldScannerInView();
+    result.ringIsToTheLeft = -ring[6] / ring[8] < -0.01;
+    d.computeHeldScannerBasis();
+    d.updateScanEmitterAtLens(p.x, d.getPlayerEyeY(), p.z);
+    const lit = d.castScannerPulse(0, 0) ? { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z } : null;
+    // Where your eye sees the middle of the ring: along the scanner's own direction, from the eye.
+    const seen = d.castScannerRay(p.x, d.getPlayerEyeY(), p.z, Math.sin(p.scannerYaw) * Math.cos(p.scannerPitch), Math.sin(p.scannerPitch), -Math.cos(p.scannerYaw) * Math.cos(p.scannerPitch), 60)
+      ? { x: d.rayHit.x, y: d.rayHit.y, z: d.rayHit.z } : null;
+    result.pulseOffTheRing = lit && seen ? Math.hypot(lit.x - seen.x, lit.y - seen.y, lit.z - seen.z) : 99;
+    for (let step = 0; step < 60; step++) d.updateHeldScannerLag(1 / 60);
+    result.behindAfterASecondDegrees = Math.abs(p.yaw - p.scannerYaw) * degrees;
+    // Spun right round and looking up at once: it is never further behind than the limit.
+    p.yaw += 2.5; p.pitch = 0.6;
+    d.updateHeldScannerLag(1 / 60);
+    result.behindAfterASpinDegrees = Math.hypot(Math.atan2(Math.sin(p.yaw - p.scannerYaw), Math.cos(p.yaw - p.scannerYaw)), p.pitch - p.scannerPitch) * degrees;
+    result.limitDegrees = tuning.scannerLagMaximumDegrees;
+    p.pitch = 0; d.steadyHeldScanner();
+    // Stepping to the right leaves it to the left; running forward brings it a little toward you.
+    p.velocityX = Math.cos(p.yaw) * tuning.walkSpeed; p.velocityZ = Math.sin(p.yaw) * tuning.walkSpeed;
+    for (let step = 0; step < 60; step++) d.updateHeldScannerLag(1 / 60);
+    result.driftRightWhileSteppingRight = p.scannerDriftRight;
+    p.velocityX = Math.sin(p.yaw) * tuning.sprintSpeed; p.velocityZ = -Math.cos(p.yaw) * tuning.sprintSpeed;
+    for (let step = 0; step < 60; step++) d.updateHeldScannerLag(1 / 60);
+    result.driftBackWhileRunning = p.scannerDriftBack;
+    result.driftRightWhileRunning = p.scannerDriftRight;
+    p.velocityX = 0; p.velocityZ = 0;
+    for (let step = 0; step < 60; step++) d.updateHeldScannerLag(1 / 60);
+    result.driftLeftStandingStill = Math.abs(p.scannerDriftRight) + Math.abs(p.scannerDriftBack);
+    d.steadyHeldScanner();
+    return result;
+  }, bareWallForScanner);
+  check('standing still the scanner points where you look and the ring is in the middle of the view',
+    trailing.atRestDegrees < 0.01 && trailing.ringAtRest < 1e-4, trailing);
+  check('the scanner trails a turn: a step after turning it is behind, the ring is on the side you turned from, and a second later it has caught up',
+    trailing.behindAfterOneStepDegrees > 1 && trailing.behindAfterOneStepDegrees < 5 && trailing.ringIsToTheLeft && trailing.behindAfterASecondDegrees < 0.01, trailing);
+  check('the pulses go with the scanner: the middle one lands exactly where your eye sees the middle of the ring',
+    trailing.pulseOffTheRing < 1e-6, trailing.pulseOffTheRing);
+  check('however fast you turn, the scanner is never further behind than its limit',
+    trailing.behindAfterASpinDegrees <= trailing.limitDegrees + 1e-6 && trailing.behindAfterASpinDegrees > trailing.limitDegrees - 0.5, trailing);
+  check('a step to the side leaves the scanner a few centimetres behind, running brings it a little toward you, and standing still it comes back',
+    trailing.driftRightWhileSteppingRight < -0.02 && trailing.driftRightWhileSteppingRight > -0.08 && trailing.driftBackWhileRunning > 0.01 && trailing.driftBackWhileRunning < 0.04 &&
+    Math.abs(trailing.driftRightWhileRunning) < 0.002 && trailing.driftLeftStandingStill < 0.001, trailing);
+
   // --- knocks ---
   const bareWall = await inGame(() => { window.looseLab.reset(); return window.looseLab.findBareWall(); });
   check('Kessel-9 has a bare wall with a clear run up to it and no door near', bareWall !== null, bareWall);
@@ -505,11 +570,75 @@ function installLab() {
     ['canister crouched', 'crate crouched', 'pipe crouched'].every((key) => intoWall[key].knocks.heard === 0 && intoWall[key].knocks.quiet >= 1 && intoWall[key].knocks.quiet <= 2 && intoWall[key].noiseCarries === 0 && !intoWall[key].hollowCameToLook && intoWall[key].saidSo === 0), intoWall);
   check('a heavy crate carries further than a light canister at the same pace', intoWall['crate walking'].noiseCarries > intoWall['canister walking'].noiseCarries,
     [intoWall['canister walking'].noiseCarries, intoWall['crate walking'].noiseCarries]);
-  check('at a walk the object against the wall stops you, and stays in your hands; you are not pushed sideways along the wall',
-    ['canister walking', 'crate walking', 'pipe walking', 'crate crouched'].every((key) => intoWall[key].stillHeld && intoWall[key].knocks.pulled === 0 && intoWall[key].sideways < 0.15) &&
-    intoWall['pipe walking'].fromWall > 1.0 && intoWall['crate walking'].fromWall > 0.7, intoWall);
-  check('run at the wall with a length of pipe and it is torn out of your hands, and clatters',
-    !intoWall['pipe running'].stillHeld && intoWall['pipe running'].knocks.pulled === 1 && intoWall['pipe running'].knocks.heard >= 2, intoWall['pipe running']);
+  // Against something straight ahead the beam gives: the thing comes nearer to you, and you can walk right up.
+  // (The beam is 0.7 m long, and it used to hold you off the wall by that much and the size of the thing.)
+  check('walked into a wall, what you carry comes in close and stays in the beam: with a canister you reach the wall, with a crate you stop where the crate is between you and it; you are not pushed sideways',
+    ['canister walking', 'crate walking', 'pipe walking', 'crate crouched', 'canister running', 'pipe running'].every((key) => intoWall[key].stillHeld && intoWall[key].knocks.pulled === 0 && intoWall[key].sideways < 0.2) &&
+    intoWall['canister walking'].fromWall < 0.5 && intoWall['crate walking'].fromWall > 0.6 && intoWall['crate walking'].fromWall < 1.0 && intoWall['pipe walking'].fromWall < 1.05, intoWall);
+  check('run at the wall with a length of pipe and it clatters, and is still in the beam', intoWall['pipe running'].stillHeld && intoWall['pipe running'].knocks.heard >= 1 && intoWall['pipe running'].fromWall < 0.6, intoWall['pipe running']);
+
+  // The beam shortens, and lets out again when there is room.
+  const beamGives = await inGame((bare) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    d.clearLooseObjects();
+    lab.stand(bare.x + bare.stepX * (bare.wall - 2.9), bare.z + bare.stepZ * (bare.wall - 2.9), bare.yaw);
+    const object = lab.carry('toolCase');
+    const fromLens = function () { return lab.round(Math.hypot(object.x - d.scanEmitter.x, object.y - d.scanEmitter.y, object.z - d.scanEmitter.z) - object.prepared.partsRadius); };
+    result.inTheOpen = { length: lab.round(d.looseState.holdLength), fromLens: fromLens() };
+    d.input.keysDown.add('KeyW');
+    d.simulate(3.5);
+    d.input.keysDown.clear();
+    d.simulate(0.5);
+    const along = (p.x - bare.x) * bare.stepX + (p.z - bare.z) * bare.stepZ;
+    result.atTheWall = { length: lab.round(d.looseState.holdLength), fromLens: fromLens(), youFromWall: lab.round(bare.wall - along), held: d.getHeldLooseObject() === object };
+    d.input.keysDown.add('KeyS');
+    d.simulate(1.2);
+    d.input.keysDown.clear();
+    d.simulate(1.2);
+    result.backedAway = { length: lab.round(d.looseState.holdLength), fromLens: fromLens(), held: d.getHeldLooseObject() === object };
+    result.full = d.tuning.looseHoldDistance; result.shortest = d.tuning.looseHoldShortestDistance;
+    return result;
+  }, bareWall);
+  check('against a wall the beam holds the thing nearer, down to its shortest; back away and it lets it out to its full length again',
+    beamGives.inTheOpen.length === beamGives.full && beamGives.atTheWall.held && beamGives.atTheWall.length < beamGives.full - 0.2 && beamGives.atTheWall.length >= beamGives.shortest &&
+    beamGives.atTheWall.fromLens < beamGives.inTheOpen.fromLens - 0.2 && beamGives.backedAway.held && beamGives.backedAway.length === beamGives.full && Math.abs(beamGives.backedAway.fromLens - beamGives.inTheOpen.fromLens) < 0.1, beamGives);
+
+  // What the beam still loses: a thing left behind something. You stand in front of the wall beside a doorway
+  // with a canister in the beam, and are then on the other side of that wall (the test puts you there in one
+  // step, as a corner turned too sharply would): the canister is against the wall, and the beam lets it go.
+  const leftBehind = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = { found: false };
+    lab.reset();
+    d.game.flags.powerOn = true;
+    const isPlain = function (x, z) { const spot = d.findWalkableSpotNear(x, z); return Boolean(spot) && spot.x === x && spot.z === z && Math.abs(d.getFloorHeightAt(x, z)) < 0.01 && d.getTileFlagsAt(x, z) === 0; };
+    // (The door's own frame does not count: it stands proud of the wall by five centimetres and stops nobody.)
+    const clearOfThings = function (x, z) { return d.worldProps.every((prop) => prop.isRemoved || prop.isDynamic || !prop.blocksMovement || prop.minimumY > 2.2 || prop.maximumY < 0.03 || Math.abs(prop.centerX - x) > prop.boundsHalfX + 0.75 || Math.abs(prop.centerZ - z) > prop.boundsHalfZ + 0.75); };
+    for (const door of d.doors) {
+      if (door.kind !== d.doorKinds.automatic || result.found) continue;
+      for (const step of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        // Beside the door, a tile and a bit to one side: floor on both sides of the wall there, two tiles deep, and nothing standing on it.
+        const sideX = -step[1], sideZ = step[0];
+        const spots = [-2, -1, 1, 2].map((along) => [door.centerX + step[0] * along + sideX, door.centerZ + step[1] * along + sideZ]);
+        if (!spots.every((spot) => isPlain(spot[0], spot[1]) && clearOfThings(spot[0], spot[1]))) continue;
+        if (d.isSpaceOpenAt(door.centerX + sideX, 1, door.centerZ + sideZ)) continue; // there must be wall beside the door
+        result.found = true;
+        lab.stand(door.centerX - step[0] * 1.6 + sideX, door.centerZ - step[1] * 1.6 + sideZ, Math.atan2(step[0], -step[1]));
+        const canister = lab.carry('canister');
+        d.simulate(0.5);
+        const before = lab.knocks();
+        result.inFrontOfTheWall = { held: d.getHeldLooseObject() === canister };
+        d.teleport(door.centerX + step[0] * 1.6 + sideX, door.centerZ + step[1] * 1.6 + sideZ);
+        d.simulate(2.5);
+        const side = (canister.x - door.centerX) * step[0] + (canister.z - door.centerZ) * step[1];
+        result.behindIt = { stillHeld: d.getHeldLooseObject() === canister, canisterOnTheFirstSide: side < 0, knocks: lab.since(before), messages: lab.messages() };
+        break;
+      }
+    }
+    return result;
+  });
+  check('with a wall between you and what you carry, the beam loses it, and says so',
+    leftBehind.found && leftBehind.inFrontOfTheWall.held && !leftBehind.behindIt.stillHeld && leftBehind.behindIt.canisterOnTheFirstSide && leftBehind.behindIt.knocks.pulled === 1 &&
+    leftBehind.behindIt.messages.some((text) => /The beam loses the gas canister/.test(text)), leftBehind);
 
   const settingDown = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
@@ -1039,12 +1168,23 @@ function installLab() {
       d.input.keysDown.add('KeyC');
       d.simulate(0.8);
       const object = lab.carry(kindKey);
+      if (kindKey === 'pipe') {
+        // Taken up squarely across your way: put down, turned across the vent, and taken into the beam again.
+        d.releaseHeldLooseObject(0);
+        d.setLooseObjectYaw(object, mouth.stepX !== 0 ? Math.PI / 2 : 0);
+        object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; object.spinX = 0; object.spinY = 0; object.spinZ = 0;
+        d.pickUpLooseObject(object, false);
+        d.simulate(0.6);
+      }
       const before = lab.knocks();
+      // Which way its length lies: 1 along the vent, 0 across it. (Its own first axis is its length, for a pipe.)
+      const alongTheVent = function () { return lab.round(Math.abs(object.matrix[0] * mouth.stepX + object.matrix[6] * mouth.stepZ)); };
+      const acrossAtFirst = alongTheVent();
       d.input.keysDown.add('KeyW');
       let objectInVent = false;
       for (let step = 0; step < 150; step++) { d.simulate(1 / 30); if (d.isVentAt(object.x, object.z)) objectInVent = true; }
       result[kindKey] = { playerInVent: d.isVentAt(p.x, p.z), objectInVent: objectInVent, objectInVentAtTheEnd: d.isVentAt(object.x, object.z), stillHeld: d.getHeldLooseObject() === object, knocks: lab.since(before), messages: lab.messages(),
-        metresIn: lab.round((p.x - mouth.x) * mouth.stepX + (p.z - mouth.z) * mouth.stepZ) };
+        metresIn: lab.round((p.x - mouth.x) * mouth.stepX + (p.z - mouth.z) * mouth.stepZ), acrossAtFirst: acrossAtFirst, alongTheVent: alongTheVent() };
       d.input.keysDown.clear();
     }
     return result;
@@ -1052,8 +1192,8 @@ function installLab() {
   // No rule says what may go into a vent: a thing goes where it fits. A vent is a metre wide and 1.15 m high.
   check('a jar, a tool case, a crate and a pump motor each go into a vent ahead of you, still in the beam',
     vent !== null && ['jar', 'toolCase', 'crate', 'pumpMotor'].every((key) => vent[key].playerInVent && vent[key].objectInVent && vent[key].stillHeld), vent);
-  check('a pipe hangs across the beam and is wider than the vent: it jams at the mouth and stops you there, and nothing but the pipe says so',
-    vent !== null && !vent.pipe.playerInVent && vent.pipe.stillHeld && vent.pipe.metresIn < -0.3 &&
+  check('a pipe hangs across the beam and is wider than the vent: it goes in only once pressing it against the mouth has turned it lengthwise, and nothing but the pipe says so',
+    vent !== null && vent.pipe.stillHeld && (!vent.pipe.playerInVent || vent.pipe.alongTheVent > 0.6) && vent.pipe.acrossAtFirst < 0.45 &&
     ['jar', 'toolCase', 'crate', 'pumpMotor', 'pipe'].every((key) => !vent[key].messages.some((text) => /will not go in|no room in here/.test(text))), vent ? vent.pipe : null);
 
   // --- the pit, and a new descent ---
@@ -1231,6 +1371,201 @@ function installLab() {
     !thrownBack.can.afterPickingItUp.ignored && thrownBack.can.afterPickingItUp.ofInterest, thrownBack.can);
   check('a gas canister is too heavy for that: it goes after it and does not throw it', thrownBack.canister.kicked && thrownBack.canister.flungAfterSeconds < 0 && !thrownBack.canister.ignored, thrownBack.canister);
 
+  // --- vent covers ---
+  const covers = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = { wrong: [] };
+    lab.reset();
+    d.loadStation('generated', 3, 'large', 'mixed', 'one');
+    d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
+    d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
+    const all = d.stationLooseObjects.map((item, index) => ({ item: item, object: d.looseObjects[index] })).filter((entry) => entry.item.kindKey === 'ventCover');
+    const mouthOf = function (object) { return d.level.ventMouths.slice().sort((a, b) => Math.hypot(a.faceX - object.x, a.faceZ - object.z) - Math.hypot(b.faceX - object.x, b.faceZ - object.z))[0]; };
+    result.counts = { vents: d.level.ventCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length, worth: d.looseObjectKinds.ventCover.value };
+    for (const entry of all) {
+      const object = entry.object, mouth = mouthOf(object), fromMouth = Math.hypot(mouth.faceX - object.x, mouth.faceZ - object.z), up = Math.abs(object.matrix[4]);
+      const where = 'the cover at ' + object.x.toFixed(1) + ', ' + object.z.toFixed(1);
+      if (entry.item.on === 'vent') { if (!d.isVentAt(object.x, object.z) || up < 0.99 || fromMouth > 0.2) result.wrong.push(where + ' should stand upright in the mouth of its vent'); }
+      else if (d.isVentAt(object.x, object.z) || up > 0.1 || object.y - mouth.floorY > 0.12 || fromMouth > 3.2) result.wrong.push(where + ' should lie flat on the floor in front of its vent');
+    }
+    const standing = all.filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
+    if (standing.length < 3) return result;
+    const into = function (mouth, metres) { return d.castScannerRay(mouth.faceX - mouth.outwardX * 0.5, mouth.floorY + 0.6, mouth.faceZ - mouth.outwardZ * 0.5, mouth.outwardX, 0, mouth.outwardZ, metres) ? { metres: lab.round(d.rayHit.distance), colour: d.rayHit.surfaceClass, isTheCover: d.rayHit.looseObject !== null } : { metres: 99, colour: -1, isTheCover: false }; };
+
+    // A cover that lies flat is a plate on the floor: walked over, it stays where it is and makes no sound.
+    const lying = all.filter((entry) => entry.item.on === 'floor')[0].object;
+    lab.stand(lying.x - 1.2, lying.z, Math.PI / 2);
+    d.simulate(0.5);
+    result.scanLying = d.castScannerRay(lying.x - 0.3, lying.y + 0.8, lying.z, 0.3, -0.954, 0, 3) ? { colour: d.rayHit.surfaceClass, isTheCover: d.rayHit.looseObject === lying } : { colour: -1, isTheCover: false };
+    let before = lab.knocks();
+    const lyingAt = { x: lying.x, z: lying.z }, walkedFrom = p.x;
+    d.input.keysDown.add('KeyW');
+    d.simulate(1.4);
+    d.input.keysDown.clear();
+    d.simulate(0.5);
+    result.walkedOver = { youWalked: lab.round(Math.abs(p.x - walkedFrom)), itMoved: lab.round(Math.hypot(lying.x - lyingAt.x, lying.z - lyingAt.z)), knocks: lab.since(before) };
+
+    // One taken off with the beam: quietly, and then the vent is open.
+    let cover = standing[0], mouth = mouthOf(cover);
+    lab.stand(cover.x - mouth.outwardX * 1.6, cover.z - mouth.outwardZ * 1.6, Math.atan2(mouth.outwardX, -mouth.outwardZ));
+    p.pitch = -0.4;
+    d.simulate(0.2);
+    result.scanBefore = into(mouth, 3);
+    before = lab.knocks();
+    result.taken = { picked: d.pickUpLooseObject(cover, false) };
+    d.simulate(1.5);
+    result.taken.held = d.getHeldLooseObject() === cover; result.taken.knocks = lab.since(before); result.taken.slowsYouTo = lab.round(d.getCarrySpeedFactor()); result.taken.bulky = cover.kind.bulky;
+    // Turned away and put down behind you: now nothing stands in the mouth.
+    p.yaw += Math.PI;
+    d.simulate(1.5);
+    p.pitch = -1.1;
+    d.simulate(1.5);
+    d.releaseHeldLooseObject(0);
+    d.simulate(2);
+    result.scanAfter = into(mouth, 3);
+
+    // One crawled into: it goes over, and that carries.
+    cover = standing[1]; mouth = mouthOf(cover);
+    lab.stand(cover.x - mouth.outwardX * 1.5, cover.z - mouth.outwardZ * 1.5, Math.atan2(mouth.outwardX, -mouth.outwardZ));
+    d.input.keysDown.add('KeyC');
+    d.simulate(0.8);
+    before = lab.knocks();
+    lab.noises.length = 0;
+    let carries = 0, knockTime = d.looseState.lastKnock.time;
+    d.input.keysDown.add('KeyW');
+    for (let step = 0; step < 150; step++) {
+      d.simulate(1 / 30);
+      if (d.looseState.lastKnock.time !== knockTime) { knockTime = d.looseState.lastKnock.time; carries = Math.max(carries, d.looseState.lastKnock.carries); }
+    }
+    d.input.keysDown.clear();
+    const alongDuct = function (x, z) { return (x - mouth.faceX) * mouth.outwardX + (z - mouth.faceZ) * mouth.outwardZ; };
+    result.crawledInto = { liesFlat: Math.abs(cover.matrix[4]) < 0.1, knocks: lab.since(before), carries: lab.round(carries), youInTheVent: d.isVentAt(p.x, p.z),
+      youAreIn: lab.round(alongDuct(p.x, p.z)), itLiesIn: lab.round(alongDuct(cover.x, cover.z)) };
+
+    // One the Hollow comes through: you hear that, with a direction, and it does not startle the Hollow.
+    cover = standing[2]; mouth = mouthOf(cover);
+    lab.stand(cover.x - mouth.outwardX * 6, cover.z - mouth.outwardZ * 6, 0);
+    d.simulate(4.5);
+    d.spawnHollow(cover.x - mouth.outwardX * 1.6, cover.z - mouth.outwardZ * 1.6);
+    d.hollow.graceTimer = 0; d.hollow.state = 0;
+    for (const key of ['objectKnock', 'objectCrash']) d.captionCounts[key] = 0;
+    lab.noises.length = 0;
+    before = lab.knocks();
+    const startedAt = { x: cover.x, z: cover.z };
+    for (let step = 0; step < 40; step++) { d.hollow.figure.x += mouth.outwardX * 3 / 30; d.hollow.figure.z += mouth.outwardZ * 3 / 30; d.simulate(1 / 30); }
+    result.byTheHollow = { moved: lab.round(Math.hypot(cover.x - startedAt.x, cover.z - startedAt.z)), stillUpright: Math.abs(cover.matrix[4]) > 0.9, knocks: lab.since(before),
+      said: d.captionCounts.objectKnock + d.captionCounts.objectCrash, noiseAtTheCover: lab.noises.some((noise) => Math.hypot(noise.x - startedAt.x, noise.z - startedAt.z) < 1.5) };
+    d.hollow.isActive = false;
+    lab.reset();
+    return result;
+  });
+  check('every vent mouth has its cover: either standing upright in the mouth, or lying flat on the floor in front of it; a cover is worth something',
+    covers.counts.vents >= 2 && covers.counts.mouths === covers.counts.vents * 2 && covers.counts.covers === covers.counts.mouths && covers.counts.standing >= 3 && covers.counts.standing < covers.counts.covers &&
+    covers.counts.worth > 0 && covers.wrong.length === 0, [covers.counts, covers.wrong]);
+  check('a cover in its vent hides the vent from a scan, in the warning colour; taken off with the beam it comes quietly, is heavy to carry, and the vent is open',
+    covers.scanBefore.isTheCover && covers.scanBefore.colour === 12 && covers.scanBefore.metres < 0.7 && covers.taken.picked && covers.taken.held && covers.taken.knocks.heard === 0 && covers.taken.slowsYouTo < 0.85 && covers.taken.bulky &&
+    !covers.scanAfter.isTheCover && covers.scanAfter.metres > 1.2, [covers.scanBefore, covers.taken, covers.scanAfter]);
+  check('crawl into a cover that still stands and it goes over with a clang that carries; then it lies flat, and you crawl on over it',
+    covers.crawledInto.liesFlat && covers.crawledInto.knocks.heard >= 1 && covers.crawledInto.carries > 10 && covers.crawledInto.youInTheVent && covers.crawledInto.youAreIn > covers.crawledInto.itLiesIn + 0.5, covers.crawledInto);
+  check('a cover that lies flat on the floor is walked over: it stays where it is, without a sound, and so a scan does not show it in the warning colour',
+    covers.walkedOver.youWalked > 1.5 && covers.walkedOver.itMoved < 0.02 && covers.walkedOver.knocks.heard + covers.walkedOver.knocks.quiet === 0 &&
+    covers.scanLying.isTheCover && covers.scanLying.colour !== 12, [covers.walkedOver, covers.scanLying]);
+  check('the Hollow coming through knocks a cover out of its vent: you hear that, with a direction, and it does not startle the Hollow',
+    covers.byTheHollow.moved > 0.2 && covers.byTheHollow.knocks.heard >= 1 && covers.byTheHollow.said >= 1 && !covers.byTheHollow.noiseAtTheCover, covers.byTheHollow);
+
+  // --- what a knock costs ---
+  const breakage = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    lab.reset();
+    lab.setBreakable(true);
+    const wall = lab.rockAhead(spot.x, spot.z);
+    // How a thing of this kind fares: set down from a crouch, let go of standing up, or thrown as hard as you can.
+    const fares = function (kindKey, how) {
+      d.clearLooseObjects();
+      lab.stand(spot.x, spot.z, Math.PI / 2);
+      if (how === 'set down') { d.input.keysDown.add('KeyC'); d.simulate(0.8); }
+      const object = lab.carry(kindKey);
+      // Set down: you look down at the floor over a second and a half, so that it is lowered and not slammed.
+      if (how === 'set down') { for (let step = 0; step < 45; step++) { p.pitch -= 1.1 / 45; d.simulate(1 / 30); } d.simulate(0.8); } else p.pitch = how === 'thrown' ? 0.1 : 0;
+      d.captionCounts.ownObjectShatter = 0;
+      d.clearMessages();
+      lab.noises.length = 0;
+      const shatteredBefore = d.looseState.statistics.shattered;
+      d.releaseHeldLooseObject(how === 'thrown' ? 1 : 0);
+      for (let step = 0; step < 300 && !object.isAsleep && !object.isRemoved; step++) d.simulate(1 / 30);
+      d.input.keysDown.clear();
+      return { whole: object.kind.value, worth: object.isRemoved ? 0 : d.getLooseObjectValue(object), gone: object.isRemoved, shattered: d.looseState.statistics.shattered - shatteredBefore,
+        said: lab.messages(), caption: d.captionCounts.ownObjectShatter, loudest: lab.round(Math.max.apply(null, [0].concat(lab.noises.map((noise) => noise.radius)))),
+        at: [lab.round(object.x), lab.round(object.z)] };
+    };
+    result.toolCase = { setDown: fares('toolCase', 'set down'), dropped: fares('toolCase', 'dropped'), thrown: fares('toolCase', 'thrown') };
+    result.can = { thrown: fares('can', 'thrown') };
+    // Thrown again and again, it is never worth less than a tenth of what it was.
+    d.clearLooseObjects();
+    lab.stand(spot.x, spot.z, Math.PI / 2);
+    const battered = lab.carry('toolCase');
+    for (let again = 0; again < 14; again++) {
+      p.pitch = 0.1;
+      d.releaseHeldLooseObject(1);
+      for (let step = 0; step < 240 && !battered.isAsleep; step++) d.simulate(1 / 30);
+      lab.stand(battered.x - 1.2, battered.z, Math.PI / 2);
+      p.pitch = Math.atan2(battered.y - d.getPlayerEyeY(), 1.2);
+      d.simulate(0.1);
+      d.pickUpLooseObject(battered, false);
+      d.simulate(1.2);
+      lab.stand(spot.x, spot.z, Math.PI / 2);
+      d.simulate(0.8);
+    }
+    result.battered = { worth: d.getLooseObjectValue(battered), whole: battered.kind.value, least: battered.kind.value * d.tuning.looseWorthLeastShare, lostInAll: d.looseState.statistics.worthLost };
+    d.releaseHeldLooseObject(0);
+
+    // A sample jar: set down it is whole; carried into a wall at a walk it lives, and is worth a little less;
+    // let go of standing up it shatters.
+    result.jar = { setDown: fares('jar', 'set down') };
+    d.clearLooseObjects();
+    lab.stand(spot.x + wall - 2.6, spot.z, Math.PI / 2);
+    const bumped = lab.carry('jar');
+    d.input.keysDown.add('KeyW');
+    d.simulate(2.5);
+    d.input.keysDown.clear();
+    result.jar.walkedIntoAWall = { gone: bumped.isRemoved, worth: bumped.isRemoved ? 0 : d.getLooseObjectValue(bumped), whole: bumped.kind.value, held: d.getHeldLooseObject() === bumped };
+    const patchesBefore = d.noisyFloorPatches.length;
+    result.jar.dropped = fares('jar', 'dropped');
+    const glass = d.noisyFloorPatches.filter((patch) => patch.isFromPlay);
+    result.glass = { patches: d.noisyFloorPatches.length - patchesBefore, kind: glass.length ? glass[0].kind : '', metresFromWhereItBroke: glass.length ? lab.round(Math.hypot(glass[0].x - result.jar.dropped.at[0], glass[0].z - result.jar.dropped.at[1])) : 99,
+      pieces: glass.length ? glass[0].props.length : 0, markedLoud: glass.length ? d.findNoisyFloorPatchAt(glass[0].x, glass[0].z) === glass[0] : false };
+    // Walking across what is left of it is as loud as any broken glass.
+    if (glass.length) {
+      d.clearLooseObjects();
+      d.noisyFloorCounts.byPlayer = 0;
+      lab.stand(glass[0].x - 1.6, glass[0].z, Math.PI / 2);
+      d.input.keysDown.add('KeyW');
+      d.simulate(1.6);
+      d.input.keysDown.clear();
+      result.glass.setOffByWalkingOverIt = d.noisyFloorCounts.byPlayer;
+    }
+    // A new descent: the glass is swept up, and what the station has lying about is whole again.
+    d.startOver();
+    d.game.flags.hasLeftLift = true; d.hollow.isActive = false;
+    result.newDescent = { glassLeft: d.noisyFloorPatches.filter((patch) => patch.isFromPlay).length, patches: d.noisyFloorPatches.length - patchesBefore,
+      allWhole: d.looseObjects.length > 10 && d.looseObjects.every((object) => d.getLooseObjectValue(object) === object.kind.value), lost: d.looseState.statistics.worthLost };
+    lab.reset();
+    lab.setBreakable(false);
+    return result;
+  }, spot);
+  check('a knock costs by how hard it is: a tool case set down from a crouch is worth what it was, let go of standing up it is worth less, thrown it is worth less still, and the screen says so',
+    breakage.toolCase.setDown.worth === breakage.toolCase.setDown.whole && breakage.toolCase.dropped.worth < breakage.toolCase.dropped.whole && breakage.toolCase.dropped.worth > breakage.toolCase.dropped.whole * 0.6 &&
+    breakage.toolCase.thrown.worth < breakage.toolCase.dropped.worth && !breakage.toolCase.thrown.gone && breakage.toolCase.dropped.said.some((text) => /The tool case took that badly/.test(text)) &&
+    breakage.toolCase.setDown.said.every((text) => !/took that badly/.test(text)), breakage.toolCase);
+  check('an empty can loses nothing however it is thrown, and a thing thrown again and again is never worth less than a tenth of what it was',
+    breakage.can.thrown.worth === breakage.can.thrown.whole && breakage.battered.worth >= Math.round(breakage.battered.least) && breakage.battered.worth <= breakage.battered.whole * 0.25 && breakage.battered.lostInAll > 0, [breakage.can, breakage.battered]);
+  check('a sample jar set down is whole; carried into a wall at a walk it lives, worth no more than it was; let go of standing up it shatters, loudly, and is gone',
+    !breakage.jar.setDown.gone && breakage.jar.setDown.worth === breakage.jar.setDown.whole && !breakage.jar.walkedIntoAWall.gone && breakage.jar.walkedIntoAWall.held && breakage.jar.walkedIntoAWall.worth <= breakage.jar.walkedIntoAWall.whole &&
+    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.85 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.caption === 1 && breakage.jar.dropped.loudest >= 18 &&
+    breakage.jar.dropped.said.some((text) => /The sample jar shatters\..*Mind the glass/.test(text)), breakage.jar);
+  check('where it shattered there is broken glass on the floor, as loud to walk over as any other; a new descent sweeps it up and has everything whole again',
+    breakage.glass.patches === 1 && breakage.glass.kind === 'glass' && breakage.glass.metresFromWhereItBroke < 0.8 && breakage.glass.pieces >= 3 && breakage.glass.markedLoud && breakage.glass.setOffByWalkingOverIt >= 1 &&
+    breakage.newDescent.glassLeft === 0 && breakage.newDescent.patches === 0 && breakage.newDescent.allWhole && breakage.newDescent.lost === 0, [breakage.glass, breakage.newDescent]);
+
   // --- what a thing is worth ---
   await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab;
@@ -1285,13 +1620,17 @@ function installLab() {
       d.simulate(2);
       tumbling = Math.min(tumbling, performance.now() - started);
     }
-    for (let step = 0; step < 300; step++) d.simulate(1 / 30);
+    // Given up to a minute for the last of them to stop: a box that came down on a length of pipe rides it across
+    // the floor for half a minute before both lie still. How long it took is in the result.
+    let secondsToRest = 0;
+    while (secondsToRest < 60 && d.looseObjects.some((object) => !object.isAsleep)) { for (let step = 0; step < 30; step++) d.simulate(1 / 30); secondsToRest++; }
     const atRest = d.looseObjects.filter((object) => object.isAsleep).length;
+    const notAtRest = d.looseObjects.filter((object) => !object.isAsleep).map((object) => object.kind.label + ' at height ' + lab.round(object.y) + ', moving ' + lab.round(Math.hypot(object.velocityX, object.velocityY, object.velocityZ)) + ' m/s, turning ' + lab.round(Math.hypot(object.spinX, object.spinY, object.spinZ)));
     started = performance.now();
     d.simulate(2);
     const resting = performance.now() - started;
     const allInTheOpen = d.looseObjects.every((object) => lab.isInTheOpen(object.x, object.y, object.z));
-    return { millisecondsPerSecondOfPlay: { nothingLoose: Math.round(plain / 2), twelveTumbling: Math.round(tumbling / 2), twelveAtRest: Math.round(resting / 2) }, atRest: atRest, of: d.looseObjects.length, allInTheOpen: allInTheOpen };
+    return { millisecondsPerSecondOfPlay: { nothingLoose: Math.round(plain / 2), twelveTumbling: Math.round(tumbling / 2), twelveAtRest: Math.round(resting / 2) }, atRest: atRest, of: d.looseObjects.length, secondsToRest: secondsToRest + 2, notAtRest: notAtRest, allInTheOpen: allInTheOpen };
   }, spot);
   check('twelve objects thrown in a heap all come to rest inside the room', cost.atRest === cost.of && cost.allInTheOpen, cost);
   check('twelve tumbling at once cost less than a fifth of the time there is (200 ms of work per second of play), and at rest they cost nothing to speak of',
@@ -1518,6 +1857,7 @@ function installLab() {
   const phone = await openGame({ dev: true, width: 844, height: 390, isPhone: true });
   await startGame(phone.page, true);
   await phone.page.evaluate(installLab);
+  await phone.page.evaluate(() => window.looseLab.setBreakable(false));
   const phoneHint = await phone.page.evaluate(() => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player;
     lab.reset();

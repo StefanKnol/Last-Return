@@ -115,6 +115,13 @@ const TUNING = {
   scannerSpreadMinimumDegrees: 3,   // narrowest beam (mouse wheel down). Half-angle of the cone.
   scannerSpreadMaximumDegrees: 26,  // widest beam (mouse wheel up)
   scannerSpreadDefaultDegrees: 11,
+  // The scanner is a thing in your hand and trails a little behind where you look (issue #55). Its dots, the
+  // aiming ring, its lens and what it carries all go with it.
+  scannerFollowRate: 22,            // how eagerly it comes round to where you look, per second. Lower trails further. 0 switches the trailing off.
+  scannerLagMaximumDegrees: 9,      // it never trails further behind your view than this, however fast you turn
+  scannerStrafeLagSeconds: 0.016,   // sidestepping leaves it behind by your sideways speed times this (4 cm at a walk)
+  scannerStrafeLagMaximumMetres: 0.07,
+  scannerRunLagSeconds: 0.005,      // going forward brings it toward you by your forward speed times this (about 2 cm at a run)
   scannerClearanceMetres: 0.08,     // the scanner is held back this far from a wall your face is against, so that it is never inside it
   // Heat runs from 0 (cold) to 1 (overheated). The HUD bar shows it.
   heatPerSecondWhilePainting: 0.1,  // 0.1 = ten seconds of continuous painting from cold to overheated
@@ -171,6 +178,9 @@ const TUNING = {
   looseHoldSlipDegrees: 22,         // knocked this far round against something, the beam gives and holds it as the knock left it
   looseHoldFastestSpeed: 7,         // it never chases your hands faster than this (m/s), however far behind it is
   looseHoldSagPerKilogram: 0.002,   // metres it hangs below the line the scanner points along, per kilogram
+  looseHoldShortestDistance: 0.12,  // pressed against something ahead, the beam holds a thing as near as this (from the lens to its nearest side); then it can give no more
+  looseHoldGiveSlack: 0.04,         // the thing has to be this far short of where the beam wants it before the beam gives
+  looseHoldLetOutSpeed: 1.6,        // how fast the beam lets it out again when there is room (m/s)
   looseHoldStopDistance: 0.35,      // when it is against something and this far behind where the beam wants it, it starts to hold you back ...
   looseHoldStopSpeed: 3,            // ... by up to this many metres a second: enough to stop a walk (2.5), not a run (4.6)
   looseHoldBreakDistance: 0.9,      // caught on something and further than this from where the beam wants it ...
@@ -196,6 +206,7 @@ const TUNING = {
   hollowFlingsSpeed: 12,            // how fast it throws, over the ground (m/s)
   hollowFlingsScatterMetres: 1.5,   // it lands within this far of you: at you or near you, on purpose
   // What a station has lying about (see planStationLooseObjects in 08-loose-objects.js).
+  ventCoverInPlaceChance: 0.5,      // this share of the vents' mouths still have their cover standing in them; the others' lie on the floor in front
   looseLitterPerRoom: 0.7,          // boxes, plates and stray cans: this many for every room and corridor
   looseValuablesPerRoom: 0.4,       // things worth carrying out: this many for every room and corridor
   haulShareOfValue: 0.4,            // the salvage quest asks for this share of what everything within walking reach of the lift is worth
@@ -205,6 +216,11 @@ const TUNING = {
   noiseRadiusHaulBayPing: 9,        // how far the Hollow hears that ping
   looseAppraiseHits: 20,            // after this many pulses on a thing the scanner has read it, and the screen says what it is worth
   looseValuablesShareOnSurfaces: 0.5, // this share of those stands on tables, shelves and crates; the rest on the floor, out of the way
+  // What a knock costs (see "What a knock costs" in 08-loose-objects.js).
+  looseDamageFromSpeed: 2.2,        // a knock slower than this (m/s) costs nothing. A thing set down is under it; a full walk into a wall (2.5) is just over.
+  looseDamageRuinSpeed: 9,          // ... and at this speed it takes off the whole of the thing's `fragile` share. A drop from your hands lands at about 4.5, a hard throw at up to 11.
+  looseWorthLeastShare: 0.1,        // nothing is ever worth less than this share of what it was whole
+  noiseRadiusShatter: 24,           // a sample jar shattering: as far as the hardest knock carries
   // Walking into one that lies on the floor.
   looseShoveFreeMass: 2,            // lighter than this (kg) you kick along without it slowing you
   looseShoveBlockMass: 16,          // this heavy or heavier it does not move for your legs and stops you: pick it up. In between it slows you by its share of the way from one to the other.
@@ -568,6 +584,8 @@ const CAPTIONS = {
   ownGlass: { text: '[glass crunches under your boots]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   ownPlate: { text: '[a floor plate clanks under you]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   hollowFling: { text: '[something is thrown, hard, out of the dark]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'hollowFeet', rank: 2 },
+  ownObjectShatter: { text: '[glass shatters at your feet]', level: 'sound', withinMetres: 0, seconds: 3, slot: 'ownHands', rank: 2 },
+  objectShatter: { text: '[glass shatters]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   ownObjectKicked: { text: '[something skitters away from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
   scanGrenade: { text: '[a rising whine, and a crack of light]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   hollowStunned: { text: '[it stands frozen in the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },

@@ -51,7 +51,7 @@ const ATTRACT_CAMERA = level.attractCamera; // set by whichever lift lobby is lo
 const renderCamera = { x: 0, y: 1.6, z: 0, yaw: 0, pitch: 0, fieldOfViewDegrees: 72 };
 const frameState = {
   time: 0, realTime: 0, interference: 0, danger: 0, fade: 1, powerOn: false, hasKeycard: false, keycardLevel: 0, palette: 0,
-  showViewmodel: false, viewmodelSwayX: 0, viewmodelSwayY: 0, viewmodelKick: 0, scannerActivity: 0, scannerHeat: 0,
+  showViewmodel: false, viewmodelSwayX: 0, viewmodelSwayY: 0, viewmodelKick: 0, viewmodelDriftRight: 0, viewmodelDriftBack: 0, viewmodelTurn: null, scannerActivity: 0, scannerHeat: 0,
   debug: null
 };
 let lastFrameTimestamp = 0;
@@ -539,6 +539,7 @@ function retryFromCheckpoint() {
   if (!game.difficulty.checkpointsEnabled) return; // one life: the only way on is to start over
   player.x = game.checkpoint.x; player.z = game.checkpoint.z; player.yaw = game.checkpoint.yaw;
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
+  steadyHeldScanner();
   player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
   player.sweepTimeRemaining = 0;
   input.keysDown.clear();
@@ -666,6 +667,7 @@ function updatePlaying(dt) {
   game.time += dt;
   currentPointTime = game.time;
   updatePlayerMovement(dt);
+  updateHeldScannerLag(dt); // before what you carry and before the scanner: both go where it points
   const bobHeight = Math.sin(player.bobPhase) * 0.028;
   const eyeY = getPlayerEyeY() + bobHeight;
   updateLooseObjects(dt, player.x, getPlayerEyeY(), player.z); // before the scanner: what you carry is in its way
@@ -793,6 +795,9 @@ function runFrame(timestamp) {
     frameState.viewmodelSwayX = Math.cos(player.bobPhase * 0.5) * 0.006;
     frameState.viewmodelSwayY = Math.sin(player.bobPhase) * 0.005 - (player.isSprinting ? 0.03 : 0);
     frameState.viewmodelKick = isScanning && game.mode === 'playing' ? (Math.random() - 0.5) * 0.004 : 0;
+    frameState.viewmodelDriftRight = player.scannerDriftRight;
+    frameState.viewmodelDriftBack = player.scannerDriftBack;
+    frameState.viewmodelTurn = computeHeldScannerInView();
   }
 
   // Belt and braces: whenever the game arrives at a screen that is not play, by whatever route, the sounds of
@@ -925,7 +930,7 @@ function startApplication() {
     findDoorWorthBreaking: findDoorWorthBreaking, breakDoor: breakDoor, mendDoor: mendDoor, getDoorSides: getDoorSides,
     playDoorBang: playDoorBang, playDoorBreak: playDoorBreak,
     // Noisy things on the floor: where they are, how often they have been set off, and a check of their placing.
-    noisyFloorPatches: noisyFloorPatches, noisyFloorCounts: noisyFloorCounts, auditNoisyFloor: auditNoisyFloor, playNoisyFloorSound: playNoisyFloorSound,
+    noisyFloorPatches: noisyFloorPatches, findNoisyFloorPatchAt: findNoisyFloorPatchAt, noisyFloorCounts: noisyFloorCounts, auditNoisyFloor: auditNoisyFloor, playNoisyFloorSound: playNoisyFloorSound,
     doorKinds: { automatic: DOOR_KIND_AUTOMATIC, powered: DOOR_KIND_POWERED, keycard: DOOR_KIND_KEYCARD, lift: DOOR_KIND_LIFT, bay: DOOR_KIND_BAY },
     canHollowOpenDoor: canHollowOpenDoor, isDoorPassableToHollow: isDoorPassableToHollow, isHollowInCrawlspace: isHollowInCrawlspace,
     getHollowPartAt: function (x, z) { return isInsideGrid(Math.floor(x), Math.floor(z)) ? tileHollowPart[tileIndexAt(Math.floor(x), Math.floor(z))] : 0; },
@@ -947,6 +952,7 @@ function startApplication() {
     sanitizeCustomDifficultyValues: sanitizeCustomDifficultyValues, describeCustomDifficulty: describeCustomDifficulty,
     explainCustomDifficultyValue: explainCustomDifficultyValue, retryFromCheckpoint: retryFromCheckpoint,
     // Apparitions: the list of those that exist, the part that decides when the chance ones come, and a way to call one up.
+    isLooseObjectInTheWayAt: isLooseObjectInTheWayAt,
     phantoms: phantoms, phantomDirector: phantomDirector, phantomKindKeys: PHANTOM_KIND_KEYS, phantomVentMouths: phantomVentMouths,
     summonPhantom: summonPhantom, getPhantomHoldReason: getPhantomHoldReason, isRealThreatNearPlayer: isRealThreatNearPlayer,
     canPlayerSeePoint: canPlayerSeePoint, getAngleFromPlayerView: getAngleFromPlayerView, getScannedHalfAngle: getScannedHalfAngle,
@@ -968,10 +974,12 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     stationLooseObjects: stationLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
-    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth,
+    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth, getLooseObjectValue: getLooseObjectValue, addBrokenGlassAt: addBrokenGlassAt, removeBrokenGlassFromPlay: removeBrokenGlassFromPlay,
+    startOver: function () { resetWorldState(); }, // a new descent into the station that is loaded, as "Begin descent" does it
+
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
     wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
-    fireScanPulse: fireScanPulse, fireScanPulseBeyond: fireScanPulseBeyond, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateScanEmitterAtEye: updateScanEmitterAtEye, castScannerPulse: castScannerPulse, castRayAgainstThings: castRayAgainstThings,
+    fireScanPulse: fireScanPulse, fireScanPulseBeyond: fireScanPulseBeyond, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateHeldScannerLag: updateHeldScannerLag, steadyHeldScanner: steadyHeldScanner, computeHeldScannerBasis: computeHeldScannerBasis, computeHeldScannerInView: computeHeldScannerInView, updateScanEmitterAtEye: updateScanEmitterAtEye, castScannerPulse: castScannerPulse, castRayAgainstThings: castRayAgainstThings,
     getPlayFieldOfViewDegrees: getPlayFieldOfViewDegrees, beginLettingGo: beginLettingGo,
     castScannerRay: castScannerRay, rayHit: rayHit, scannerBasis: scannerBasis, computeScannerBasis: computeScannerBasis,
     setScanHeld: function (isHeld) { input.isScanHeld = isHeld; },
