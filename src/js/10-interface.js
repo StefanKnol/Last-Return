@@ -632,9 +632,9 @@ function getExtraJobStatusText() {
 // ---------------------------------------------------------------------------
 // What a thing is worth, floating at the thing
 //
-// Once the scanner has read a loose thing, what it is worth shows as a small number just above it, for as long
-// as the scanner's points are on it: on a thing at rest until it is moved, on one that moves for under a
-// second. The thing you would pick up shows its name there too, once the screen has stopped saying how.
+// Once the scanner has read a loose thing, what it is worth shows as a small number just above it for a few
+// seconds after a pulse last landed on it, then fades. Scan it again and it shows again. The thing you would
+// pick up shows its name there too, once the screen has stopped saying how.
 // ---------------------------------------------------------------------------
 
 const looseMarkers = {
@@ -658,7 +658,7 @@ function projectPointToScreen(x, y, z, result) {
   return result;
 }
 
-// Which things have a marker: read, with their points on them, near, on screen and in sight. If there are more
+// Which things have a marker: read, scanned in the last few seconds, near, on screen and in sight. If there are more
 // than may show at once, those nearest to where you look. Looked at a few times a second, not every frame.
 function chooseLooseMarkers() {
   const markers = looseMarkers, screen = markers.screen, candidates = [];
@@ -667,7 +667,7 @@ function chooseLooseMarkers() {
   for (const object of looseObjects) {
     if (object.isHeld || object.isRemoved) continue;
     const isFocused = object === focused;
-    const showsWorth = object.isAppraised && getLooseObjectValue(object) > 0 && doesLooseObjectShowItsPoints(object);
+    const showsWorth = object.isAppraised && getLooseObjectValue(object) > 0 && getSecondsSinceLooseObjectScanned(object) < TUNING.looseMarkerSeconds;
     if (!isFocused && !showsWorth) continue;
     const distance = distanceBetweenPoints(object.x, object.z, player.x, player.z);
     if (!isFocused && distance > TUNING.looseMarkerMetres) continue;
@@ -701,6 +701,10 @@ function updateLooseMarkers(realDt) {
     if (object.isRemoved || object.isHeld) continue;
     const screen = projectPointToScreen(object.x, getLooseObjectTopY(object) + 0.06, object.z, markers.screen);
     if (!screen.isInFront) continue;
+    // The few seconds may run out between two looks at which things have a marker.
+    const secondsLeft = TUNING.looseMarkerSeconds - getSecondsSinceLooseObjectScanned(object);
+    const worth = marker.showsWorth && secondsLeft > 0 ? String(getLooseObjectValue(object)) : '';
+    if (worth === '' && !marker.isFocused) continue;
     if (shown === markers.elements.length) {
       const created = document.createElement('div');
       created.className = 'loose-marker';
@@ -708,13 +712,13 @@ function updateLooseMarkers(realDt) {
       markers.elements.push(created);
     }
     const element = markers.elements[shown++];
-    const worth = marker.showsWorth ? String(getLooseObjectValue(object)) : '';
     const text = marker.isFocused ? getLooseObjectLabel(object) + (worth ? ' \u00B7 ' + worth : '') : worth;
     if (element.textContent !== text) element.textContent = text;
     element.classList.toggle('is-focused', marker.isFocused);
-    // Fainter the further off it is.
+    // Fainter the further off it is, and fading out as its few seconds end.
     const distance = distanceBetweenPoints(object.x, object.z, player.x, player.z);
-    element.style.opacity = marker.isFocused ? '1' : (1 - 0.6 * clampNumber(distance / TUNING.looseMarkerMetres, 0, 1)).toFixed(2);
+    const fade = clampNumber(secondsLeft / TUNING.looseMarkerFadeSeconds, 0, 1);
+    element.style.opacity = marker.isFocused ? '1' : ((1 - 0.6 * clampNumber(distance / TUNING.looseMarkerMetres, 0, 1)) * fade).toFixed(2);
     element.style.transform = 'translate(' + screen.x.toFixed(1) + 'px, ' + screen.y.toFixed(1) + 'px) translate(-50%, -100%)';
     element.hidden = false;
   }

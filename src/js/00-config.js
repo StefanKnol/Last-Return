@@ -168,7 +168,9 @@ const TUNING = {
   looseRestSpin: 0.35,              // ... and turning slower than this (radians per second) ...
   looseRestSeconds: 0.4,            // ... for this long, while touching something: it is at rest, and left alone until something touches it
   looseImprintSeconds: 0.7,         // how long points scanned onto a moving or carried object stay. (On one at rest they stay for good.)
-  looseMarkerMetres: 7,             // what a thing is worth floats at it from this near, once the scanner has read it and while its points are on it
+  looseMarkerSeconds: 4,            // what a thing is worth floats at it for this long after a pulse last landed on it, once the scanner has read it. Scan it again and it shows again.
+  looseMarkerFadeSeconds: 1,        // ... fading out over the last of those
+  looseMarkerMetres: 7,             // ... and from no further off than this
   looseMarkersAtOnce: 6,            // no more than this many of them on screen: those nearest to where you look
   // Carrying.
   looseBeamReach: 2.6,              // how far away the scanner's beam can take hold of one

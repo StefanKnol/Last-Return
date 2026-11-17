@@ -1611,12 +1611,21 @@ function installLab() {
   });
   await drawFrames(page, 4);
   const readOnScreen = await readScreen();
+  // Only for a few seconds after the scan: then the number is gone, though the thing and its points are still there.
+  const waitOutTheMarker = () => inGame(() => { const d = window.lastReturnDebug; d.simulate(d.tuning.looseMarkerSeconds + 0.3); });
+  await waitOutTheMarker();
+  await drawFrames(page, 4);
+  const aWhileLater = await readScreen();
+  // Scanned again, it shows again.
+  await inGame(() => { const d = window.lastReturnDebug; d.setScanHeld(true); d.simulate(0.5); d.setScanHeld(false); d.simulate(0.1); });
+  await drawFrames(page, 4);
+  const rescanned = await readScreen();
   // Picked up: it has no marker while the beam has it, and the status line says what it is worth.
   await inGame(() => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects[0], false); d.simulate(0.3); });
   await drawFrames(page, 4);
   const carried = await readScreen();
   // Set down and looked at again. You have picked something up now, so the screen no longer says how: the
-  // thing's name floats at it instead. Its points went when it was moved, so not what it is worth, until it is scanned again.
+  // thing's name floats at it instead. Not what it is worth: its last scan is too long ago, until it is scanned again.
   const lookAtIt = () => inGame(() => {
     const d = window.lastReturnDebug, p = d.player, object = d.looseObjects[0];
     p.yaw = Math.atan2(object.x - p.x, -(object.z - p.z));
@@ -1631,6 +1640,7 @@ function installLab() {
     for (let step = 0; step < 240 && !object.isAsleep; step++) d.simulate(1 / 30);
     d.input.keysDown.clear(); d.simulate(0.6);
   });
+  await waitOutTheMarker(); // its last scan is long enough ago
   await lookAtIt();
   await drawFrames(page, 4);
   const setDown = await readScreen();
@@ -1642,6 +1652,8 @@ function installLab() {
   await drawFrames(page, 4);
   const lookedAway = await readScreen();
   await inGame(() => { window.lastReturnDebug.looseState.hasPickedUpOnce = false; });
+  check('what floats at a thing is there for a few seconds after a scan and then gone; scanned again, it is there again',
+    aWhileLater.markers.length === 0 && aWhileLater.worth === 25 && rescanned.markers.length === 1 && rescanned.markers[0].text === '25', { aWhileLater: aWhileLater, rescanned: rescanned });
   check('what a thing is worth is not on screen until the scanner has read it; then it floats at the thing, as a number, and the line that says how to pick it up does not mention it',
     /Pick up the gas canister$/.test(unread.prompt) && unread.worth === 0 && unread.markers.length === 0 && read.pulses >= read.needed && read.worth === read.really && read.really > 0 &&
     read.messages.some((text) => /The scanner has read what that is: gas canister, worth 25/.test(text)) && /Pick up the gas canister$/.test(readOnScreen.prompt) &&
@@ -1649,7 +1661,7 @@ function installLab() {
     Math.abs(readOnScreen.markers[0].across - 0.5) < 0.08 && readOnScreen.markers[0].down > 0.25 && readOnScreen.markers[0].down < 0.55,
     { unread: unread, read: read, onScreen: readOnScreen });
   check('in the beam a thing has no marker, and the status line says what it is worth', carried.markers.length === 0 && carried.chip === 'CARRYING: GAS CANISTER · 25', carried);
-  check('once you have picked something up the screen no longer says how: the name of the thing you would take floats at it, with what it is worth once its points are on it again',
+  check('once you have picked something up the screen no longer says how: the name of the thing you would take floats at it, with what it is worth for a few seconds once it is scanned again',
     setDown.prompt === '' && setDown.markers.length === 1 && setDown.markers[0].text === 'gas canister' && setDown.markers[0].isFocused &&
     scannedAgain.prompt === '' && scannedAgain.markers.length === 1 && scannedAgain.markers[0].text === 'gas canister · 25' && lookedAway.markers.length === 0,
     { setDown: setDown, scannedAgain: scannedAgain, lookedAway: lookedAway });

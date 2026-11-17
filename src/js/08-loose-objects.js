@@ -471,15 +471,15 @@ function noteLooseObjectScanned(object) {
     object.isAppraised = true;
     if (!looseState.hasShownAppraisalHint && getLooseObjectValue(object) > 0 && game.mode === 'playing') {
       looseState.hasShownAppraisalHint = true;
-      showMessage('The scanner has read what that is: ' + object.kind.label + ', worth ' + getLooseObjectValue(object) + '. Scan a thing well and what it is worth shows at it, for as long as its points do.', 7, 'info');
+      showMessage('The scanner has read what that is: ' + object.kind.label + ', worth ' + getLooseObjectValue(object) + '. Scan a thing well and what it is worth shows at it for a few seconds, each time you scan it.', 7, 'info');
     }
   }
 }
 
-// Are the scanner's points on it now? On a thing at rest they stay until it is moved; on one that moves they
-// fade in under a second. What a thing is worth is shown at it for as long as they are there (10-interface.js).
-function doesLooseObjectShowItsPoints(object) {
-  return object.hasRestPoints || game.time - object.lastScannedTime < TUNING.looseImprintSeconds;
+// How long ago a pulse last landed on it, in seconds. What a thing is worth floats at it for a few seconds after
+// that, and no longer: scan it again and it shows again (10-interface.js).
+function getSecondsSinceLooseObjectScanned(object) {
+  return game.time - object.lastScannedTime;
 }
 
 // How high the top of it is, turned as it is: what floats at it floats just above that.
