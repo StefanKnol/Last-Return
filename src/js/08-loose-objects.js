@@ -1264,7 +1264,7 @@ function canSprintWhileCarrying() {
 function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   const held = looseState.held;
   if (!held) return;
-  computeScannerBasis(player.yaw, player.pitch);
+  computeHeldScannerBasis();
   updateScanEmitterAtLens(eyeX, eyeY, eyeZ);
   const distance = TUNING.looseHoldDistance + held.prepared.partsRadius;
   looseState.holdTargetX = scanEmitter.x + scannerBasis.forwardX * distance;
