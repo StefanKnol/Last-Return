@@ -158,11 +158,12 @@ void main() {
   else if (surfaceClass == 10) color = vec3(1.0, 0.03, 0.02);
   else if (surfaceClass == 12) color = vec3(0.85, 0.66, 0.1);
   else if (surfaceClass == 16) color = vec3(0.5, 1.0, 0.92);
+  else if (surfaceClass == 17) color = vec3(1.9, 1.0, 0.2);
   // TWEAK: 0.03 is how quickly points dim with distance. 0 = no dimming, 0.1 = far rooms nearly black.
   float brightness = (0.22 + 0.78 * intensity) / (1.0 + distanceToCamera * 0.03) * (0.72 + 0.28 * smoothstep(0.4, 4.0, distanceToCamera));
   // TWEAK: fresh points flash white. 2.6 is how fast the flash dies (higher = shorter flash).
   float flash = exp(-age * 2.6);
-  vec3 flashColor = surfaceClass == 10 ? vec3(0.9, 0.05, 0.03) : vec3(0.85, 1.0, 1.0);
+  vec3 flashColor = surfaceClass == 10 ? vec3(0.9, 0.05, 0.03) : (surfaceClass == 17 ? vec3(1.0, 0.5, 0.1) : vec3(0.85, 1.0, 1.0));
   if (surfaceClass == 10) brightness = max(brightness, 0.55);
   vColor = color * brightness + flashColor * flash * 0.45;
   vFade = fade;

@@ -131,6 +131,7 @@ function initializeInterface() {
   }
   buildCustomDifficultyPanel(refreshDifficulty);
   refreshDifficulty();
+  interfaceState.refreshDifficulty = refreshDifficulty;
 
   // Which work orders an uncharted annex may give you: a tick for each (WORK_ORDERS in 09-quests.js). A descent
   // has one of those that are ticked; the seed says which. At least one stays ticked.

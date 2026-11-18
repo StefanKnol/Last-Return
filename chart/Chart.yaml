@@ -5,4 +5,4 @@ type: application
 # The chart's own version. Bump it when the templates change.
 version: 0.3.0
 # The game version this chart was written against. The image tag is what decides what runs.
-appVersion: "1.24.0"
+appVersion: "1.25.0"

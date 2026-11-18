@@ -102,13 +102,18 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await guests[0].member.next(); await guests[0].member.next(); // the two who joined after it
   const started = await guests[0].member.next();
   check('only the host can begin the descent', started.t === 'start' && started.d.kind === 'classic', started);
-  fifth.say({ t: 'join', code: lobby.code, build: 'one' });
-  check('nobody joins a lobby that has gone down', (await fifth.next()).why === 'started');
 
   guests[2].member.socket.close();
   let left = await host.next();
   while (left.t !== 'left') left = await host.next();
   check('the others hear of one who leaves', left.id === 4, left);
+  fifth.say({ t: 'join', code: lobby.code, build: 'one' });
+  const late = await fifth.next();
+  check('a lobby that has gone down can still be joined, by whoever will wait for the next descent', late.t === 'lobby' && late.players.length === 4, late);
+  host.say({ t: 'start', d: { kind: 'classic', round: 2 } });
+  let again = await fifth.next();
+  while (again.t !== 'start' && again.t !== 'gone') again = await fifth.next();
+  check('and the host can begin again, as often as the lobby likes', again.t === 'start' && again.d.round === 2, again);
   host.socket.close();
   let closed = await guests[1].member.next();
   while (closed.t !== 'closed' && closed.t !== 'gone') closed = await guests[1].member.next();
@@ -139,6 +144,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('one opens a lobby, the other joins it with the code, and both see two in it',
     (await a.textContent('#together-status')).startsWith('2 of 4') && (await b.textContent('#together-status')).startsWith('2 of 4'), code);
   check('the host can begin; the other waits', (await a.textContent('#button-begin')) === 'Begin descent together' && await b.isDisabled('#button-begin'));
+
+  // The other's title screen shows what the host has chosen, and follows it when the host changes it.
+  await b.waitForFunction(() => window.lastReturnDebug.settings.station === 'generated', null, { timeout: 5000 }).catch(() => {});
+  const shownAtFirst = await b.evaluate(() => { const d = window.lastReturnDebug; return { station: d.settings.station, seed: d.settings.seedText, size: d.settings.stationSize, difficulty: d.settings.difficulty,
+    sizeControl: document.getElementById('title-station-size').value, cannotChange: document.getElementById('title-station-size').disabled && document.getElementById('difficulty-nightmare').closest('fieldset').disabled }; });
+  check('the other\'s title screen shows the station and the threat level the host has chosen, and cannot change them',
+    shownAtFirst.station === 'generated' && shownAtFirst.seed === '4471' && shownAtFirst.size === 'small' && shownAtFirst.sizeControl === 'small' && shownAtFirst.difficulty === 'standard' && shownAtFirst.cannotChange, shownAtFirst);
+  await a.evaluate(() => { document.getElementById('station-generated').click(); }); // (the title screen was not told of the settings put in above: this shows the size and the seed)
+  await a.selectOption('#title-station-size', 'large');
+  await b.waitForFunction(() => window.lastReturnDebug.settings.stationSize === 'large', null, { timeout: 5000 }).catch(() => {});
+  const followed = await b.evaluate(() => ({ size: window.lastReturnDebug.settings.stationSize, control: document.getElementById('title-station-size').value, kept: JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').station }));
+  check('when the host changes something, it changes there too; what the other chose for themselves is what is kept', followed.size === 'large' && followed.control === 'large' && followed.kept !== 'generated', followed);
+  await a.selectOption('#title-station-size', 'small');
+  await b.waitForFunction(() => window.lastReturnDebug.settings.stationSize === 'small', null, { timeout: 5000 });
 
   // The other's click on "Join" is forgotten by the browser after a few seconds. The host begins after that.
   await b.waitForFunction(() => !navigator.userActivation.isActive, null, { timeout: 15000 });
@@ -203,6 +222,27 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     return d.pointCloud.totalReturns - before;
   });
   check('and no longer when they stop', after === 0, after);
+
+  // Your own body is in the way of the others' scanners, though you never see it. The host scans the other from
+  // a metre and a half, with a narrow beam: on the other's screen none of that light gets past them, and none
+  // is drawn on them. And the light on the host's scanner is simply there, scanning or not.
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.player.velocityX = 0; d.player.velocityZ = 0; for (let count = 0; count < 3; count++) d.updateTogether(0.1); });
+  await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0];
+    d.teleport(other.x, other.z + 1.5, 0); d.player.pitch = -0.2;
+    d.setScannerSpread(5); d.setScanHeld(true); d.simulate(0.3);
+    for (let count = 0; count < 4; count++) d.updateTogether(0.1);
+  });
+  await b.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees > 0);
+  const blocked = await b.evaluate(() => {
+    const d = window.lastReturnDebug, before = d.pointCloud.totalReturns, writtenBefore = d.pointCloud.writeIndex;
+    for (let count = 0; count < 5; count++) d.updateTogether(0.1);
+    return { points: d.pointCloud.totalReturns - before, written: d.pointCloud.writeIndex - writtenBefore };
+  });
+  check('a scanner pointed at you lights nothing behind you on your own screen, and nothing on you', blocked.points === 0, blocked);
+  check('the light on another scanner is always lit: a few points every frame that are not returns', blocked.written > 0, blocked);
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.setScanHeld(false); d.setScannerSpread(d.tuning.scannerSpreadDefaultDegrees); d.simulate(0.2); for (let count = 0; count < 4; count++) d.updateTogether(0.1); });
+  await b.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees === 0);
 
   // ---- One station: the host's creatures, doors and work order are everybody's ----
   // A stretch of play in one browser: its own game, and what it says to the others.
@@ -276,6 +316,14 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, isDown: other.isDown, players: d.players.length, metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
   check('the host\'s Hollow catching the other is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
   check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
+  await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
+  await a.waitForFunction(() => window.lastReturnDebug.together.others[0].isFallen, null, { timeout: 5000 }).catch(() => {});
+  const fallen = await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0], writtenBefore = d.pointCloud.writeIndex;
+    d.updateTogether(0.1);
+    return { isFallen: other.isFallen, bodyHit: d.fireScanPulse(other.x, other.eyeY - 0.4, other.z + 0.9, 0, 0, -1, false) && d.rayHit.figure === other.figure, light: d.pointCloud.writeIndex - writtenBefore };
+  });
+  check('dead, their body is gone and their scanner lies where they fell, still lit', fallen.isFallen && !fallen.bodyHit && fallen.light > 0, fallen);
   // The station does not stop for the dead.
   await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 });
   const timeBefore = await b.evaluate(() => window.lastReturnDebug.game.time);
@@ -336,12 +384,69 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('a position no player could be at is held to the station, and nothing hangs on it',
     wild.x <= 512 && wild.z === 0 && wild.eyeY <= 100 && Math.abs(wild.yaw) <= Math.PI && wild.pitch <= 1.6 && wild.spread <= 60, wild);
 
-  // The host leaves. The other stays down, alone.
+  // ---- A lobby lasts longer than one descent ----
+  // A third joins while the two are down. They wait at the title screen.
+  const third = await openGame({ address: address });
+  const c = third.page;
+  await c.fill('#together-code', code);
+  await c.click('#button-join-lobby');
+  await c.waitForFunction(() => window.lastReturnDebug.together.memberIds.length === 3 && window.lastReturnDebug.together.isRoundOn, null, { timeout: 8000 }).catch(() => {});
+  const waiting3 = await c.evaluate(() => ({ members: window.lastReturnDebug.together.memberIds.length, isRoundOn: window.lastReturnDebug.together.isRoundOn, mode: window.lastReturnDebug.game.mode,
+    button: document.getElementById('button-begin').textContent, disabled: document.getElementById('button-begin').disabled, station: window.lastReturnDebug.settings.station }));
+  check('somebody can join while the others are down, and waits at the title screen for the next descent',
+    waiting3.members === 3 && waiting3.isRoundOn && waiting3.mode === 'title' && waiting3.disabled && waiting3.button === 'Waiting for the others' && waiting3.station === 'generated', waiting3);
+
+  // The host goes back up. That is the end of the descent for everyone, and nobody leaves the lobby over it.
+  await a.evaluate(() => window.lastReturnDebug.returnToTitle());
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'title', null, { timeout: 8000 }).catch(() => {});
+  await c.waitForFunction(() => !window.lastReturnDebug.together.isRoundOn, null, { timeout: 8000 }).catch(() => {});
+  const backUp = { host: await a.evaluate(() => ({ code: window.lastReturnDebug.together.code, members: window.lastReturnDebug.together.memberIds.length, players: window.lastReturnDebug.players.length })),
+    other: await b.evaluate(() => ({ code: window.lastReturnDebug.together.code, mode: window.lastReturnDebug.game.mode, status: document.getElementById('together-status').textContent })),
+    third: await c.evaluate(() => ({ isRoundOn: window.lastReturnDebug.together.isRoundOn, button: document.getElementById('button-begin').textContent })) };
+  check('when the host goes back up the descent is over for everyone, and all are still in the lobby',
+    backUp.host.code === code && backUp.host.members === 3 && backUp.host.players === 1 && backUp.other.code === code && backUp.other.mode === 'title' && /host has gone back up/.test(backUp.other.status) && !backUp.third.isRoundOn && backUp.third.button === 'Waiting for the host', backUp);
+
+  // The next descent takes all three.
+  await a.waitForFunction(() => window.lastReturnDebug.game.mode === 'title');
+  await startGame(a, false);
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'intro', null, { timeout: 10000 }).catch(() => {});
+  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'intro', null, { timeout: 10000 }).catch(() => {});
+  const second2 = [await a.evaluate(() => window.lastReturnDebug.together.others.length), await b.evaluate(() => window.lastReturnDebug.game.mode), await c.evaluate(() => window.lastReturnDebug.game.mode)];
+  check('the host begins again and everyone in the lobby goes down, the one who waited included', second2[0] === 2 && second2[1] === 'intro' && second2[2] === 'intro', second2);
+  await b.keyboard.press('Enter'); await c.keyboard.press('Enter');
+  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing');
+
+  // One of them goes back up alone. They wait for the others; the descent goes on.
+  await b.evaluate(() => window.lastReturnDebug.returnToTitle());
+  await a.waitForFunction(() => window.lastReturnDebug.together.others.length === 1, null, { timeout: 8000 }).catch(() => {});
+  const wentUp = { other: await b.evaluate(() => ({ code: window.lastReturnDebug.together.code, isRoundOn: window.lastReturnDebug.together.isRoundOn, button: document.getElementById('button-begin').textContent })),
+    host: await a.evaluate(() => ({ others: window.lastReturnDebug.together.others.length, mode: window.lastReturnDebug.game.mode, members: window.lastReturnDebug.together.memberIds.length })) };
+  check('one who goes back up alone stays in the lobby and waits; for the others the descent goes on without them',
+    wentUp.other.code === code && wentUp.other.isRoundOn && wentUp.other.button === 'Waiting for the others' && wentUp.host.others === 1 && wentUp.host.mode === 'playing' && wentUp.host.members === 3, wentUp);
+
+  // The host's tab is hidden. A browser stops drawing it, and with that the game's own frames: the station goes on all the same.
+  await a.keyboard.press('Escape');
+  const unseen = await a.evaluate(async () => {
+    const d = window.lastReturnDebug;
+    Object.defineProperty(document, 'hidden', { get: function () { return true; }, configurable: true });
+    window.requestAnimationFrame = function () { return 0; }; // nothing is drawn from here on
+    await new Promise(function (resolve) { setTimeout(resolve, 200); });
+    const before = d.game.time;
+    await new Promise(function (resolve) { setTimeout(resolve, 900); });
+    return { mode: d.game.mode, seconds: d.game.time - before };
+  });
+  check('the host\'s station goes on while the host\'s tab is hidden', unseen.mode === 'paused' && unseen.seconds > 0.5 && unseen.seconds < 1.5, unseen);
+
+  // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
   await first.browser.close();
   await b.waitForFunction(() => window.lastReturnDebug.together.code === '');
-  const alone = await b.evaluate(() => { const d = window.lastReturnDebug; return { others: d.together.others.length, mode: d.game.mode, hit: d.fireScanPulse(d.player.x, d.getPlayerEyeY() - 0.4, d.player.z + 0.9, 0, 0, -1, false) && d.rayHit.figure !== null }; });
-  check('when the host leaves, the other stays down there alone, and the host\'s body is gone', alone.others === 0 && alone.mode === 'playing' && !alone.hit, alone);
-  check('no script errors were reported', first.problems.length === 0 && second.problems.length === 0, first.problems.concat(second.problems));
+  await c.waitForFunction(() => window.lastReturnDebug.together.code === '');
+  const alone = await c.evaluate(() => { const d = window.lastReturnDebug; return { others: d.together.others.length, mode: d.game.mode, players: d.players.length }; });
+  const ownAgain = await b.evaluate(() => ({ station: window.lastReturnDebug.settings.station, canChange: !document.getElementById('title-station-size').disabled, button: document.getElementById('button-begin').textContent }));
+  check('when the host leaves, whoever is down there stays down there alone', alone.others === 0 && alone.mode === 'playing' && alone.players === 1, alone);
+  check('and whoever was waiting has their own title screen back, as they had left it', ownAgain.station === 'classic' && ownAgain.canChange && ownAgain.button === 'Begin descent', ownAgain);
+  check('no script errors were reported', first.problems.length === 0 && second.problems.length === 0 && third.problems.length === 0, first.problems.concat(second.problems, third.problems));
+  await third.browser.close();
 
   await second.browser.close();
   named.server.close();

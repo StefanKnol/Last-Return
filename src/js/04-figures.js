@@ -36,6 +36,19 @@ const FIGURE_PROPORTIONS_PLAYER = {
   thigh: 0.5, shin: 0.45, footLength: 0.2, torsoRadius: 0.14, limbRadius: 0.04, legRadius: 0.06, jointRadius: 0.06
 };
 
+// The scanner a player's figure holds. TWEAK: its length and its thickness, in metres.
+const PLAYER_SCANNER_LENGTH = 0.3;
+const PLAYER_SCANNER_RADIUS = 0.055;
+
+// Where the light on top of the scanner in a player's hand is: halfway along it, just above. `out` gets x, y, z.
+function getFigureScannerLight(figure, out) {
+  const offset = (figure.capsuleCount - 1) * FIGURE_CAPSULE_STRIDE, capsules = figure.capsules;
+  out.x = (capsules[offset] + capsules[offset + 3]) / 2;
+  out.y = (capsules[offset + 1] + capsules[offset + 4]) / 2 + PLAYER_SCANNER_RADIUS + 0.015;
+  out.z = (capsules[offset + 2] + capsules[offset + 5]) / 2;
+  return out;
+}
+
 const raycastableFigures = [];
 
 // Points store their lifetime in one byte, in quarter seconds: 1 = 0.25 s, 255 = 63.75 s. 0 means "forever".
@@ -249,13 +262,19 @@ function buildDummyCapsules(figure) {
   add(shoulderLeft, shoulderRight, body.limbRadius * 1.3);
   add(legs[0].hip, legs[1].hip, body.legRadius);
 
+  // A player holds a scanner in the right hand. That arm goes by armRaise and elbowBend, and is held steady;
+  // the other hangs at their side and swings as they walk.
+  const isPlayer = body.kind === 'player';
+  let scannerHand = null, scannerAngle = 0;
   for (let side = -1; side <= 1; side += 2) {
     const shoulder = side < 0 ? shoulderLeft : shoulderRight;
-    const armAngle = pose.armRaise + pose.lean * 0.4 + pose.armSwing * (side < 0 ? -1 : 1);
+    const isScannerArm = isPlayer && side > 0, isFreeArm = isPlayer && side < 0;
+    const armAngle = (isFreeArm ? 0.06 : pose.armRaise) + pose.lean * 0.4 + (isScannerArm ? 0 : pose.armSwing * (side < 0 ? -1 : 1));
     const elbow = [shoulder[0], shoulder[1] - Math.cos(armAngle) * body.upperArm, shoulder[2] + Math.sin(armAngle) * body.upperArm];
-    const foreArmAngle = armAngle + pose.elbowBend;
+    const foreArmAngle = armAngle + (isFreeArm ? 0.15 : pose.elbowBend);
     const wrist = [elbow[0], elbow[1] - Math.cos(foreArmAngle) * body.foreArm, elbow[2] + Math.sin(foreArmAngle) * body.foreArm];
     const hand = [wrist[0], wrist[1] - Math.cos(foreArmAngle) * body.handLength, wrist[2] + Math.sin(foreArmAngle) * body.handLength];
+    if (isScannerArm) { scannerHand = hand; scannerAngle = foreArmAngle; }
     add(shoulder, elbow, body.limbRadius);
     add(elbow, wrist, body.limbRadius * 0.9);
     add(wrist, hand, body.limbRadius * 1.15);
@@ -267,6 +286,11 @@ function buildDummyCapsules(figure) {
     add(leg.knee, leg.ankle, body.legRadius * 0.85);
     add(leg.ankle, [leg.ankle[0], 0.04, leg.ankle[2] + body.footLength], 0.04);
     add(leg.knee, leg.knee, body.jointRadius);
+  }
+  if (isPlayer) {
+    // The scanner: it goes on from the hand the way the forearm points. It is the last part of the body, which
+    // is how getFigureScannerLight finds it.
+    add(scannerHand, [scannerHand[0], scannerHand[1] - Math.cos(scannerAngle) * PLAYER_SCANNER_LENGTH, scannerHand[2] + Math.sin(scannerAngle) * PLAYER_SCANNER_LENGTH], PLAYER_SCANNER_RADIUS);
   }
   figure.capsuleCount = next;
   return headTop[1] + body.headRadius;

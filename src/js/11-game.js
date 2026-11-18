@@ -938,6 +938,16 @@ function runFrame(timestamp) {
   if (debugHooks.update) debugHooks.update(realDt);
 }
 
+// A frame of the station going on with nothing drawn and nobody at the controls: for the host of others, while
+// the host's tab is hidden (startUnseenTicks, 11-together.js). A hidden tab is never in play: hiding it opens the menu.
+function runFrameUnseen(dt) {
+  game.realTime += dt;
+  if (game.mode === 'dying') { updateDying(dt); updateStationWithoutYou(dt, true); }
+  else if (game.mode === 'ascending') updateAscending(dt);
+  else if (game.mode === 'paused' || game.mode === 'reading' || game.mode === 'dead') updateStationWithoutYou(dt, false);
+  updateTogether(dt);
+}
+
 // ---------------------------------------------------------------------------
 // Start-up
 // ---------------------------------------------------------------------------
@@ -966,7 +976,7 @@ function startApplication() {
   showOnlyScreen('screen-title');
 
   window.lastReturnDebug = {
-    game: game, player: player, players: players, together: together, updateTogether: updateTogether, askToAct: askToAct, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
+    game: game, player: player, players: players, together: together, updateTogether: updateTogether, askToAct: askToAct, returnToTitle: returnToTitle, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
     playHollowRoar: playHollowRoar, playHollowSnarl: playHollowSnarl, playHollowLostHiss: playHollowLostHiss, playHollowSniff: playHollowSniff, playHollowCuriousTrill: playHollowCuriousTrill,
     playStinger: playStinger, playSweepSound: playSweepSound, playInterfaceBlip: playInterfaceBlip, playRadioBlip: playRadioBlip, playDeniedSound: playDeniedSound, stills: stills, doors: doors, pointCloud: pointCloud, settings: settings,
     beamLines: beamLines,

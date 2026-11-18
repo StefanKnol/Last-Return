@@ -25,8 +25,6 @@
 // ---------------------------------------------------------------------------
 
 const TOGETHER_SENDS_PER_SECOND = 15;    // how often you say where you are
-const TOGETHER_ECHO_RAY_SHARE = 0.8;     // TWEAK: how much of another scanner's light is drawn here, as a share of your own scanner's pulses
-                                         // (The host draws all of it: its Hollow and its Stills have to feel that light as they feel the host's.)
 const WORLD_SENDS_PER_SECOND = 10;       // how often the host says how the creatures stand and which doors are open
 
 const together = {
@@ -35,6 +33,9 @@ const together = {
   code: '',              // the lobby you are in, or ''
   myId: 0, hostId: 0,
   memberIds: [],         // everyone in the lobby, you included
+  isRoundOn: false,      // the host is down in a station right now (with whoever went along)
+  ownChoices: null,      // in somebody else's lobby: what you had chosen on the title screen yourself, to be put back when you leave
+  ownFigure: null,       // your own body, which nobody sees: it is only in the way of the others' scanners (echoOtherScanner)
   hostMap: null,         // the number the host's station came to when it was built (level.mapFingerprint), once the host has said
   isInDescent: false,
   others: [],            // the others, while you are down there together
@@ -61,6 +62,7 @@ function describeBuildForLobby() {
 
 function initializeTogether() {
   wrapForTogether();
+  together.ownFigure = createFigure(FIGURE_PROPORTIONS_PLAYER, SURFACE_PLAYER, 'playerImprintSeconds');
   const tag = document.querySelector('meta[name="last-return-relay"]');
   const place = tag ? tag.content.trim() : '';
   if (place === '' || typeof WebSocket === 'undefined') return;
@@ -73,6 +75,7 @@ function initializeTogether() {
   } catch (error) {
     return; // not an address: no lobbies
   }
+  startUnseenTicks();
   const elements = interfaceState.elements;
   elements['together-options'].hidden = false;
   elements['button-host-lobby'].addEventListener('click', function () { openLobbySocket({ t: 'host', build: describeBuildForLobby() }); });
@@ -85,6 +88,26 @@ function initializeTogether() {
   elements['together-code'].addEventListener('keydown', function (event) { if (event.key === 'Enter') join(); });
   elements['button-leave-lobby'].addEventListener('click', function () { leaveLobby(''); });
   refreshTogetherControls();
+}
+
+// A browser stops drawing a tab that is hidden, and the game is run from its drawing. For the host of others
+// that would stop the station for everyone. So while the host's tab is hidden its station is run from here
+// instead: a worker keeps time (a hidden page's own timers are slowed to one a second or worse; a worker's are
+// not), and each tick runs what a frame would have run, without drawing it (runFrameUnseen, 11-game.js).
+// This does not help when the browser puts the whole tab to sleep, or the machine sleeps.
+function startUnseenTicks() {
+  if (typeof Worker === 'undefined' || typeof Blob === 'undefined') return;
+  try {
+    const worker = new Worker(URL.createObjectURL(new Blob(['setInterval(function () { postMessage(0); }, 33);'], { type: 'text/javascript' })));
+    let lastTick = performance.now();
+    worker.onmessage = function () {
+      const now = performance.now();
+      let seconds = Math.min(1, (now - lastTick) / 1000); // (if the ticks come late all the same, the station catches up in steps)
+      lastTick = now;
+      if (!document.hidden || !isWorldYoursToShare()) return;
+      while (seconds > 0.001) { const step = Math.min(0.05, seconds); runFrameUnseen(step); seconds -= step; }
+    };
+  } catch (error) { /* no workers here: a hidden host stops the station, as before */ }
 }
 
 function isLobbyHost() {
@@ -102,16 +125,25 @@ function refreshTogetherControls() {
   let status = together.statusText;
   begin.disabled = false;
   begin.textContent = 'Begin descent';
+  // In somebody else's lobby the station and the threat level are the host's to choose: you see them, and
+  // cannot change them.
+  const isHostsToChoose = isInLobby && !isLobbyHost();
+  for (const group of document.querySelectorAll('#screen-title .title-block fieldset')) if (group !== elements['together-options']) group.disabled = isHostsToChoose;
+  for (const control of elements['station-options'].querySelectorAll('select, input')) control.disabled = isHostsToChoose;
   if (isInLobby) {
     const count = together.memberIds.length + ' of 4 in the lobby. ';
-    if (isLobbyHost()) {
+    if (!isLobbyHost() && together.isRoundOn) {
+      begin.disabled = true;
+      begin.textContent = 'Waiting for the others';
+      status = count + (together.statusText ? together.statusText + ' ' : '') + 'The others are down there. You go down with them on the next descent.';
+    } else if (isLobbyHost()) {
       begin.textContent = 'Begin descent together';
       status = count + 'Give the others the code. When you begin, everyone goes down with you: into the station and the threat level chosen here, ' +
         'with one Hollow and one work order between you.';
     } else {
       begin.disabled = true;
       begin.textContent = 'Waiting for the host';
-      status = count + 'The host chooses the station and the threat level. When the host begins, you go down too.';
+      status = count + (together.statusText ? together.statusText + ' ' : '') + 'The host chooses the station and the threat level, shown above. When the host begins, you go down too.';
     }
   }
   elements['together-status'].textContent = status;
@@ -158,10 +190,25 @@ function leaveLobby(statusText) {
 // The lobby is over for you, whoever ended it. If you are down in the station you stay there, alone.
 function endLobby(statusText) {
   const wasInDescent = together.isInDescent;
+  endDescentTogether();
   together.code = ''; together.myId = 0; together.hostId = 0; together.memberIds = [];
-  together.hostMap = null;
+  together.isRoundOn = false;
+  if (together.ownChoices) {
+    // The title screen is yours again: back to what you had chosen yourself.
+    Object.assign(settings, together.ownChoices);
+    together.ownChoices = null;
+    refreshChoiceControls();
+  }
+  together.statusText = statusText;
+  refreshTogetherControls();
+  if (wasInDescent && statusText !== '' && game.mode !== 'title') showMessage(statusText + ' You are on your own now.', 7, 'warning');
+}
+
+// You are no longer down there with the others (you may still be down there, and still in the lobby).
+function endDescentTogether() {
   const wasTheHosts = isWorldTheHosts();
   together.isInDescent = false;
+  together.hostMap = null;
   for (const other of together.others) setFigureRaycastable(other.figure, false);
   together.others.length = 0;
   players.length = 0; players.push(player);
@@ -171,20 +218,64 @@ function endLobby(statusText) {
     cancelHollowCrawl(); hollow.doorBang = null; hollow.fieldTargetIndex = -1;
     setFigureRaycastable(hollow.figure, hollow.isActive);
   }
-  together.statusText = statusText;
-  refreshTogetherControls();
-  if (wasInDescent && statusText !== '' && game.mode !== 'title') showMessage(statusText + ' You are on your own now.', 7, 'warning');
 }
 
-// Going back up to the title screen ends it too (11-game.js calls this).
+// Going back up to the title screen (11-game.js calls this). You stay in the lobby, for the next descent. If
+// you are the host, the descent is over for everyone: the station was yours.
 function leaveDescentTogether() {
-  if (together.isInDescent) leaveLobby('');
+  if (!together.isInDescent) return;
+  if (isLobbyHost()) { together.isRoundOn = false; sayToOthers({ k: 'over' }); }
+  else sayToOthers({ k: 'gone' });
+  endDescentTogether();
+  refreshTogetherControls();
+}
+
+// ---- What the host has chosen on the title screen, for the others to see ----
+
+const LOBBY_CHOICES = ['station', 'stationSize', 'stationLayout', 'stationLevels', 'seedText', 'workOrders', 'difficulty', 'customDifficulty'];
+
+function refreshChoiceControls() {
+  interfaceState.refreshSettingControls();
+  interfaceState.refreshStationControls();
+  interfaceState.refreshDifficulty();
+}
+
+// As the host: said whenever a setting changes (saveSettings, 09-player.js), and to whoever joins. It also
+// says whether you are down there right now, which somebody who joins meanwhile has no other way to know.
+function tellLobbyWhatIsChosen() {
+  if (together.code === '' || !isLobbyHost()) return;
+  sayToOthers({ k: 'chosen', on: together.isInDescent ? 1 : 0, station: settings.station, stationSize: settings.stationSize, stationLayout: settings.stationLayout,
+    stationLevels: settings.stationLevels, seedText: settings.seedText, workOrders: getAllowedWorkOrders(), difficulty: settings.difficulty, customDifficulty: settings.customDifficulty });
+}
+
+// As anyone else: the title screen shows it. It comes from somebody else's browser, so it is checked; anything
+// that is not a choice this game has is left as it was.
+function hearLobbyChoices(data) {
+  const has = function (table, key) { return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key); };
+  if (!together.ownChoices) {
+    together.ownChoices = {};
+    for (const key of LOBBY_CHOICES) together.ownChoices[key] = settings[key];
+    together.ownChoices.workOrders = Object.assign({}, settings.workOrders);
+  }
+  if (data.station === 'classic' || data.station === 'generated') settings.station = data.station;
+  if (has(GENERATED_SIZE_PRESETS, data.stationSize)) settings.stationSize = data.stationSize;
+  if (has(GENERATED_LAYOUT_PRESETS, data.stationLayout)) settings.stationLayout = data.stationLayout;
+  if (has(GENERATED_LEVEL_PRESETS, data.stationLevels)) settings.stationLevels = data.stationLevels;
+  if (typeof data.seedText === 'string') settings.seedText = data.seedText.slice(0, 24);
+  if (Array.isArray(data.workOrders)) {
+    settings.workOrders = {};
+    for (const order of WORK_ORDERS) settings.workOrders[order.key] = data.workOrders.indexOf(order.key) >= 0;
+  }
+  if (data.difficulty === 'custom' || has(DIFFICULTY_PRESETS, data.difficulty)) settings.difficulty = data.difficulty;
+  settings.customDifficulty = sanitizeCustomDifficultyValues(data.customDifficulty);
+  together.isRoundOn = data.on === 1;
+  refreshChoiceControls();
+  refreshTogetherControls();
 }
 
 const LOBBY_REFUSALS = {
   unknown: 'There is no lobby with that code.',
   full: 'That lobby is full.',
-  started: 'That lobby has already gone down.',
   build: 'That lobby is on another version of the game. Reload the page, and ask the host to do the same.',
   busy: 'The server has no room for another lobby just now.'
 };
@@ -199,6 +290,7 @@ function hearRelay(message) {
     return;
   } else if (message.t === 'joined') {
     if (together.memberIds.indexOf(message.id) < 0) together.memberIds.push(message.id);
+    tellLobbyWhatIsChosen(); // as the host: so that their title screen shows it
   } else if (message.t === 'left') {
     together.memberIds = together.memberIds.filter(function (id) { return id !== message.id; });
     const other = findOtherPlayer(message.id);
@@ -214,7 +306,15 @@ function hearRelay(message) {
     // The host has begun, and takes everyone along.
     const descent = readSharedDescent(message.d);
     if (!descent) { leaveLobby('The host began a descent this game does not understand.'); return; }
-    if (game.mode !== 'title') { leaveLobby('The host began while you were not at the title screen.'); return; }
+    together.isRoundOn = true;
+    together.statusText = '';
+    if (game.mode === 'ending' || game.mode === 'dead') { stopVoiceLine(); silenceGameplaySounds(); } // still looking at how the last one ended
+    else if (game.mode !== 'title') {
+      // Somewhere else altogether (the workshop): this one goes without you.
+      together.statusText = 'The host began while you were not at the title screen.';
+      refreshTogetherControls();
+      return;
+    }
     beginDescentTogether(descent);
     // You did not click for this, so the browser may be holding the sound back until you do something.
     for (const eventName of ['pointerdown', 'keydown']) window.addEventListener(eventName, function () { suspendAudio(false); }, { once: true });
@@ -257,6 +357,7 @@ function beginFromTitle() {
     const orders = descent.workOrders.filter(function (key) { return key !== 'salvage'; });
     descent.workOrders = orders.length > 0 ? orders : WORK_ORDERS.map(function (order) { return order.key; }).filter(function (key) { return key !== 'salvage'; });
     sendToRelay({ t: 'start', d: descent });
+    together.isRoundOn = true;
     beginDescentTogether(descent);
   }
 }
@@ -299,7 +400,8 @@ function createOtherPlayer(id) {
     blend: 1,                                                  // how far from the one to the other: 0 to 1
     isCrouching: false,
     velocityX: 0, velocityZ: 0, audibleRadius: 0, // what the host's Hollow goes by, as they say it
-    isDown: false,      // caught, and not back on their feet: nothing hunts them
+    isDown: false,      // caught, and not back on their feet: nothing hunts them (the host's game keeps this)
+    isFallen: false,    // dead, as they say themselves: their body is gone and their scanner lies where they fell
     carried: {},        // what they carry for the quests (game.carried is yours)
     spreadDegrees: 0,   // how wide their scanner is firing, or 0 when it is not
     walkPhase: 0, stride: 0, armRaise: 0.1,
@@ -319,6 +421,28 @@ function hearOtherPlayer(id, data) {
     if (id === together.hostId && Number.isFinite(data.map)) { together.hostMap = data.map; compareStationWithHost(); }
     return;
   }
+  if (data.k === 'chosen') { if (id === together.hostId) hearLobbyChoices(data); return; }
+  if (data.k === 'over') {
+    // The host is back at the title screen. The station was the host's: the descent is over for everyone.
+    if (id !== together.hostId) return;
+    together.isRoundOn = false;
+    if (together.isInDescent && game.mode !== 'ending' && game.mode !== 'title') {
+      together.statusText = 'The host has gone back up, and the descent is over.';
+      returnToTitle();
+    } else endDescentTogether(); // looking at how it ended: go on looking
+    refreshTogetherControls();
+    return;
+  }
+  if (data.k === 'gone') {
+    // One of the others is back at the title screen. They are still in the lobby.
+    const gone = findOtherPlayer(id);
+    if (gone) {
+      setFigureRaycastable(gone.figure, false);
+      together.others.splice(together.others.indexOf(gone), 1);
+      if (together.isInDescent && game.mode !== 'title') showMessage('One of the others has gone back up.', 5, 'info');
+    }
+    return;
+  }
   if (!together.isInDescent) return;
   if (data.k !== 'at') { hearOfTheStation(id, data); return; }
   const other = findOtherPlayer(id);
@@ -333,13 +457,15 @@ function hearOtherPlayer(id, data) {
   other.blend = 0;
   other.isCrouching = data.c === 1;
   other.spreadDegrees = clampNumber(data.s, 0, 60);
+  if (other.hasBeenHeardFrom && (data.d === 1) !== other.isFallen) setFigureRaycastable(other.figure, data.d !== 1);
+  other.isFallen = data.d === 1;
   if (!other.hasBeenHeardFrom) {
     // The first word from them: they are simply there, not on their way from nowhere.
     other.hasBeenHeardFrom = true;
     other.blend = 1;
     other.x = other.toX; other.z = other.toZ; other.eyeY = other.toEyeY; other.yaw = other.toYaw; other.pitch = other.toPitch;
     placeOtherPlayerFigure(other, 0);
-    setFigureRaycastable(other.figure, true);
+    setFigureRaycastable(other.figure, !other.isFallen);
   }
 }
 
@@ -350,7 +476,7 @@ function sayWhereYouAre() {
   if (game.mode === 'playing' && player.isPainting) spreadDegrees = player.spreadDegrees;
   else if (game.mode === 'playing' && player.sweepTimeRemaining > 0) spreadDegrees = TUNING.sweepHalfWidthDegrees;
   sayToOthers({ k: 'at', x: round(player.x), z: round(player.z), e: round(getPlayerEyeY()), w: round(player.yaw), p: round(player.pitch),
-    c: player.isCrouching ? 1 : 0, s: round(spreadDegrees),
+    c: player.isCrouching ? 1 : 0, s: round(spreadDegrees), d: game.mode === 'dying' || game.mode === 'dead' ? 1 : 0,
     vx: round(player.velocityX), vz: round(player.velocityZ), r: round(game.mode === 'playing' ? player.audibleRadius : 0) });
 }
 
@@ -361,10 +487,13 @@ function placeOtherPlayerFigure(other, movedDistance) {
   figure.x = other.x; figure.z = other.z; figure.yaw = other.yaw;
   other.walkPhase += movedDistance * 6;
   pose.legSwing = Math.sin(other.walkPhase) * 0.5 * other.stride;
-  pose.armSwing = Math.sin(other.walkPhase) * 0.2 * other.stride * (1 - Math.min(1, other.armRaise));
+  pose.armSwing = Math.sin(other.walkPhase) * 0.2 * other.stride;
   pose.kneeBend = other.isCrouching ? 1.2 : 0.05;
   pose.lean = other.isCrouching ? 0.5 : 0.04;
-  pose.armRaise = other.armRaise; // the scanner arm comes up while they scan (a dummy has no way to raise only one)
+  // The scanner arm (04-figures.js): at their side with the elbow bent while they only carry it, held out while
+  // they scan. Either way the forearm, and the scanner with it, points where they look.
+  pose.armRaise = other.armRaise;
+  pose.elbowBend = clampNumber(1.5 + other.pitch - other.armRaise - pose.lean * 0.4, 0, 2.2);
   updateFigureCapsules(figure);
 }
 
@@ -379,15 +508,40 @@ function advanceOtherPlayer(other, dt) {
   other.pitch = interpolateLinear(other.fromPitch, other.toPitch, other.blend);
   const movedDistance = distanceBetweenPoints(previousX, previousZ, other.x, other.z);
   other.stride = approachValue(other.stride, movedDistance > dt * 0.3 ? 1 : 0, dt * 6);
-  other.armRaise = approachValue(other.armRaise, other.spreadDegrees > 0 ? 1.2 : 0.1, dt * 5);
+  other.armRaise = approachValue(other.armRaise, other.spreadDegrees > 0 ? 1.1 : 0.2, dt * 5); // TWEAK: scanner arm held out, and at their side
   placeOtherPlayerFigure(other, movedDistance);
 }
 
-// What another scanner lights up is lit here too. Nothing is sent for it: this browser fires pulses of its
-// own from where their scanner is, the way it points, and fewer of them than they fire themselves.
+// The light on top of a scanner is the one thing down there that is simply lit: you see it without scanning,
+// unless something is in the way. On their feet it is in their hand. Dead, their body is gone and the scanner
+// lies where they fell, still lit.
+const scannerLight = { x: 0, y: 0, z: 0 };
+function showScannerLight(other) {
+  if (!other.hasBeenHeardFrom) return;
+  if (other.isFallen) { scannerLight.x = other.x; scannerLight.z = other.z; scannerLight.y = getFloorHeightAt(other.x, other.z) + 0.1; }
+  else getFigureScannerLight(other.figure, scannerLight);
+  // A few points that last a quarter of a second, put down again every frame. They are not returns of anything.
+  for (let count = 0; count < 3; count++) {
+    addScanPoint(scannerLight.x + (Math.random() - 0.5) * 0.03, scannerLight.y + (Math.random() - 0.5) * 0.02, scannerLight.z + (Math.random() - 0.5) * 0.03,
+      1, SURFACE_SCANNER_LIGHT, 1, true);
+  }
+  pointCloud.totalReturns -= 3;
+}
+
+// One of the others, for one frame: where they are now, their light, and what their scanner shows.
+// (Debug mode's walking player goes through here too: src/dev/10-debug.js.)
+function presentOtherPlayer(other, dt, isScannerShown) {
+  advanceOtherPlayer(other, dt);
+  if (game.mode !== 'intro') showScannerLight(other);
+  if (isScannerShown && !other.isFallen) echoOtherScanner(other, dt);
+}
+
+// What another scanner lights up is lit here too, as much of it as they see themselves. Nothing is sent for it:
+// this browser fires pulses of its own from where their scanner is, the way it points. Your own body is in the
+// way of them, as theirs is in the way of yours: nothing is lit behind you, and nothing is drawn on you.
 function echoOtherScanner(other, dt) {
   if (!other.hasBeenHeardFrom || other.spreadDegrees <= 0) { other.rayBudget = 0; return; }
-  other.rayBudget += QUALITY_PRESETS[settings.quality].raysPerSecond * (isLobbyHost() ? 1 : TOGETHER_ECHO_RAY_SHARE) * dt;
+  other.rayBudget += QUALITY_PRESETS[settings.quality].raysPerSecond * dt;
   const rayCount = Math.min(700, Math.floor(other.rayBudget));
   other.rayBudget -= rayCount;
   const cosinePitch = Math.cos(other.pitch), sinePitch = Math.sin(other.pitch), cosineYaw = Math.cos(other.yaw), sineYaw = Math.sin(other.yaw);
@@ -396,6 +550,9 @@ function echoOtherScanner(other, dt) {
   const upX = -sineYaw * sinePitch, upY = cosinePitch, upZ = cosineYaw * sinePitch;
   const spreadTangent = Math.tan(other.spreadDegrees * DEGREES_TO_RADIANS);
   setFigureRaycastable(other.figure, false); // their light starts inside their own head: it is not in its own way
+  const ownBody = together.ownFigure, isOwnBodyThere = game.mode === 'playing' || game.mode === 'paused' || game.mode === 'reading';
+  if (isOwnBodyThere) setFigureRaycastable(ownBody, true);
+  scanSource.x = other.x; scanSource.z = other.z;
   for (let rayIndex = 0; rayIndex < rayCount; rayIndex++) {
     const radius = Math.pow(Math.random(), 0.62) * spreadTangent, angle = Math.random() * TWO_PI;
     const horizontal = Math.cos(angle) * radius, vertical = Math.sin(angle) * radius;
@@ -403,9 +560,21 @@ function echoOtherScanner(other, dt) {
     const directionY = forwardY + upY * vertical;
     const directionZ = forwardZ + rightZ * horizontal + upZ * vertical;
     const length = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ);
-    fireScanPulse(other.x, other.eyeY, other.z, directionX / length, directionY / length, directionZ / length, false);
+    if (castScannerRay(other.x, other.eyeY, other.z, directionX / length, directionY / length, directionZ / length, TUNING.scannerMaximumRange) &&
+        rayHit.figure !== ownBody) recordScanHit(false);
   }
+  setFigureRaycastable(ownBody, false);
   setFigureRaycastable(other.figure, true);
+}
+
+// Your own body, where you stand. Nobody sees it here; it is what the others' scanners cannot reach past.
+function placeOwnBody() {
+  const figure = together.ownFigure;
+  figure.x = player.x; figure.z = player.z; figure.yaw = player.yaw;
+  figure.pose.kneeBend = player.isCrouching ? 1.2 : 0.05;
+  figure.pose.lean = player.isCrouching ? 0.5 : 0.04;
+  figure.pose.armRaise = 0.2; figure.pose.elbowBend = 1.2;
+  updateFigureCapsules(figure);
 }
 
 // Every frame, whatever the game is doing (11-game.js calls this).
@@ -416,9 +585,9 @@ function updateTogether(dt) {
     together.sendTimer = Math.max(together.sendTimer + 1 / TOGETHER_SENDS_PER_SECOND, 0);
     sayWhereYouAre();
   }
+  placeOwnBody();
   for (const other of together.others) {
-    advanceOtherPlayer(other, dt);
-    if (game.mode === 'playing' || (isLobbyHost() && game.mode !== 'intro')) echoOtherScanner(other, dt); // the host's creatures feel it whatever the host is doing
+    presentOtherPlayer(other, dt, game.mode === 'playing' || (isLobbyHost() && game.mode !== 'intro')); // the host's creatures feel their light whatever the host is doing
   }
   if (isLobbyHost()) {
     // Who is on their feet down here, for what hunts and what opens. (Never nobody: with everyone down it is you.)

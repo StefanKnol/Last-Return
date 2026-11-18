@@ -14,8 +14,9 @@
 //
 // What a browser says to the server, and what it hears back (one JSON object per message):
 //   { t: 'host', build }          ->  { t: 'lobby', code, you, host, players }
-//   { t: 'join', code, build }    ->  the same, or { t: 'refused', why: 'unknown' | 'full' | 'started' | 'build' | 'busy' }
-//   { t: 'start', d }             the host only, once: nobody can join after it. The others hear { t: 'start', d }.
+//   { t: 'join', code, build }    ->  the same, or { t: 'refused', why: 'unknown' | 'full' | 'build' | 'busy' }
+//   { t: 'start', d }             the host only: the others hear { t: 'start', d }. (A lobby goes down as often as it likes,
+//                                 and can be joined while it is down: whoever joins waits for the next descent.)
 //   { t: 'say', d }               the others hear { t: 'said', from, d }
 // and what it hears when the others come and go:
 //   { t: 'joined', id }   { t: 'left', id }   { t: 'closed' } (the host has gone, and the lobby with them)
@@ -57,7 +58,7 @@ function fillInPage(page, serverName, hasLobbies) {
 // there are, by code) and `close`. `startServer` below uses it, and so does the dev server, so that
 // `npm run dev` has lobbies too.
 function keepLobbies(server) {
-  const lobbies = new Map(); // by code: { code, build, hostId, isStarted, nextId, members: Map of id -> socket }
+  const lobbies = new Map(); // by code: { code, build, hostId, nextId, members: Map of id -> socket }
 
   const send = function (socket, message) {
     if (socket.readyState === socket.OPEN) socket.send(typeof message === 'string' ? message : JSON.stringify(message));
@@ -101,20 +102,18 @@ function keepLobbies(server) {
     const lobby = socket.lobby;
     if (message.t === 'host' && !lobby) {
       if (lobbies.size >= MAXIMUM_LOBBIES) { send(socket, { t: 'refused', why: 'busy' }); return; }
-      const opened = { code: makeCode(), build: String(message.build).slice(0, 80), hostId: 1, isStarted: false, nextId: 1, members: new Map() };
+      const opened = { code: makeCode(), build: String(message.build).slice(0, 80), hostId: 1, nextId: 1, members: new Map() };
       lobbies.set(opened.code, opened);
       enterLobby(opened, socket);
     } else if (message.t === 'join' && !lobby) {
       const wanted = lobbies.get(String(message.code).toUpperCase());
       let why = '';
       if (!wanted) why = 'unknown';
-      else if (wanted.isStarted) why = 'started';
       else if (wanted.members.size >= MAXIMUM_PLAYERS) why = 'full';
       else if (wanted.build !== String(message.build).slice(0, 80)) why = 'build';
       if (why) send(socket, { t: 'refused', why: why });
       else enterLobby(wanted, socket);
-    } else if (message.t === 'start' && lobby && socket.playerId === lobby.hostId && !lobby.isStarted) {
-      lobby.isStarted = true;
+    } else if (message.t === 'start' && lobby && socket.playerId === lobby.hostId) {
       sendToOthers(socket, { t: 'start', d: message.d });
     } else if (message.t === 'say' && lobby) {
       sendToOthers(socket, { t: 'said', from: socket.playerId, d: message.d });

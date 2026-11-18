@@ -133,7 +133,10 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  try { window.localStorage.setItem('last-return-settings', JSON.stringify(settings)); } catch (error) { /* storage is optional */ }
+  // In somebody else's lobby the title screen shows what the host has chosen. What is kept is what you chose yourself.
+  const kept = together.ownChoices ? Object.assign({}, settings, together.ownChoices) : settings;
+  try { window.localStorage.setItem('last-return-settings', JSON.stringify(kept)); } catch (error) { /* storage is optional */ }
+  tellLobbyWhatIsChosen(); // as the host of a lobby: the others see it change (11-together.js)
 }
 
 // Where the eyes (and so the camera and the scanner) are, measured from the lift's floor level.
