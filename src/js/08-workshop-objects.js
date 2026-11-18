@@ -32,7 +32,7 @@ const DESIGNED_OBJECT_FIELDS = [
   numberField('loud', 'How far its knocks carry for its weight (1 is ordinary; over 1 it shows in the warning colour)', 1, 0.3, 2.5, 0.1),
   choiceField('lies', 'How a station puts it out', 'upright', [['upright', 'Upright, as its parts are given'], ['onItsSide', 'On its side (a quarter turn over)'], ['either', 'Either']]),
   booleanField('bulky', 'Bulky: you cannot run with it', false),
-  numberField('bounce', 'Bounce: how much of its speed it keeps (a glass jar 0.2, a steel pipe 0.35)', 0.25, 0, 0.8, 0.05),
+  numberField('bounce', 'Bounce: how much of its speed it keeps (a glass jar 0.2, a steel pipe 0.35)', 0.25, 0, 1, 0.05),
   numberField('grip', 'Grip: low slides like a puck, high stops and tips over', 0.5, 0, 1, 0.05)
 ];
 // Where a generated station has it lying about, and how often among its sort: 0 is never. These are the weights

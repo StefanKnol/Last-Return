@@ -10,7 +10,7 @@
   "bulky": false,
   "bounce": 0.2,
   "grip": 0.4,
-  "asLitter": 3,
+  "asLitter": 0,
   "onTheFloor": 2,
   "onASurface": 1,
   "parts": [

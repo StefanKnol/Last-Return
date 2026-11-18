@@ -203,20 +203,25 @@ function check(description, condition, detail) {
   const asBefore = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, result = {};
     const before = {
-      // The maps: read off when the fire extinguisher got its horn, and a thing that would not stay as `lies` says
-      // came to be put down as it really lies (getLooseRestOrientation). That changed how every fire extinguisher
-      // is turned, once, and nothing else: no other thing, and none of them moved. Before that they were read off
-      // when the map and the quests were taken apart. The quests: read off when a descent came
+      // The maps: read off when the kinds in src/objects/ were last changed: a ball and a carry crate came to stand
+      // on the floor, and the fire extinguisher stopped being litter. That changes what lies loose in every station,
+      // and nothing of the station itself. (It moved one quest's thing by a tile as well, in the large station:
+      // the quests are laid out after the map, round what lies there.) Before that: when the gas canister became a
+      // file. A kind from a file comes after the kinds written as code in a station's table of what stands on the
+      // floor, and the canister had been the first: so the same draw gives another thing.
+      // Before that: when the fire extinguisher got its horn and its flat bottom, and a thing that would not stay
+      // as `lies` says came to be put down as it really lies (getLooseRestOrientation); and when the map and the
+      // quests were taken apart. The quests: read off when a descent came
       // to have one work order instead of a mixed bag (two Survey orders with a complication each, and a Restart
       // order), which changed what every station asks for, once, and nothing of any map.
       // Until the two were taken apart the first four quests drew their
       // numbers from the station's own sequence, so taking them out of it changed the furniture, the quests and
       // what lies about in every generated station, once. The rooms, corridors, doors and vents did not change.
-      'medium 9 mixed one': { map: 3245303345,
+      'medium 9 mixed one': { map: 582735700,
         quests: '3:63.7:42 4:95:83.5 5:130.55:65.5 14:60.5:88.5' },
-      'large 7 sparse one': { map: 386066987,
-        quests: '3:85.4:41.7 4:40:73.5 5:143.5:81.55 13:121.5:45.5 50:100.5:43.5' },
-      'massive 12 tight two': { map: 3150654492,
+      'large 7 sparse one': { map: 2935394273,
+        quests: '3:85.4:41.7 4:40:73.5 5:143.5:81.55 13:120.5:45.5 50:100.5:43.5' },
+      'massive 12 tight two': { map: 3022777991,
         quests: '3:107.2:53.4 4:82.5:14 5:37.45:108.5 13:94.5:48.5 14:106.5:9.5 20:55.5:72.5 21:81.5:51.5 180:61.5:91.5 181:90.5:42.5' }
     };
     for (const name in before) {
@@ -380,7 +385,8 @@ function check(description, condition, detail) {
     result.secondMeanwhile = { state: state.bays[1].state, said: /bay 1 is still open\. One at a time/.test(lab.messages()) };
 
     // What it wants carried in, with you standing in it: it counts, and the door stays up.
-    const dearestFirst = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
+    // (Nothing of glass: the third thing is let go of a metre up, on top of the first, and a jar does not survive that.)
+    const dearestFirst = d.looseObjects.filter((object) => !object.kind.shattersAt).sort((a, b) => b.kind.value - a.kind.value);
     const isAlongX = bay.maximumX - bay.minimumX > 1;
     let carried = 0;
     for (const object of dearestFirst) {

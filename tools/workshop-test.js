@@ -338,7 +338,7 @@ function checkSourcePatching() {
     });
     const objectOpened = await objectState();
     check('the object tool opens on a kind written as code, hanging at rest over the bench',
-      objectOpened.key === 'canister' && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
+      objectOpened.key === 'jar' && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
 
     await page.click('#workshop-new-object');
     await page.selectOption('#workshop-add-shape', 'capsule');

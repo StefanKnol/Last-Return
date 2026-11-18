@@ -432,7 +432,7 @@ function updatePlayerMovement(dt) {
 
   // Under a ceiling too low to stand under (a vent), you are down whether you hold the key or not.
   const isInVent = (getTileFlagsAtPosition(player.x, player.z) & TILE_FLAG_VENT) !== 0;
-  const hasNoRoomToStand = getHeadroomAt(player.x, player.z) < 1.75;
+  const hasNoRoomToStand = getHeadroomAt(player.x, player.z) < TUNING.playerHeight + 0.05;
   player.isCrouching = keys.has('KeyC') || input.touchCrouch || hasNoRoomToStand;
   player.isInVent = isInVent;
   const wantsSprint = (keys.has('ShiftLeft') || keys.has('ShiftRight') || input.touchSprint) && !player.isCrouching && canSprintWhileCarrying();
@@ -468,7 +468,7 @@ function updatePlayerMovement(dt) {
 
   const previousX = player.x, previousZ = player.z;
   const resolved = resolveBodyCollision(player.x + player.velocityX * dt, player.z + player.velocityZ * dt,
-    TUNING.playerRadius, player.isCrouching ? 1.0 : 1.7, getFloorHeightAt(player.x, player.z));
+    TUNING.playerRadius, player.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight, getFloorHeightAt(player.x, player.z));
   player.x = resolved.x; player.z = resolved.z;
   // Follow the floor. Stairs are taken smoothly; anything bigger (a teleport, a checkpoint) lands at once.
   // TWEAK: 2.5 = how fast the view rises and falls on stairs, in metres per second. Lower feels floatier.

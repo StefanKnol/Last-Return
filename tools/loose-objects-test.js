@@ -180,14 +180,16 @@ function installLab() {
   const { browser, page, problems } = await openGame({ dev: true });
   const inGame = (callback, argument) => page.evaluate(callback, argument);
   await startGame(page, false);
-  // Two kinds that only this suite has, so that every check below that is made of every kind is made of a
-  // cylinder and of a cone as well: no kind of the game's own has one yet.
+  // Three kinds that only this suite has, so that every check below that is made of every kind is made of a
+  // cylinder and of a cone as well (no kind of the game's own has one yet), and of something made to bounce.
   await inGame(() => {
     const kinds = window.lastReturnDebug.looseObjectKinds;
     kinds.testDrum = { label: 'test drum', mass: 5, value: 10, fragile: 0.3, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.25, grip: 0.5,
       parts: [{ shape: 'cylinder', from: [0, -0.15, 0], to: [0, 0.15, 0], radius: 0.12 }] };
     kinds.testCone = { label: 'test cone', mass: 2.5, value: 10, fragile: 0.3, material: 'case', loud: 1, lies: 'either', bulky: false, bounce: 0.2, grip: 0.6,
       parts: [{ shape: 'cone', from: [0, -0.15, 0], to: [0, 0.3, 0], radius: 0.15 }] };
+    kinds.testBall = { label: 'test ball', mass: 1.5, value: 8, fragile: 0, material: 'card', loud: 1, lies: 'either', bulky: false, bounce: 0.95, grip: 0.25,
+      parts: [{ shape: 'ball', center: [0, 0, 0], radius: 0.25 }] };
   });
   await inGame(installLab);
   await inGame(() => window.looseLab.setBreakable(false));
@@ -231,26 +233,36 @@ function installLab() {
       d.clearLooseObjects();
       const before = lab.knocks();
       const object = d.createLooseObject(kindKey, spot.x, 1.3, spot.z, 0.4);
-      let lowest = 99, asleepAfter = -1, leftTheOpen = false;
-      for (let step = 0; step < 150; step++) {
+      // Something made to bounce (a ball: nothing else keeps more than 0.35 of its speed) is given twice as long.
+      const isMadeToBounce = object.kind.bounce > 0.8;
+      let lowest = 99, asleepAfter = -1, leftTheOpen = false, wasRising = false, heightBefore = object.y;
+      const tops = []; // how high it was each time it came up again and turned
+      for (let step = 0; step < (isMadeToBounce ? 300 : 150); step++) {
         d.simulate(1 / 30);
         lowest = Math.min(lowest, object.y);
         if (!lab.isInTheOpen(object.x, object.y, object.z)) leftTheOpen = true;
         if (object.isAsleep && asleepAfter < 0) asleepAfter = lab.round((step + 1) / 30);
+        if (wasRising && object.y < heightBefore) tops.push(heightBefore);
+        wasRising = object.y > heightBefore; heightBefore = object.y;
       }
+      const bounces = tops.filter((top) => top > object.y + 0.02); // (not the last tremble before it lies still)
       result[kindKey] = { restsAt: lab.round(object.y), lowest: lab.round(lowest), asleepAfter: asleepAfter, drifted: lab.round(Math.hypot(object.x - spot.x, object.z - spot.z)),
-        leftTheOpen: leftTheOpen, knocks: lab.since(before), reach: lab.round(object.prepared.boundsRadius), smallest: lab.round(object.prepared.smallestRadius) };
+        leftTheOpen: leftTheOpen, knocks: lab.since(before), reach: lab.round(object.prepared.boundsRadius), smallest: lab.round(object.prepared.smallestRadius),
+        isMadeToBounce: isMadeToBounce, bounces: bounces.length, eachBounceLower: bounces.every((top, index) => index === 0 || top < bounces[index - 1]) };
     }
     return result;
   }, spot);
-  // (Five seconds, because a thing with a part that sticks out lands, falls over and then rolls onto that part:
-  // the fire extinguisher with its horn takes just over four. Everything else is at rest within two.)
   const badDrops = Object.keys(drops).filter((key) => {
     const drop = drops[key];
-    return drop.asleepAfter < 0 || drop.asleepAfter > 5 || drop.leftTheOpen || drop.lowest < drop.smallest - 0.02 || drop.restsAt > drop.reach + 0.01 ||
-      drop.drifted > 1.2 || drop.knocks.heard < 1 || drop.knocks.heard > 4;
+    // What is made to bounce has ten seconds, and is heard once for every time it comes down hard enough.
+    return drop.asleepAfter < 0 || drop.asleepAfter > (drop.isMadeToBounce ? 10 : 4) || drop.leftTheOpen || drop.lowest < drop.smallest - 0.02 || drop.restsAt > drop.reach + 0.01 ||
+      drop.drifted > 1.2 || drop.knocks.heard < 1 || drop.knocks.heard > (drop.isMadeToBounce ? 12 : 4);
   });
-  check('dropped from chest height, every kind lands, stays above the floor, comes to rest within five seconds and is heard one to four times', badDrops.length === 0, drops);
+  check('dropped from chest height, every kind lands, stays above the floor, comes to rest within four seconds and is heard one to four times (ten seconds, and up to twelve times, for what is made to bounce)',
+    badDrops.length === 0, drops);
+  check('a ball that is made to bounce does: it comes up again at least five times, each time lower than the last, and nothing else comes up more than twice',
+    drops.testBall.bounces >= 5 && drops.testBall.eachBounceLower && Object.keys(drops).every((key) => drops[key].isMadeToBounce || drops[key].bounces <= 2),
+    Object.keys(drops).map((key) => key + ': ' + drops[key].bounces));
   check('a crate dropped flat lands flat (22 cm from its middle to the floor)', Math.abs(drops.crate.restsAt - 0.22) < 0.012, drops.crate.restsAt);
 
   // --- cylinders and cones ---
@@ -913,9 +925,18 @@ function installLab() {
     result.dropped = describe();
     result.dropped.settledAfter = settledAfter;
     result.dropped.milliseconds = Math.round(performance.now() - started);
-    // Something is lying on something: take the lowest thing away and what was on it comes down.
-    const lowest = d.looseObjects.slice().sort((a, b) => a.y - b.y)[0];
-    const above = d.looseObjects.filter((object) => object !== lowest && object.y > lowest.y + 0.05 && Math.hypot(object.x - lowest.x, object.z - lowest.z) < 0.5);
+    // Something is lying on something: take the thing underneath away and what was on it comes down. Of all the
+    // things that have another one over them (higher, and within a hand's breadth of straight above), the one
+    // that has it most squarely over it: that one is certainly lying on it, however the heap fell this time.
+    let lowest = null, nearestOver = 0.2;
+    for (const under of d.looseObjects) {
+      for (const over of d.looseObjects) {
+        const aside = Math.hypot(over.x - under.x, over.z - under.z);
+        if (over !== under && over.y > under.y + 0.05 && aside < nearestOver) { nearestOver = aside; lowest = under; }
+      }
+    }
+    if (!lowest) lowest = d.looseObjects.slice().sort((a, b) => a.y - b.y)[0];
+    const above = d.looseObjects.filter((object) => object !== lowest && object.y > lowest.y + 0.05 && Math.hypot(object.x - lowest.x, object.z - lowest.z) <= nearestOver);
     result.somethingOnTop = above.length;
     const heights = above.map((object) => object.y);
     d.removeLooseObject(lowest);
@@ -930,7 +951,7 @@ function installLab() {
   check('ten things dropped onto one spot make a heap that comes to rest, with nothing through the floor and nothing lost',
     pile.dropped.atRest === pile.dropped.of && pile.dropped.settledAfter >= 0 && pile.dropped.settledAfter <= 8 && pile.dropped.lowest > 0.02 &&
     pile.dropped.highest > 0.3 && pile.dropped.widest < 3 && pile.dropped.allInTheOpen && pile.dropped.allNumbers && pile.putBack === 0, pile.dropped);
-  check('take the lowest thing out of the heap and what lay on it wakes, comes down and comes to rest again',
+  check('take a thing out from under another in the heap and what lay on it wakes, comes down and comes to rest again',
     pile.somethingOnTop >= 1 && pile.wokeWhenItWent && pile.cameDown && pile.afterwards.atRest === pile.afterwards.of && pile.afterwards.allInTheOpen, pile);
 
   // --- a door ---
@@ -988,9 +1009,13 @@ function installLab() {
       for (let batch = 0; batch < 4; batch++) {
         d.clearLooseObjects();
         for (let index = 0; index < 30; index++) {
-          const place = places[Math.floor(chance() * places.length)];
+          let place = places[Math.floor(chance() * places.length)];
+          const kindKey = kinds[Math.floor(chance() * kinds.length)];
+          // Something too big to be in a vent at all (a vent cover is bigger than the vent it covers) is not started
+          // off inside one: that is not throwing it, and it is squeezed into the rock there. It gets another place.
+          while (d.isVentAt(place[0], place[1]) && d.looseObjectKinds[kindKey].prepared.boundsRadius > 0.7) place = places[Math.floor(chance() * places.length)];
           const floor = d.getFloorHeightAt(place[0], place[1]);
-          const object = d.createLooseObject(kinds[Math.floor(chance() * kinds.length)], place[0], floor + 0.7 + chance() * 0.6, place[1], chance() * 6);
+          const object = d.createLooseObject(kindKey, place[0], floor + 0.7 + chance() * 0.6, place[1], chance() * 6);
           d.setLooseObjectOrientation(object, chance() - 0.5, chance() - 0.5, chance() - 0.5, chance() - 0.5);
           const speed = 2 + chance() * 11, heading = chance() * Math.PI * 2, climb = (chance() - 0.5) * 2;
           object.velocityX = Math.cos(heading) * speed; object.velocityZ = Math.sin(heading) * speed; object.velocityY = climb * speed * 0.6;

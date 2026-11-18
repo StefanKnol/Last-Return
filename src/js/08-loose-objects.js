@@ -49,10 +49,6 @@
 // Where it hangs is the same for all of them: straight out from the scanner's lens, `looseHoldDistance` (in
 // 00-config.js) beyond its own size. How much of the beam it takes follows from how big it is.
 const LOOSE_OBJECT_KINDS = {
-  canister: {
-    label: 'gas canister', mass: 3, value: 25, fragile: 0.5, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.3, grip: 0.5,
-    parts: [{ shape: 'capsule', from: [0, -0.13, 0], to: [0, 0.13, 0], radius: 0.07 }]
-  },
   jar: {
     label: 'sample jar', mass: 0.8, value: 60, fragile: 1, shattersAt: 3.4, material: 'glass', loud: 1, lies: 'upright', bulky: false, bounce: 0.2, grip: 0.45,
     parts: [{ shape: 'capsule', from: [0, -0.05, 0], to: [0, 0.05, 0], radius: 0.06 }]
@@ -86,7 +82,10 @@ const LOOSE_OBJECT_KINDS = {
   // Nothing puts one in a station: one lies where somebody fell.
   scanner: {
     label: 'scanner', mass: 1.4, value: 0, material: 'case', loud: 1, lies: 'either', bulky: false, bounce: 0.15, grip: 0.6,
-    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.16, 0.05, 0.05] }]
+    parts: [
+      { shape: 'box', center: [0, 0, 0], half: [0.16, 0.05, 0.05] },
+      { shape: 'capsule', from: [0.22,-0.215,0], to: [0.155,0, 0], radius: 0.05 },
+    ]
   },
   // ---- litter: what lies about a station that nobody has swept in forty years ----
   // An empty can. Six of them lie wherever the noisy floor's draw says "cans" (03-noisy-floor.js). Kicked at a
@@ -511,7 +510,7 @@ function removeLooseObject(object) {
 // What somebody is carrying is in nobody's way, as what you carry is not in yours.
 function pushBackFromAnothersThings() {
   if (!isWorldShared() || game.mode !== 'playing') return;
-  const top = player.floorY + (player.isCrouching ? 1.0 : 1.7);
+  const top = player.floorY + (player.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight);
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
     const object = looseObjects[objectIndex];
     if (object.heldById || !isLooseObjectAnothers(object)) continue;
@@ -949,6 +948,10 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
   const firstTileX = Math.floor(positionX - radius), lastTileX = Math.floor(positionX + radius);
   const firstTileZ = Math.floor(positionZ - radius), lastTileZ = Math.floor(positionZ + radius);
   const stamp = ++collisionStampCounter;
+  // The floor the ball itself is over (none if that is rock). The line between two tiles of one floor is not an
+  // edge: see below.
+  const ownTileX = Math.floor(positionX), ownTileZ = Math.floor(positionZ);
+  const ownFloorHeight = isInsideGrid(ownTileX, ownTileZ) && tileIsOpen[ownTileZ * GRID_WIDTH + ownTileX] === 1 ? tileFloorHeight[ownTileZ * GRID_WIDTH + ownTileX] : -Infinity;
   for (let tileZ = firstTileZ; tileZ <= lastTileZ; tileZ++) {
     for (let tileX = firstTileX; tileX <= lastTileX; tileX++) {
       const nearestX = clampNumber(positionX, tileX, tileX + 1), nearestZ = clampNumber(positionZ, tileZ, tileZ + 1);
@@ -967,10 +970,15 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
       const floorHeight = tileFloorHeight[index], ceilingHeight = tileCeilingHeight[index];
       if (positionY - radius < floorHeight) {
         if (positionY >= floorHeight) {
-          // Above this floor and close to it: flat on it, or over the edge of a step.
+          // Above this floor and close to it: flat on it, or over the edge of a step. It is only the edge of a
+          // step if this floor is higher than the one the ball is over. Where the two are one floor the ball is
+          // flat on its own tile, and a push from the "edge" of the next would be a push sideways from a line
+          // that is not there: it set a pipe whose end lay just short of such a line rolling by itself.
           const deltaY = positionY - floorHeight;
           const distanceSquared = acrossSquared + deltaY * deltaY;
-          if (distanceSquared < radius * radius) {
+          if (isBeside && floorHeight <= ownFloorHeight + 0.001) {
+            // (nothing: the tile the ball is over has it)
+          } else if (distanceSquared < radius * radius) {
             const distance = Math.sqrt(distanceSquared);
             if (distance > 1e-6) addLooseContact(deltaX / distance, deltaY / distance, deltaZ / distance, radius - distance);
             else addLooseContact(0, 1, 0, radius);
@@ -1044,7 +1052,7 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
   // height is only in your way where it stands higher than that: the part of it below is walked over.
   const stepOverHeight = object.kind.stepOverHeight || 0;
   if (!object.isHeld && game.mode === 'playing') {
-    addLooseContactWithWalker(true, getLooseShoveResistance(object.kind.mass), player.x, player.z, TUNING.playerRadius, player.floorY + stepOverHeight, player.floorY + (player.isCrouching ? 1.0 : 1.7),
+    addLooseContactWithWalker(true, getLooseShoveResistance(object.kind.mass), player.x, player.z, TUNING.playerRadius, player.floorY + stepOverHeight, player.floorY + (player.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight),
       looseState.playerStrideX, looseState.playerStrideZ, positionX, positionY, positionZ, radius);
   }
   // The others who are down here walk into things as you do. (What gives way to them is moved here; what they
@@ -1052,7 +1060,7 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
   for (let index = 1; index < players.length; index++) {
     const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
     if (one === player || object.heldById === one.id) continue;
-    addLooseContactWithWalker(false, getLooseShoveResistance(object.kind.mass), one.x, one.z, TUNING.playerRadius, floorY + stepOverHeight, floorY + (one.isCrouching ? 1.0 : 1.7),
+    addLooseContactWithWalker(false, getLooseShoveResistance(object.kind.mass), one.x, one.z, TUNING.playerRadius, floorY + stepOverHeight, floorY + (one.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight),
       one.velocityX, one.velocityZ, positionX, positionY, positionZ, radius);
   }
   if (hollow.isActive && !isWorldTheHosts()) {
@@ -1745,7 +1753,8 @@ function findLooseObjectInFocus(eyeX, eyeY, eyeZ, betterThan) {
 const stationLooseObjects = []; // { kindKey, x, y, z, orientation: [x, y, z, w], on: 'floor' | 'surface' }
 
 // TWEAK: how a thing that is put down is judged to stay as it is.
-const LOOSE_REST_BALANCE_METRES = 0.002; // its weight is this near to being over what it stands on: it stays. (A canister on its round end, a pipe on its side.)
+const LOOSE_REST_BALANCE_METRES = 0.00002; // its weight is this near to being over what it rests on: it stays. A fiftieth of a millimetre, so only a thing
+                                           // that is the same on both sides stays on a round end or a round side (a canister, a pipe): one that is not, rolls.
 const LOOSE_REST_LEVEL_METRES = 0.0005;  // a ball of its shell this near to the floor is on it
 
 // Where each ball of a shell is, from the centre of mass, with the thing turned by the quaternion (x, y, z, w).
@@ -1763,13 +1772,15 @@ function placeLooseShell(prepared, x, y, z, w, centres) {
 //
 // `lies` says which way up a station puts a kind out, and for most things that is how they rest: a crate on
 // its bottom, a canister on its side. Something with a part that sticks out to one side does not (a fire
-// extinguisher with its horn). Stood up it falls over, and laid down it rolls until the horn is on the floor.
-// Put out as `lies` says, it would do that the moment anything woke it, with a knock the Hollow hears.
+// extinguisher with its horn). Stood on a round end it falls over, and laid on its round side it rolls until
+// its weight hangs lowest or the horn is on the floor. Put out as `lies` says, it would do that the moment
+// anything woke it, with a knock the Hollow hears.
 //
 // So a thing that would not stay as it is turned is tipped over here, slowly, the way its weight takes it:
-// about the ball of its shell it stands on (or the two it lies on) until the next one comes down, and again,
-// until its centre of mass is over what it rests on. That is what the steps further up would do to it on a
-// level floor, without the bouncing. A thing that stays as it is turned comes back exactly as it was given.
+// about the ball of its shell it stands on (or the two it lies on) until its weight is over them or the next
+// ball comes down, and again, until its centre of mass is over what it rests on. That is what the steps
+// further up would do to it on a level floor, without the bouncing. A thing that stays as it is turned comes
+// back exactly as it was given.
 function settleLooseRestTurn(prepared, turn) {
   const shell = prepared.shell, shellCount = prepared.shellCount;
   const centres = new Float64Array(shellCount * 3);
@@ -1824,14 +1835,17 @@ function settleLooseRestTurn(prepared, turn) {
     }
     const axisLength = Math.sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ) * (axisZ * nearX - axisX * nearZ < 0 ? -1 : 1);
     axisX /= axisLength; axisY /= axisLength; axisZ /= axisLength;
-    // Turned by `angle` about that line. Returns whether some other ball has come down to the floor by then
-    // (a fiftieth of a millimetre past it, so that one which only stays level with it does not count).
+    // Turned by `angle` about that line. Returns whether it has gone as far as it goes by then: its weight has
+    // come over what it turns on (something round rolls no further than that), or some other ball has come down
+    // to the floor (a fiftieth of a millimetre past it, so that one which only stays level with it does not count).
     const tipped = { x: 0, y: 0, z: 0, w: 1 };
     const hasComeDown = function (angle) {
       const sine = Math.sin(angle / 2);
       const product = multiplyLooseTurns(axisX * sine, axisY * sine, axisZ * sine, Math.cos(angle / 2), turnX, turnY, turnZ, turnW);
       tipped.x = product.x; tipped.y = product.y; tipped.z = product.z; tipped.w = product.w;
       placeLooseShell(prepared, tipped.x, tipped.y, tipped.z, tipped.w, centres);
+      // (How hard its weight still turns it about the line, and which way: the centre of mass is at 0, 0.)
+      if (centres[first.ballIndex * 3] * axisZ - centres[first.ballIndex * 3 + 2] * axisX <= 0) return true;
       const level = centres[first.ballIndex * 3 + 1] - shell[first.ballIndex * 4 + 3];
       for (let ballIndex = 0; ballIndex < shellCount; ballIndex++) {
         if (ballIndex === first.ballIndex || (second && ballIndex === second.ballIndex)) continue;
@@ -1839,11 +1853,11 @@ function settleLooseRestTurn(prepared, turn) {
       }
       return false;
     };
-    // Half a degree at a time until one has, and then to the moment it did.
+    // Half a degree at a time until it has, and then to the moment it did.
     const stride = Math.PI / 360;
     let before = 0, after = 0;
     for (let angle = stride; angle <= TWO_PI && after === 0; angle += stride) { if (hasComeDown(angle)) after = angle; else before = angle; }
-    if (after === 0) return turn; // nothing ever comes down: it is not a thing that can lie anywhere
+    if (after === 0) return turn; // it never does: it is not a thing that can lie anywhere
     for (let halving = 0; halving < 30; halving++) {
       const middle = (before + after) / 2;
       if (hasComeDown(middle)) after = middle; else before = middle;
@@ -1957,8 +1971,12 @@ function addStationLooseObject(kindKey, x, surfaceY, z, yaw, isOnItsSide, alongX
 
 // TWEAK: what the litter is, and what is worth carrying out, with how often each turns up among its sort.
 const STATION_LITTER = [['carton', 5], ['plate', 3], ['can', 2]];
-const STATION_VALUABLES_ON_THE_FLOOR = [['canister', 4], ['crate', 3], ['pipe', 3], ['toolCase', 2], ['pumpMotor', 1]];
-const STATION_VALUABLES_ON_A_SURFACE = [['jar', 5], ['toolCase', 3], ['canister', 2]];
+const STATION_VALUABLES_ON_THE_FLOOR = [['crate', 3], ['pipe', 3], ['toolCase', 2], ['pumpMotor', 1]];
+const STATION_VALUABLES_ON_A_SURFACE = [['jar', 5], ['toolCase', 3]];
+// What stands on a tile where the thing that was drawn cannot (it is too heavy to stand in the only way through,
+// or too long for the nook): something small that is in nobody's way. The canister is a file in src/objects/,
+// so a build without that file has none, and leaves such a tile bare.
+const STATION_STAND_IN_KIND = 'canister';
 
 function drawFromLooseTable(table, random) {
   let total = 0;
@@ -2129,7 +2147,8 @@ function planStationLooseObjects() {
     const index = tiles[nextTile][1];
     let kindKey = drawFromLooseTable(STATION_VALUABLES_ON_THE_FLOOR, random);
     // What cannot be shoved aside does not go where it would stand in the only way through.
-    if (LOOSE_OBJECT_KINDS[kindKey].mass >= TUNING.looseShoveBlockMass * 0.6 && !isLooseTileEasyToPass(index)) kindKey = 'canister';
+    if (LOOSE_OBJECT_KINDS[kindKey].mass >= TUNING.looseShoveBlockMass * 0.6 && !isLooseTileEasyToPass(index)) kindKey = STATION_STAND_IN_KIND;
+    if (!LOOSE_OBJECT_KINDS[kindKey]) continue;
     let lies = LOOSE_OBJECT_KINDS[kindKey].lies;
     let yaw = random() * TWO_PI;
     const sideDraw = lies === 'either' ? random() : 1, isTurnedTheOtherWay = random() < 0.5; // drawn exactly as they always were
@@ -2144,7 +2163,11 @@ function planStationLooseObjects() {
         if (!isLooseRestClearAt(kindKey, centerX, centerZ, tileFloorHeight[index], getLooseRestOrientation(kindKey, tried, isOnItsSideTried, lies === 'onItsSide' ? false : isTurnedTheOtherWay))) continue;
         yaw = tried; fits = true;
       }
-      if (!fits) { kindKey = 'canister'; lies = LOOSE_OBJECT_KINDS[kindKey].lies; }
+      if (!fits) {
+        kindKey = STATION_STAND_IN_KIND;
+        if (!LOOSE_OBJECT_KINDS[kindKey]) continue;
+        lies = LOOSE_OBJECT_KINDS[kindKey].lies;
+      }
     }
     const isOnItsSide = lies === 'onItsSide' || (lies === 'either' && sideDraw < 0.5);
     // Something round lies either way; a tool case lies on its broad side, never on its end.
@@ -2721,11 +2744,11 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     const object = looseObjects[objectIndex];
     if (!object.isAsleep) continue;
     if (isLooseObjectAnothers(object)) continue; // woken by its mover, where it is moved
-    if (player.isMoving) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + 1.7);
+    if (player.isMoving) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + TUNING.playerHeight);
     if (hollow.isActive) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
     for (let index = 1; index < players.length; index++) {
       const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
-      if (one !== player) wakeLooseObjectIfWalkedInto(object, one.x, one.z, TUNING.playerRadius, floorY, floorY + 1.7);
+      if (one !== player) wakeLooseObjectIfWalkedInto(object, one.x, one.z, TUNING.playerRadius, floorY, floorY + TUNING.playerHeight);
     }
   }
 
@@ -2752,7 +2775,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   // Something heavy on the floor that you walked into gives you back what it did not take.
   if (looseState.shoveBackDepth > 0) {
     const resolved = resolveBodyCollision(player.x + looseState.shoveBackX * looseState.shoveBackDepth, player.z + looseState.shoveBackZ * looseState.shoveBackDepth,
-      TUNING.playerRadius, player.isCrouching ? 1.0 : 1.7, getFloorHeightAt(player.x, player.z));
+      TUNING.playerRadius, player.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight, getFloorHeightAt(player.x, player.z));
     player.x = resolved.x; player.z = resolved.z;
   }
 
@@ -2785,7 +2808,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     if (gap > TUNING.looseHoldStopDistance && advance > 0) {
       const back = Math.min(gap - TUNING.looseHoldStopDistance, advance, TUNING.looseHoldStopSpeed * dt);
       const resolved = resolveBodyCollision(player.x - gapX / gap * back, player.z - gapZ / gap * back,
-        TUNING.playerRadius, player.isCrouching ? 1.0 : 1.7, getFloorHeightAt(player.x, player.z));
+        TUNING.playerRadius, player.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight, getFloorHeightAt(player.x, player.z));
       looseState.holdTargetX += resolved.x - player.x; looseState.holdTargetZ += resolved.z - player.z;
       player.x = resolved.x; player.z = resolved.z;
     }

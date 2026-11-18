@@ -99,7 +99,9 @@ const QUALITY_PRESETS = {
 const TUNING = {
   // ---- The player's body ---------------------------------------------------
   playerRadius: 0.3,            // how wide you are for bumping into walls. Smaller squeezes through tighter gaps.
-  eyeHeightStanding: 1.1,      // camera height when standing
+  playerHeight: 1.26,
+  playerHeightCrouching: 0.88,
+  eyeHeightStanding: 1.16,      // camera height when standing
   eyeHeightCrouching: 0.7,     // camera height when crouched
   walkSpeed: 2.2,
   sprintSpeed: 4.4,             // must stay above hollowHuntSpeed or sprinting cannot open a gap

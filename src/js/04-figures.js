@@ -33,18 +33,18 @@ const FIGURE_PROPORTIONS_PLAYER = {
   kind: 'player',
   torsoLength: 0.3, neckLength: 0.1, headRadius: 0.1, headLength: 0.04,
   shoulderWidth: 0.4, hipWidth: 0.2, upperArm: 0.15, foreArm: 0.15, handLength: 0.05,
-  thigh: 0.3, shin: 0.25, footLength: 0.1, torsoRadius: 0.14, limbRadius: 0.04, legRadius: 0.06, jointRadius: 0.06
+  thigh: 0.3, shin: 0.25, footLength: 0.1, torsoRadius: 0.15, limbRadius: 0.04, legRadius: 0.06, jointRadius: 0.05
 };
 
 // The scanner a player's figure holds. TWEAK: its length and its thickness, in metres.
-const PLAYER_SCANNER_LENGTH = 0.3;
-const PLAYER_SCANNER_RADIUS = 0.055;
+const PLAYER_SCANNER_LENGTH = 0.2;
+const PLAYER_SCANNER_RADIUS = 0.05;
 
 // Where the light on top of the scanner in a player's hand is: halfway along it, just above. `out` gets x, y, z.
 function getFigureScannerLight(figure, out) {
   const offset = (figure.capsuleCount - 1) * FIGURE_CAPSULE_STRIDE, capsules = figure.capsules;
   out.x = (capsules[offset] + capsules[offset + 3]) / 2;
-  out.y = (capsules[offset + 1] + capsules[offset + 4]) / 2 + PLAYER_SCANNER_RADIUS + 0.015;
+  out.y = (capsules[offset + 1] + capsules[offset + 4]) / 2 + PLAYER_SCANNER_RADIUS + (PLAYER_SCANNER_RADIUS * 0.045);
   out.z = (capsules[offset + 2] + capsules[offset + 5]) / 2;
   return out;
 }

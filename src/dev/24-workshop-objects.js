@@ -74,7 +74,8 @@ function getObjectWorkshopChoices() {
 
 function getDefaultObjectWorkshopKey() {
   for (const key in designedObjects) return key;
-  return 'canister';
+  for (const key in LOOSE_OBJECT_KINDS) return key; // none made yet: the first kind written as code, to look at
+  return '';
 }
 
 // Opens an object. `draft` (optional) is a working copy to carry on with instead of the object's file.
