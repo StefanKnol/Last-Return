@@ -13,7 +13,7 @@
 // The switches. `group` decides which heading they appear under in the panel.
 // To add a switch: add a line here, then read `debugState.options.yourKey` wherever it should act.
 const DEBUG_OPTION_DEFINITIONS = [
-  { key: 'showCreatures', group: 'See', label: 'Show creatures', hint: 'Draws the Hollow (red), the Stills (amber) and apparitions (violet) as solid bodies.' },
+  { key: 'showCreatures', group: 'See', label: 'Show creatures', hint: 'Draws the Hollow (red), the Stills (amber), apparitions (violet) and other players (teal) as solid bodies.' },
   { key: 'seeThroughWalls', group: 'See', label: 'See creatures through walls', hint: 'Also draws them faintly behind walls. Needs "Show creatures".' },
   { key: 'lightStation', group: 'See', label: 'Light the station', hint: 'Draws every wall, floor and object with a metre grid, scanned or not.' },
   { key: 'showSenses', group: 'See', label: 'Show senses and paths', hint: 'Rings for how far you can be heard, noises as they happen, and the route the Hollow is walking.' },
@@ -425,6 +425,12 @@ function buildDebugFrameData() {
       // Waiting apparitions are drawn darker than ones that can currently be scanned.
       const strength = phantom.state === 1 ? 1 : 0.45;
       data.figures.push({ figure: phantom.figure, red: 0.6 * strength, green: 0.4 * strength, blue: 1.0 * strength });
+    }
+    // The other players, and the stand-in for one ("Another player, walking about"): teal, as a scan shows them.
+    // One who lies dead has no body to draw.
+    const others = debugWalker.other ? together.others.concat(debugWalker.other) : together.others;
+    for (const other of others) {
+      if (other.hasBeenHeardFrom && !other.isFallen) data.figures.push({ figure: other.figure, red: 0.3, green: 0.95, blue: 0.85 });
     }
   }
 
