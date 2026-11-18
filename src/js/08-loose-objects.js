@@ -1393,11 +1393,6 @@ function damageLooseObject(object, speed) {
   const after = getLooseObjectValue(object);
   if (after >= before) return false;
   looseState.statistics.worthLost += before - after;
-  // Said only of what is yours just now (in the beam, or just out of it), and not for every scratch.
-  if (object.knockIsOwn && (object.isHeld || game.time - object.lastHandledTime < 4) && game.time - looseState.lastDamageSaidTime > 1.5 && game.mode === 'playing') {
-    looseState.lastDamageSaidTime = game.time;
-    showMessage(object.isAppraised ? 'The ' + kind.label + ' took that badly: worth ' + after + ' now.' : 'The ' + kind.label + ' took that badly: it is worth less now.', 3.5, 'warning');
-  }
   return false;
 }
 
@@ -1421,14 +1416,6 @@ function shatterLooseObject(object) {
   if (!isOfTheHollowsOwnMaking) emitNoise(x, z, TUNING.noiseRadiusShatter);
   const lastKnock = looseState.lastKnock;
   lastKnock.x = x; lastKnock.z = z; lastKnock.speed = kind.shattersAt; lastKnock.carries = TUNING.noiseRadiusShatter; lastKnock.isOwn = wasOwn; lastKnock.time = game.time;
-  if (wasOwn) {
-    showCaption(isGlass ? 'ownObjectShatter' : 'ownObjectBreak');
-    if (game.mode === 'playing') {
-      showMessage('The ' + kind.label + (isGlass ? ' shatters.' : ' breaks apart.') + (wasAppraised ? ' That was worth ' + wasWorth + '.' : '') + (isGlass ? ' Mind the glass.' : ''), 5, 'warning');
-    }
-  } else {
-    showCaption(isGlass ? 'objectShatter' : 'objectBreak', { x: x, z: z });
-  }
 }
 
 // ---------------------------------------------------------------------------

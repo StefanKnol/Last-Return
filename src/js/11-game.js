@@ -35,6 +35,7 @@ const game = {
   ascentTimer: 0,
   hasShownHollowHint: false,
   hasShownVentHint: false,
+  actor: null,                   // somebody else whose action is being carried out here right now, or null: getActingPlayer
   hasShownNoisyFloorHint: false, // the first time something loose underfoot gives you away, you are told what it was
   attract: { yaw: -0.9, pitch: 0, timer: 0, sweepTimer: 4, sweepProgress: -1, rayBudget: 0, centerRange: -1 }
 };
@@ -66,7 +67,14 @@ function scheduleEvent(delaySeconds, action) {
   game.scheduledEvents.push({ time: game.time + delaySeconds, action: action });
 }
 
+// Whoever is doing what is being done right now: you, or (down there with others, while something one of them
+// did is being carried out in your game too) that one. See performActionFor in 11-together.js.
+function getActingPlayer() {
+  return game.actor || player;
+}
+
 function saveCheckpoint() {
+  if (game.actor) return; // somebody else's doing: it is not your place to come back to
   game.checkpoint.x = player.x; game.checkpoint.z = player.z; game.checkpoint.yaw = player.yaw;
 }
 
@@ -342,7 +350,7 @@ function pauseGame() {
   interfaceState.refreshSettingControls();
   showOnlyScreen('screen-pause');
   if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
-  suspendAudio(true);
+  if (!isWorldShared()) suspendAudio(true); // down there with others the station goes on, and so does what you hear of it
 }
 
 function resumeGame() {
@@ -399,7 +407,7 @@ function collectSpool(interactable) {
   removeInteractableFromWorld(interactable);
   game.flags.spoolsCollected++;
   playPickupSound();
-  emitNoise(player.x, player.z, TUNING.noiseRadiusPickup);
+  emitNoise(getActingPlayer().x, getActingPlayer().z, TUNING.noiseRadiusPickup);
   saveCheckpoint();
   refreshObjective();
   // Ripley numbered hers "of 3". In a station with more spools than that, the heading counts them all.
@@ -532,17 +540,23 @@ function completeLiftArrival(radioKey) {
 // game's to kill.
 function catchPlayer(caught, kind, figure) {
   if (caught === player) triggerPlayerDeath(kind, figure);
+  else catchOtherPlayer(caught, kind, figure); // 11-together.js: they are told, and it is their game that kills them
 }
 
+// Returns whether you died of it.
 function triggerPlayerDeath(kind, figure) {
-  if (game.mode !== 'playing') return;
-  if (debugState.options.invulnerable || debugState.options.flyMode) return;
+  // Down there with others the station does not wait while you read or have the menu open, and neither does this.
+  const isAway = isWorldShared() && (game.mode === 'paused' || game.mode === 'reading');
+  if (game.mode !== 'playing' && !isAway) return false;
+  if (debugState.options.invulnerable || debugState.options.flyMode) return false;
+  if (isAway) { stopVoiceLine(); suspendAudio(false); showOnlyScreen(null); }
   game.mode = 'dying';
   game.statistics.deaths++;
   game.deathSequence = { kind: kind, figure: figure, timer: 0 };
   setScannerSound(0);
   closeMapOverlay();
-  playStinger('death');
+  asYoursAlone(function () { playStinger('death'); }); // (as the host of others this is reached while the creatures are run, and their sounds are everybody's)
+  return true;
 }
 
 function updateDying(dt) {
@@ -574,6 +588,7 @@ function updateDying(dt) {
   if (sequence.timer > 1.55) {
     game.mode = 'dead';
     game.fade = 0;
+    sendCreaturesAwayAfterCatch(sequence.kind); // down there with others, as their host: it does not stand over you while the others play on
     silenceGameplaySounds();
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
     showDeathScreen(sequence.kind);
@@ -597,7 +612,7 @@ function retryFromCheckpoint() {
     relocateHollowAwayFromPlayer(12);
   }
   if (stillsAreHunting) resetStillsToHomePositions();
-  if (game.flags.uploadStarted && !game.flags.liftArrived) {
+  if (game.flags.uploadStarted && !game.flags.liftArrived && !isWorldShared()) { // (down there with others the car does not start over for one of you)
     game.liftCountdown = TUNING.liftArrivalSeconds;
     scheduleEvent(8, function () {
       if (game.flags.uploadStarted && !game.flags.liftArrived && hollow.isActive) hollow.knowsPlayerPositionAlways = true;
@@ -608,7 +623,46 @@ function retryFromCheckpoint() {
   game.mode = 'playing';
   focusGameView();
   requestPointerLockOnCanvas();
+  if (isWorldTheHosts()) sayToOthers({ k: 'back' }); // the host's creatures may come for you again
   showMessage('Scanner restarted from the last checkpoint.', 5, 'info');
+}
+
+// ---------------------------------------------------------------------------
+// Things that happen to the whole descent. Alone they happen the moment you do them. Down there with others
+// the host's game puts everyone's in one order, and each browser carries them out in that order
+// (askToAct and performActionFor in 11-together.js), so that every game ends up the same.
+// ---------------------------------------------------------------------------
+
+// The first time anyone sets foot in a room, whatever is waiting on that room hears of it.
+function notePlaceEntered(placeName) {
+  if (game.placesEntered[placeName]) return;
+  game.placesEntered[placeName] = true;
+  fireGameEvent('enter:' + placeName);
+}
+
+// Somebody is out of the car and a good step past its door.
+function noteLiftLeft() {
+  if (game.flags.hasLeftLift) return;
+  game.flags.hasLeftLift = true;
+  liftDoor.forcedState = false;
+  game.isLiftDoorClosingBehindYou = true;
+  saveCheckpoint();
+  refreshObjective();
+  scheduleEvent(1.4, function () { playLiftDepartSound(); });
+  fireGameEvent('leftLift');
+}
+
+// The car goes up.
+function beginAscent() {
+  if (game.mode === 'ascending' || game.mode === 'ending' || game.mode === 'title') return;
+  if (game.mode !== 'playing') { stopVoiceLine(); suspendAudio(false); showOnlyScreen(null); setHudVisible(true); } // whatever you were at
+  game.mode = 'ascending';
+  game.ascentTimer = 0;
+  liftDoor.forcedState = false;
+  hollow.knowsPlayerPositionAlways = false;
+  setScannerSound(0);
+  setLiftMachinerySound(0.9);
+  closeMapOverlay();
 }
 
 // ---------------------------------------------------------------------------
@@ -620,8 +674,9 @@ function updateGameProgress(dt) {
   game.statistics.elapsed += dt;
 
   // The first time you set foot in a room, whatever is waiting on that room hears of it: 'enter:PUMP HALL B'.
+  // (Down there with others, the first of you to set foot in it: askToAct, 11-together.js.)
   const placeName = ZONE_NAMES[getZoneAtPosition(player.x, player.z)] || '';
-  if (placeName !== '' && !game.placesEntered[placeName]) { game.placesEntered[placeName] = true; fireGameEvent('enter:' + placeName); }
+  if (placeName !== '' && !game.placesEntered[placeName]) askToAct({ what: 'enter', place: placeName });
 
   for (let index = game.scheduledEvents.length - 1; index >= 0; index--) {
     if (game.time >= game.scheduledEvents[index].time) {
@@ -632,21 +687,14 @@ function updateGameProgress(dt) {
   }
 
   // Out of the car and a good step past its door.
-  if (!flags.hasLeftLift && distanceOutsideLiftCar(player.x, player.z) > 1.7) {
-    flags.hasLeftLift = true;
-    liftDoor.forcedState = false;
-    game.isLiftDoorClosingBehindYou = true;
-    saveCheckpoint();
-    refreshObjective();
-    scheduleEvent(1.4, function () { playLiftDepartSound(); });
-    fireGameEvent('leftLift');
-  }
+  if (!flags.hasLeftLift && distanceOutsideLiftCar(player.x, player.z) > 1.7) askToAct({ what: 'leaveLift' });
 
   // The car's door never comes down on you. Step out and dart back in while it is closing, and it goes up
   // again; it shuts when you are clear of it. (Once it is down it stays down: the car has gone up.)
   // A salvage bay's door keeps the same rule (updateHaulBays in 08-loose-objects.js).
   if (game.isLiftDoorClosingBehindYou) {
-    const isInTheWay = distanceOutsideLiftCar(player.x, player.z) < 1.2; // in the car, or in its doorway
+    let isInTheWay = false; // somebody in the car, or in its doorway
+    for (const one of players) if (distanceOutsideLiftCar(one.x, one.z) < 1.2) isInTheWay = true;
     if (isInTheWay && liftDoor.openFraction > 0) liftDoor.forcedState = true;
     else if (!isInTheWay) {
       liftDoor.forcedState = false;
@@ -660,16 +708,15 @@ function updateGameProgress(dt) {
     if (game.liftCountdown <= 0) completeLiftArrival();
   }
 
-  const isWellInsideLiftCar = player.x > LIFT_CAR_BOUNDS.minimumX + 0.3 && player.x < LIFT_CAR_BOUNDS.maximumX - 0.3 &&
-    player.z > LIFT_CAR_BOUNDS.minimumZ + 0.3 && player.z < LIFT_CAR_BOUNDS.maximumZ - 0.3;
-  if (flags.liftArrived && isWellInsideLiftCar) {
-    game.mode = 'ascending';
-    game.ascentTimer = 0;
-    liftDoor.forcedState = false;
-    hollow.knowsPlayerPositionAlways = false;
-    setScannerSound(0);
-    setLiftMachinerySound(0.9);
-    closeMapOverlay();
+  // The car goes up with everyone who is still on their feet in it. Alone, that is you. Down there with others
+  // it waits for all of you, and it is the host's game that says when (the list of players is the host's).
+  if (flags.liftArrived && !isWorldTheHosts()) {
+    let isEveryoneAboard = true;
+    for (const one of players) {
+      if (!(one.x > LIFT_CAR_BOUNDS.minimumX + 0.3 && one.x < LIFT_CAR_BOUNDS.maximumX - 0.3 &&
+          one.z > LIFT_CAR_BOUNDS.minimumZ + 0.3 && one.z < LIFT_CAR_BOUNDS.maximumZ - 0.3)) isEveryoneAboard = false;
+    }
+    if (isEveryoneAboard) askToAct({ what: 'ascend' });
   }
 
   if (hollow.isActive && !game.hasShownHollowHint && hollow.figure.totalHits > 30) {
@@ -719,23 +766,39 @@ function updatePlaying(dt) {
   updateLooseObjects(dt, player.x, getPlayerEyeY(), player.z); // before the scanner: what you carry is in its way
   updateScanner(dt, player.x, eyeY, player.z);
   updateInteractionFocus(player.x, eyeY, player.z);
-  updateDoors(dt);
-  if (debugState.options.freezeCreatures) {
-    hollow.figure.hitsThisFrame = 0;
-  } else {
-    updateHollow(dt);
-    updateStills(dt);
-  }
+  updateStation(dt);
   updatePhantoms(dt);
   if (game.mode === 'playing') updateGameProgress(dt);
   updateAtmosphere(dt);
+}
+
+// What goes on in the station whoever is looking: its doors, and what walks in it. Down there with others, in
+// the host's station, none of that is decided here: it is shown as the host's game says it is.
+function updateStation(dt) {
+  if (isWorldTheHosts()) { followHostStation(dt); return; }
+  updateDoors(dt);
+  // (While it has hold of you, it has no mind for anything else. Alone that is the whole of the station
+  // standing still; as the host of others it is only this, for the moment it takes.)
+  if (debugState.options.freezeCreatures || game.mode === 'dying') {
+    hollow.figure.hitsThisFrame = 0;
+  } else {
+    shareWorldSoundsDuring(function () { updateHollow(dt); updateStills(dt); });
+  }
+}
+
+// Down there with others the station does not stop for the one who is reading, has the menu open, or is dead.
+// This is a frame of it going on without you. (Alone, it waits for you, as it always did.)
+function updateStationWithoutYou(dt, hasTimeMoved) {
+  if (!hasTimeMoved) { game.time += dt; currentPointTime = game.time; }
+  updateStation(dt);
+  updateGameProgress(dt);
 }
 
 function updateAscending(dt) {
   game.time += dt;
   currentPointTime = game.time;
   game.ascentTimer += dt;
-  updateDoors(dt);
+  if (isWorldTheHosts()) followHostStation(dt); else updateDoors(dt);
   resetBeamLines(0, 0, 0);
   game.interference = approachValue(game.interference, 0, dt);
   game.danger = approachValue(game.danger, 0, dt);
@@ -826,10 +889,13 @@ function runFrame(timestamp) {
     game.interference = 0; game.danger = 0; game.fade = 1;
   } else {
     if (game.mode === 'playing') updatePlaying(realDt);
-    else if (game.mode === 'dying') updateDying(realDt);
+    else if (game.mode === 'dying') { updateDying(realDt); if (isWorldShared()) updateStationWithoutYou(realDt, true); }
     else if (game.mode === 'ascending') updateAscending(realDt);
     else if (game.mode === 'workshop') workshopHooks.update(realDt);
-    else resetBeamLines(0, 0, 0);
+    else {
+      resetBeamLines(0, 0, 0);
+      if (isWorldShared() && (game.mode === 'paused' || game.mode === 'reading' || game.mode === 'dead')) updateStationWithoutYou(realDt, false);
+    }
     const isScanning = player.isPainting || player.sweepTimeRemaining > 0;
     renderCamera.x = player.x;
     renderCamera.y = getPlayerEyeY() + Math.sin(player.bobPhase) * 0.028;
@@ -900,7 +966,7 @@ function startApplication() {
   showOnlyScreen('screen-title');
 
   window.lastReturnDebug = {
-    game: game, player: player, players: players, together: together, updateTogether: updateTogether, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
+    game: game, player: player, players: players, together: together, updateTogether: updateTogether, askToAct: askToAct, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
     playHollowRoar: playHollowRoar, playHollowSnarl: playHollowSnarl, playHollowLostHiss: playHollowLostHiss, playHollowSniff: playHollowSniff, playHollowCuriousTrill: playHollowCuriousTrill,
     playStinger: playStinger, playSweepSound: playSweepSound, playInterfaceBlip: playInterfaceBlip, playRadioBlip: playRadioBlip, playDeniedSound: playDeniedSound, stills: stills, doors: doors, pointCloud: pointCloud, settings: settings,
     beamLines: beamLines,

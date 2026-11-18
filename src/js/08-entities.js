@@ -93,6 +93,12 @@ function getHollowHearingBoost() {
 }
 
 function emitNoise(x, z, radius) {
+  // Down there with others, in the host's station: the Hollow that hears this is the host's (11-together.js).
+  if (isWorldTheHosts()) { tellHostOfNoise(x, z, radius); return; }
+  shareWorldSoundsDuring(function () { hearNoise(x, z, radius); }); // what it sounds like when it hears this is everybody's
+}
+
+function hearNoise(x, z, radius) {
   const effectiveRadius = radius * game.difficulty.hearingFactor * getHollowHearingBoost();
   if (debugHooks.recordNoise) debugHooks.recordNoise(x, z, effectiveRadius);
   if (!hollow.isActive || hollow.graceTimer > 0 || debugState.options.creaturesIgnorePlayer) return;
@@ -119,9 +125,10 @@ function emitNoise(x, z, radius) {
 
 // Stuns the Hollow where it stands, for `seconds`. An enraged Hollow is past that. Returns whether it worked.
 function stunHollow(seconds) {
+  if (isWorldTheHosts()) { sayToOthers({ k: 'stun', s: seconds }); return hollow.isActive; } // the host's Hollow: the host's to stun
   if (!hollow.isActive || hollow.enragedTimer > 0 || hollow.graceTimer > 0 || isHollowInCrawlspace()) return false;
   hollow.stunSeconds = Math.max(hollow.stunSeconds, seconds);
-  showCaption('hollowStunned', hollow.figure);
+  shareWorldSoundsDuring(function () { showCaption('hollowStunned', hollow.figure); });
   return true;
 }
 
@@ -152,6 +159,19 @@ function captionDoorSound(door, isOpening) {
   showCaption(isOpening ? 'doorOpens' : 'doorCloses', { x: door.centerX, z: door.centerZ });
 }
 
+// You are standing at a door that will not open for you: it says so, and why, every few seconds.
+function tellPlayerOfShutDoor(door, dt) {
+  door.deniedMessageCooldown -= dt;
+  if (door.deniedMessageCooldown > 0 || canPlayerOpenDoor(door)) return;
+  if (distanceBetweenPoints(player.x, player.z, door.centerX, door.centerZ) >= 1.9) return;
+  door.deniedMessageCooldown = 5;
+  playDeniedSound();
+  if (door.kind === DOOR_KIND_KEYCARD && game.flags.powerOn) {
+    showMessage(level.keycardCount > 1 ? 'Door locked. Keycard ' + door.cardLevel + ' required.' : 'Door locked. Keycard required.', 3.5, 'warning');
+  }
+  else showMessage('Door has no power.', 3.5, 'warning');
+}
+
 function updateDoors(dt) {
   for (const door of doors) {
     door.bangCooldown = Math.max(0, door.bangCooldown - dt);
@@ -167,20 +187,8 @@ function updateDoors(dt) {
       // open is for you alone, when it is you standing at it.
       const nearestPlayer = findNearestPlayer(door.centerX, door.centerZ);
       const isSomeoneNear = distanceBetweenPoints(nearestPlayer.x, nearestPlayer.z, door.centerX, door.centerZ) < 1.9;
-      const isPlayerNear = distanceBetweenPoints(player.x, player.z, door.centerX, door.centerZ) < 1.9;
-      door.deniedMessageCooldown -= dt;
-      if (isSomeoneNear) {
-        if (canPlayerOpenDoor(door)) {
-          wantsOpen = true; openedByPlayer = true;
-        } else if (isPlayerNear && door.deniedMessageCooldown <= 0) {
-          door.deniedMessageCooldown = 5;
-          playDeniedSound();
-          if (door.kind === DOOR_KIND_KEYCARD && game.flags.powerOn) {
-            showMessage(level.keycardCount > 1 ? 'Door locked. Keycard ' + door.cardLevel + ' required.' : 'Door locked. Keycard required.', 3.5, 'warning');
-          }
-          else showMessage('Door has no power.', 3.5, 'warning');
-        }
-      }
+      if (isSomeoneNear && canPlayerOpenDoor(door)) { wantsOpen = true; openedByPlayer = true; }
+      tellPlayerOfShutDoor(door, dt);
       // The Hollow: a door opens for it only if it is one it can open (not a keycard door: see 08-crawlspace.js).
       // A door that is already open for someone else never closes on it.
       if (hollow.isActive && !isHollowInCrawlspace()) {
@@ -198,32 +206,40 @@ function updateDoors(dt) {
     // the thing is there. (Which wedges it open for the Hollow as much as for you.) The lift's own door, and
     // any door that is being told what to do, does as it is told.
     if (!wantsOpen && door.forcedState === null && door.openFraction > 0 && isLooseObjectInDoorway(door)) wantsOpen = true;
-    if (wantsOpen) {
-      door.closeDelay = 1.3;
-      if (door.openFraction === 0) {
-        wakeLooseObjectsNear(door.centerX, door.centerZ, 1.3); // what leans on the door is about to lose its support
-        const slab = door.slab;
-        fadePointsInsideBox(door.centerX - slab.halfX - 0.1, door.baseY, door.centerZ - slab.halfZ - 0.1,
-          door.centerX + slab.halfX + 0.1, door.baseY + 2.5, door.centerZ + slab.halfZ + 0.1,
-          convertSecondsToPointLifeCode(TUNING.doorImprintSeconds));
-        playDoorSound(door.centerX, door.centerZ, true);
-        captionDoorSound(door, true);
-        if (openedByPlayer) emitNoise(door.centerX, door.centerZ, TUNING.noiseRadiusDoor);
-      }
-    } else {
-      door.closeDelay -= dt;
-    }
-    const target = wantsOpen || door.closeDelay > 0 ? 1 : 0;
-    const previousFraction = door.openFraction;
-    door.openFraction = approachValue(door.openFraction, target, dt * 1.7); // TWEAK: 1.7 = a door takes about 0.6 s to open
-    if (previousFraction === 1 && door.openFraction < 1) { playDoorSound(door.centerX, door.centerZ, false); captionDoorSound(door, false); }
-    const slab = door.slab;
-    slab.centerY = door.baseY + 1.15 + door.openFraction * DOOR_TRAVEL_HEIGHT;
-    slab.minimumY = slab.centerY - slab.halfY;
-    slab.maximumY = slab.centerY + slab.halfY;
-    slab.isRemoved = door.openFraction > 0.97;
+    moveDoor(door, wantsOpen, openedByPlayer, 1.3, dt);
   }
   refreshHollowDoorBlocks();
+}
+
+// One frame of a door going where it is wanted: up while `wantsOpen`, and down again `holdSeconds` after it
+// stops being wanted open. updateDoors decides what is wanted; down there with others the host's game decides,
+// and everyone else's doors only follow (11-together.js), which is why the two are apart.
+function moveDoor(door, wantsOpen, openedByPlayer, holdSeconds, dt) {
+  if (wantsOpen) {
+    door.closeDelay = holdSeconds;
+    if (door.openFraction === 0) {
+      wakeLooseObjectsNear(door.centerX, door.centerZ, 1.3); // what leans on the door is about to lose its support
+      const slab = door.slab;
+      fadePointsInsideBox(door.centerX - slab.halfX - 0.1, door.baseY, door.centerZ - slab.halfZ - 0.1,
+        door.centerX + slab.halfX + 0.1, door.baseY + 2.5, door.centerZ + slab.halfZ + 0.1,
+        convertSecondsToPointLifeCode(TUNING.doorImprintSeconds));
+      playDoorSound(door.centerX, door.centerZ, true);
+      captionDoorSound(door, true);
+      if (openedByPlayer) emitNoise(door.centerX, door.centerZ, TUNING.noiseRadiusDoor);
+    }
+  } else {
+    door.closeDelay -= dt;
+  }
+  const target = wantsOpen || door.closeDelay > 0 ? 1 : 0;
+  door.isWantedOpen = target === 1; // what the host of others tells them (describeWorld, 11-together.js)
+  const previousFraction = door.openFraction;
+  door.openFraction = approachValue(door.openFraction, target, dt * 1.7); // TWEAK: 1.7 = a door takes about 0.6 s to open
+  if (previousFraction === 1 && door.openFraction < 1) { playDoorSound(door.centerX, door.centerZ, false); captionDoorSound(door, false); }
+  const slab = door.slab;
+  slab.centerY = door.baseY + 1.15 + door.openFraction * DOOR_TRAVEL_HEIGHT;
+  slab.minimumY = slab.centerY - slab.halfY;
+  slab.maximumY = slab.centerY + slab.halfY;
+  slab.isRemoved = door.openFraction > 0.97;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +247,7 @@ function updateDoors(dt) {
 // ---------------------------------------------------------------------------
 
 function activateHollow(x, z, graceSeconds) {
+  if (isWorldTheHosts()) return; // the host's Hollow: it is the host's game that wakes it
   hollow.isActive = true;
   hollow.figure.x = x; hollow.figure.z = z;
   hollow.state = HOLLOW_STATE_ROAM;
@@ -409,7 +426,7 @@ function chooseHollowRoamTarget() {
 
 // Moves the Hollow somewhere far from the player (after a death, or to give breathing room).
 function relocateHollowAwayFromPlayer(graceSeconds) {
-  if (!hollow.isActive) return;
+  if (!hollow.isActive || isWorldTheHosts()) return;
   refreshPlayerDistanceField();
   let best = roamingWaypoints[0], bestSteps = -1;
   for (const waypoint of roamingWaypoints) {
@@ -743,7 +760,12 @@ function updateHollow(dt) {
     stepHollowOnNoisyFloor(figure.x, figure.z, isHunting); // glass and loose plates give it away as they would you
   }
 
-  if (distanceToPlayer < TUNING.hollowKillDistance && hollow.graceTimer <= 0) catchPlayer(nearestPlayer, 'hollow', figure);
+  if (distanceToPlayer < TUNING.hollowKillDistance && hollow.graceTimer <= 0) {
+    // Everyone within its reach, not only the nearest: two who stand together are caught together.
+    for (const one of players.slice()) {
+      if (distanceBetweenPoints(figure.x, figure.z, one.x, one.z) < TUNING.hollowKillDistance) catchPlayer(one, 'hollow', figure);
+    }
+  }
 }
 
 // Sets the Hollow's pose from what it is doing. `creature` is the Hollow, or a stand-in with the same fields
@@ -822,6 +844,7 @@ function createStills() {
 }
 
 function resetStillsToHomePositions() {
+  if (isWorldTheHosts()) return;
   for (const still of stills) {
     still.figure.x = still.homeX; still.figure.z = still.homeZ;
     still.figure.yaw = still.homeYaw;
@@ -834,7 +857,7 @@ function resetStillsToHomePositions() {
 }
 
 function awakenStills() {
-  if (!game.difficulty.stillsEnabled) return;
+  if (!game.difficulty.stillsEnabled || isWorldTheHosts()) return;
   stillsAreHunting = true;
   for (const still of stills) {
     if (still.isLateArrival && !still.isPresent) {

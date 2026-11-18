@@ -252,7 +252,7 @@ function initializeInput() {
   canvas.addEventListener('wheel', function (event) {
     if (game.mode !== 'playing') return;
     event.preventDefault();
-    setScannerSpread(player.spreadDegrees + (event.deltaY > 0 ? -0.5 : 0.5));
+    setScannerSpread(player.spreadDegrees + (event.deltaY > 0 ? -TUNING.scannerSpreadScrollSpeed : TUNING.scannerSpreadScrollSpeed));
   }, { passive: false });
   canvas.addEventListener('contextmenu', function (event) { event.preventDefault(); });
 
@@ -839,7 +839,7 @@ function updateInteractionFocus(eyeX, eyeY, eyeZ) {
       if (getHeldLooseObject()) showMessage('The beam is already holding something.', 2, 'info');
       else pickUpLooseObject(looseObject);
     } else if (best) {
-      useInteractable(best);
+      askToAct({ what: 'use', objectId: best.objectId });
     } else if (getHeldLooseObject()) {
       beginLettingGo();
     }

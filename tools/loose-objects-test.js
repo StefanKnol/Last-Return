@@ -1607,19 +1607,16 @@ function installLab() {
     lab.setBreakable(false);
     return result;
   }, spot);
-  check('a knock costs by how hard it is: a tool case set down from a crouch is worth what it was, let go of standing up it is worth less, thrown it is worth less still, and the screen says so',
+  check('a knock costs by how hard it is: a tool case set down from a crouch is worth what it was, let go of standing up it is worth less, thrown it is worth less still',
     breakage.toolCase.setDown.worth === breakage.toolCase.setDown.whole && breakage.toolCase.dropped.worth < breakage.toolCase.dropped.whole && breakage.toolCase.dropped.worth > breakage.toolCase.dropped.whole * 0.6 &&
-    breakage.toolCase.thrown.worth < breakage.toolCase.dropped.worth && !breakage.toolCase.thrown.gone && breakage.toolCase.dropped.said.some((text) => /The tool case took that badly/.test(text)) &&
-    breakage.toolCase.setDown.said.every((text) => !/took that badly/.test(text)), breakage.toolCase);
+    breakage.toolCase.thrown.worth < breakage.toolCase.dropped.worth && !breakage.toolCase.thrown.gone, breakage.toolCase);
   check('an empty can loses nothing however it is thrown, and a thing thrown again and again is never worth less than a tenth of what it was',
     breakage.can.thrown.worth === breakage.can.thrown.whole && breakage.battered.worth >= Math.round(breakage.battered.least) && breakage.battered.worth <= breakage.battered.whole * 0.25 && breakage.battered.lostInAll > 0, [breakage.can, breakage.battered]);
   check('a sample jar set down is whole; carried into a wall at a walk it lives, worth no more than it was; let go of standing up it shatters, loudly, and is gone',
     !breakage.jar.setDown.gone && breakage.jar.setDown.worth === breakage.jar.setDown.whole && !breakage.jar.walkedIntoAWall.gone && breakage.jar.walkedIntoAWall.held && breakage.jar.walkedIntoAWall.worth <= breakage.jar.walkedIntoAWall.whole &&
-    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.85 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.caption === 1 && breakage.jar.dropped.loudest >= 18 &&
-    breakage.jar.dropped.said.some((text) => /The sample jar shatters\..*Mind the glass/.test(text)), breakage.jar);
+    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.85 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.loudest >= 18, breakage.jar);
   check('anything set to shatter does, not only glass: a crate told to breaks apart when let go of, loudly, says so, and leaves no glass',
-    breakage.crate.dropped.gone && breakage.crate.dropped.shattered === 1 && breakage.crate.dropped.captionBreak === 1 && breakage.crate.dropped.caption === 0 && breakage.crate.dropped.loudest >= 18 &&
-    breakage.crate.glassLeft === 0 && breakage.crate.dropped.said.some((text) => /The crate breaks apart\./.test(text)) && !breakage.crate.dropped.said.some((text) => /glass/.test(text)), breakage.crate);
+    breakage.crate.dropped.gone && breakage.crate.dropped.shattered === 1&& breakage.crate.dropped.loudest >= 18 && breakage.crate.glassLeft === 0, breakage.crate);
   check('where it shattered there is broken glass on the floor, as loud to walk over as any other; a new descent sweeps it up and has everything whole again',
     breakage.glass.patches === 1 && breakage.glass.kind === 'glass' && breakage.glass.metresFromWhereItBroke < 0.8 && breakage.glass.pieces >= 3 && breakage.glass.markedLoud && breakage.glass.setOffByWalkingOverIt >= 1 &&
     breakage.newDescent.glassLeft === 0 && breakage.newDescent.patches === 0 && breakage.newDescent.allWhole && breakage.newDescent.lost === 0, [breakage.glass, breakage.newDescent]);

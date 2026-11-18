@@ -28,6 +28,14 @@ const FIGURE_PROPORTIONS_DUMMY = {
   thigh: 0.575, shin: 0.45, footLength: 0.2, torsoRadius: 0.145, limbRadius: 0.04, legRadius: 0.065, jointRadius: 0.06
 };
 
+// Player model
+const FIGURE_PROPORTIONS_PLAYER = {
+  kind: 'player',
+  torsoLength: 0.5, neckLength: 0.1, headRadius: 0.1, headLength: 0.04,
+  shoulderWidth: 0.4, hipWidth: 0.2, upperArm: 0.3, foreArm: 0.28, handLength: 0.1,
+  thigh: 0.5, shin: 0.45, footLength: 0.2, torsoRadius: 0.14, limbRadius: 0.04, legRadius: 0.06, jointRadius: 0.06
+};
+
 const raycastableFigures = [];
 
 // Points store their lifetime in one byte, in quarter seconds: 1 = 0.25 s, 255 = 63.75 s. 0 means "forever".

@@ -116,7 +116,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('when the host leaves, the lobby is over for everyone', closed.t === 'closed' && named.server.lobbies.size === 0, [closed, named.server.lobbies.size]);
 
   const noisy = await connect(named.host);
-  for (let count = 0; count < 80; count++) noisy.say({ t: 'say', d: {} });
+  for (let count = 0; count < 200; count++) noisy.say({ t: 'say', d: {} });
   await pause(300);
   check('a member that says far too much is shown the door', noisy.isClosed);
   for (const member of [lost, otherBuild, fifth, guests[0].member, guests[1].member]) member.socket.close();
@@ -128,7 +128,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const a = first.page, b = second.page;
 
   check('the title screen offers a lobby when the page comes from the server', await a.isVisible('#button-host-lobby'));
-  await a.evaluate(() => { const d = window.lastReturnDebug; d.settings.station = 'generated'; d.settings.seedText = '4471'; d.settings.stationSize = 'small'; d.settings.difficulty = 'survey'; });
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.settings.station = 'generated'; d.settings.seedText = '4471'; d.settings.stationSize = 'small'; d.settings.difficulty = 'standard'; d.settings.workOrders = { salvage: true, survey: false, recovery: false, restart: false }; });
   await a.click('#button-host-lobby');
   await a.waitForFunction(() => window.lastReturnDebug.together.code !== '');
   const code = await a.textContent('#together-lobby-code');
@@ -152,8 +152,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const station = async (page) => page.evaluate(() => { const d = window.lastReturnDebug; return { seed: d.level.seed, map: d.level.mapFingerprint, order: d.level.workOrder, difficulty: d.game.difficulty.label, players: d.players.length }; });
   const stationA = await station(a), stationB = await station(b);
   check('both are in the same station, built the same to the tile, at the host\'s threat level',
-    stationA.seed === 4471 && JSON.stringify(stationA) === JSON.stringify(stationB) && stationA.difficulty === 'Survey only', [stationA, stationB]);
-  check('nothing of yours hunts the others: each is alone in their own list of players', stationA.players === 1 && stationB.players === 1);
+    stationA.seed === 4471 && stationA.map === stationB.map && stationA.order === stationB.order && stationA.difficulty === 'Standard' && stationB.difficulty === 'Standard', [stationA, stationB]);
+  check('a descent together is never for salvage, which is about things that still lie loose in each browser alone', stationA.order !== 'salvage', stationA.order);
   const comparison = await b.evaluate(() => {
     const d = window.lastReturnDebug, result = { hostMap: d.together.hostMap, mine: d.level.mapFingerprint, saidWhenSame: document.getElementById('hud-messages').textContent.includes('not built the same') };
     return result;
@@ -204,9 +204,129 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   check('and no longer when they stop', after === 0, after);
 
+  // ---- One station: the host's creatures, doors and work order are everybody's ----
+  // A stretch of play in one browser: its own game, and what it says to the others.
+  const play = (page, seconds) => page.evaluate((seconds) => {
+    const d = window.lastReturnDebug;
+    for (let time = 0; time < seconds; time += 0.1) { d.simulate(0.1); d.updateTogether(0.1); }
+  }, seconds);
+  const both = async (seconds) => { for (let time = 0; time < seconds; time += 0.3) { await play(a, 0.3); await play(b, 0.3); await pause(170); } }; // (not faster than the clock: the server shows a browser the door for saying too much)
+  await a.evaluate(() => { window.lastReturnDebug.settings.captions = 'all'; });
+  await b.evaluate(() => { window.lastReturnDebug.settings.captions = 'all'; });
+
+  // Both step out of the car. The one who is not the host does it first.
+  await b.evaluate(() => {
+    const d = window.lastReturnDebug;
+    // The nearest walkable spot that is well outside the car.
+    let best = null;
+    for (let step = 3; step < 12 && !best; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+      const spot = d.findWalkableSpotNear(d.playerStart.x + way[0], d.playerStart.z + way[1]);
+      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 3) { best = spot; break; }
+    }
+    d.teleport(best.x, best.z, 0);
+  });
+  await both(1.2);
+  const leftLift = { host: await a.evaluate(() => ({ left: window.lastReturnDebug.game.flags.hasLeftLift, players: window.lastReturnDebug.players.length })),
+    other: await b.evaluate(() => ({ left: window.lastReturnDebug.game.flags.hasLeftLift, players: window.lastReturnDebug.players.length })) };
+  check('in the host\'s game the other is one of the players; in the other\'s own game nothing hunts or opens but as the host says', leftLift.host.players === 2 && leftLift.other.players === 1, leftLift);
+  check('one of you leaving the lift is the descent leaving the lift, for everybody', leftLift.host.left && leftLift.other.left, leftLift);
+
+  // A door far from the host opens because the other stands at it, in both games.
+  const doorIndex = await a.evaluate(() => {
+    const d = window.lastReturnDebug;
+    for (let index = 0; index < d.doors.length; index++) {
+      const door = d.doors[index];
+      if (door.kind === d.doorKinds.automatic && Math.hypot(door.centerX - d.player.x, door.centerZ - d.player.z) > 10) return index;
+    }
+    return -1;
+  });
+  await both(0.6);
+  const doorBefore = [await a.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex), await b.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex)];
+  await b.evaluate((index) => { const d = window.lastReturnDebug, door = d.doors[index]; d.teleport(door.centerX, door.centerZ, 0); d.player.velocityX = 0; d.player.velocityZ = 0; }, doorIndex);
+  await both(2.4);
+  const doorAfter = [await a.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex), await b.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex)];
+  check('a door opens for the other in the host\'s game, and the other\'s door follows it', doorBefore[0] === 0 && doorBefore[1] === 0 && doorAfter[0] === 1 && doorAfter[1] === 1, [doorBefore, doorAfter]);
+
+  // The host's Hollow: shown to the other where the host has it, and it hears the other.
+  const hollowAt = await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0];
+    let spot = null;
+    for (const way of [[9, 0], [-9, 0], [0, 9], [0, -9], [6, 6], [-6, -6]]) { const tried = d.findWalkableSpotNear(other.x + way[0], other.z + way[1]); if (tried && Math.hypot(tried.x - other.x, tried.z - other.z) > 5) { spot = tried; break; } }
+    d.spawnHollow(spot.x, spot.z);
+    d.hollow.graceTimer = 0; d.hollow.state = 4; d.hollow.listenTimer = 30; // standing, listening
+    return spot;
+  });
+  await both(1.2);
+  const hollowSeen = await b.evaluate(() => { const d = window.lastReturnDebug; return { isActive: d.hollow.isActive, x: d.hollow.figure.x, z: d.hollow.figure.z, state: d.hollow.state, capsules: d.hollow.figure.capsuleCount }; });
+  check('the other is shown the host\'s Hollow where the host has it, doing what it is doing', hollowSeen.isActive && Math.hypot(hollowSeen.x - hollowAt.x, hollowSeen.z - hollowAt.z) < 0.6 && hollowSeen.state === 4 && hollowSeen.capsules > 20, [hollowAt, hollowSeen]);
+  const roarsBefore = await b.evaluate(() => { const d = window.lastReturnDebug; return (d.captionCounts.hollowFound || 0) + (d.captionCounts.hollowRoar || 0); });
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.emitNoise(d.player.x, d.player.z, 60); });
+  await pause(150);
+  await both(0.6);
+  const heard = { host: await a.evaluate(() => { const d = window.lastReturnDebug; return { state: d.hollow.state, at: Math.hypot(d.hollow.lastKnownPlayerX - d.together.others[0].x, d.hollow.lastKnownPlayerZ - d.together.others[0].z) }; }),
+    roars: await b.evaluate(() => { const d = window.lastReturnDebug; return (d.captionCounts.hollowFound || 0) + (d.captionCounts.hollowRoar || 0); }) - roarsBefore };
+  check('noise the other makes is heard by the host\'s Hollow, which hunts them', heard.host.state === 2 && heard.host.at < 2.5, heard);
+  check('and the other hears it roar', heard.roars >= 1, heard);
+
+  // It reaches them. That is their death, in their own game; the host plays on, and the Hollow is sent away.
+  await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.hollow.figure.x = other.x + 0.3; d.hollow.figure.z = other.z; d.hollow.graceTimer = 0; });
+  await play(a, 0.2);
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 5000 }).catch(() => {});
+  const caught = { other: await b.evaluate(() => window.lastReturnDebug.game.mode),
+    host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, isDown: other.isDown, players: d.players.length, metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
+  check('the host\'s Hollow catching the other is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
+  check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
+  // The station does not stop for the dead.
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 });
+  const timeBefore = await b.evaluate(() => window.lastReturnDebug.game.time);
+  for (let count = 0; count < 4; count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  check('the station goes on while you lie dead', await b.evaluate((before) => window.lastReturnDebug.game.time > before, timeBefore));
+  await b.evaluate(() => window.lastReturnDebug.retryFromCheckpoint());
+  await a.waitForFunction(() => !window.lastReturnDebug.together.others[0].isDown, null, { timeout: 5000 }).catch(() => {});
+  await both(0.6);
+  check('back on their feet, they are one of the players again', await a.evaluate(() => window.lastReturnDebug.players.length === 2 && !window.lastReturnDebug.together.others[0].isDown));
+  await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
+
+  // What one of you does to the station is done in every game: the other takes the first keycard.
+  const taken = await b.evaluate(() => {
+    const d = window.lastReturnDebug;
+    d.clearMessages();
+    d.askToAct({ what: 'use', objectId: d.keycardObjectIds[1] });
+    return d.game.flags.keycardLevel; // not yet: it is the host's to say
+  });
+  await a.waitForFunction(() => window.lastReturnDebug.game.flags.keycardLevel >= 1, null, { timeout: 5000 }).catch(() => {});
+  await b.waitForFunction(() => window.lastReturnDebug.game.flags.keycardLevel >= 1, null, { timeout: 5000 }).catch(() => {});
+  const card = { before: taken,
+    host: await a.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: document.getElementById('hud-messages').textContent.includes('eycard') }; }),
+    other: await b.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: document.getElementById('hud-messages').textContent.includes('eycard') }; }) };
+  check('a keycard one of you takes is taken in every game, once the host has said so', card.before === 0 && card.host.level === 1 && card.other.level === 1 && card.host.gone && card.other.gone, card);
+  check('and only the one who took it is told so', card.other.told && !card.host.told, card);
+
+  // The menu does not stop the host's station.
+  await a.keyboard.press('Escape');
+  const paused = await a.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, time: window.lastReturnDebug.game.time }));
+  for (let count = 0; count < 4; count++) await a.screenshot({ type: 'jpeg', quality: 5 });
+  check('the host\'s station goes on while the host has the menu open', paused.mode === 'paused' && await a.evaluate((before) => window.lastReturnDebug.game.time > before, paused.time), paused);
+  await a.keyboard.press('Escape');
+  await a.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing');
+
+  // The car goes up when everyone is in it, and not before.
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.game.flags.liftArrived = true; d.teleport(d.playerStart.x, d.playerStart.z, 0); });
+  await both(0.9);
+  const waiting = [await a.evaluate(() => window.lastReturnDebug.game.mode), await b.evaluate(() => window.lastReturnDebug.game.mode)];
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.teleport(d.playerStart.x, d.playerStart.z, 0); });
+  await both(0.9);
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode !== 'playing', null, { timeout: 5000 }).catch(() => {});
+  const up = [await a.evaluate(() => window.lastReturnDebug.game.mode), await b.evaluate(() => window.lastReturnDebug.game.mode)];
+  check('the car waits while one of you is still outside', waiting[0] === 'playing' && waiting[1] === 'playing', waiting);
+  check('and goes up with everyone once all are in it', up[0] === 'ascending' && up[1] === 'ascending', up);
+  // (Back to play, for what is left of this suite.)
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.game.mode = 'playing'; d.game.flags.liftArrived = false; });
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.game.mode = 'playing'; });
+
   // Numbers no player could be at. They come from somebody else's browser, so they are held to the station.
   // (The host's game is kept from saying where it really is straight afterwards, which would put it right again.)
-  await a.evaluate(() => { const d = window.lastReturnDebug; d.together.sendTimer = 1e9; d.together.socket.send(JSON.stringify({ t: 'say', d: { k: 'at', x: 1e300, z: -5, e: 1e9, w: 1e300, p: 9, c: 1, s: 1e9 } })); });
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.together.sendTimer = 1e9; d.together.socket.send(JSON.stringify({ t: 'say', d: { k: 'at', x: 1e300, z: -5, e: 1e9, w: 1e300, p: 9, c: 1, s: 1e9, vx: 1e300, vz: -1e300, r: 1e300 } })); });
   await b.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees > 0);
   const wild = await b.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0];

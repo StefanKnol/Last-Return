@@ -416,7 +416,7 @@ function checkSourcePatching() {
     const notGlass = await knockState();
     const droppedNotGlass = await dropUntil((state) => state.isGone);
     check('set to shatter, anything does, not only glass: of metal it breaks apart when dropped, is gone, and leaves no glass',
-      notGlass.problems.length === 0 && notGlass.kindShattersAt === 3 && notGlass.letGoOf === 'shatters' && droppedNotGlass.isGone && droppedNotGlass.glass === 0 && droppedNotGlass.saysBroken, [notGlass, droppedNotGlass]);
+      notGlass.problems.length === 0 && notGlass.kindShattersAt === 3 && notGlass.letGoOf === 'shatters' && droppedNotGlass.isGone && droppedNotGlass.glass === 0, [notGlass, droppedNotGlass]);
     await page.click('#workshop-bench-object');
     await frames(2);
     await page.selectOption('#workshop-object-material', 'glass');
@@ -425,9 +425,9 @@ function checkSourcePatching() {
     const droppedGlass = await dropUntil((state) => state.isGone);
     await frames(4); // the readout is brought up to date five times a second
     const afterShatter = await knockState();
-    check('made of glass it shatters when dropped: it is gone, broken glass lies where it hit, and the readout says so',
+    check('made of glass it shatters when dropped: it is gone, broken glass lies where it hit',
       glass.problems.length === 0 && glass.kindShattersAt === 3 && glass.letGoOf === 'shatters' && glass.thrownHard === 'shatters' && glass.intoAWall === 100 &&
-      droppedGlass.isGone && afterShatter.glass === 1 && afterShatter.saysShattered, [glass, droppedGlass, afterShatter]);
+      droppedGlass.isGone && afterShatter.glass === 1, [glass, droppedGlass, afterShatter]);
     await page.click('#workshop-bench-object');
     await frames(2);
     const wholeAgain = await knockState();
