@@ -95,7 +95,7 @@ const LOOSE_OBJECT_KINDS = {
   // An empty can. Six of them lie wherever the noisy floor's draw says "cans" (03-noisy-floor.js). Kicked at a
   // walk they carry as far as the patch of cans they replace did; crouched, you can pick your way through.
   can: {
-    label: 'empty can', mass: 0.06, value: 1, material: 'tin', loud: 1.7, lies: 'either', bulky: false, bounce: 0.35, grip: 0.4,
+    label: 'empty can', mass: 0.06, value: 3, fragile: 0.3, material: 'tin', loud: 1.7, lies: 'either', bulky: false, bounce: 0.35, grip: 0.4,
     stepRadius: 0.035, // its body is what must not pass through a shelf in one step; the balls in the corners of its ends are within it
     // A cylinder, 13 cm tall and 7 cm across: it stands on either flat end. (It used to be a capsule with four
     // small feet at each end to stand on, of the same height. As a cylinder from -0.035 to 0.035 it was half
@@ -103,11 +103,11 @@ const LOOSE_OBJECT_KINDS = {
     parts: [{ shape: 'cylinder', from: [0, -0.065, 0], to: [0, 0.065, 0], radius: 0.035 }]
   },
   carton: {
-    label: 'cardboard box', mass: 0.7, value: 2, fragile: 0.5, material: 'card', loud: 0.6, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.7,
+    label: 'cardboard box', mass: 0.7, value: 5, fragile: 0.5, material: 'card', loud: 0.6, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.7,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.17, 0.11, 0.13] }]
   },
   plate: {
-    label: 'steel plate', mass: 3.5, value: 6, fragile: 0.2, material: 'metal', loud: 1.3, lies: 'upright', bulky: false, bounce: 0.25, grip: 0.5,
+    label: 'steel plate', mass: 3.5, value: 8, fragile: 0.2, material: 'metal', loud: 1.3, lies: 'upright', bulky: false, bounce: 0.25, grip: 0.5,
     // It is thin, but nothing in a station is thinner than a shelf board: steps of a centimetre or so are fine enough
     // for it not to pass through one, and steps as fine as its own thickness would slow everything that moves with it.
     stepRadius: 0.025,
