@@ -449,6 +449,7 @@ function hearOtherPlayer(id, data) {
   }
   if (!together.isInDescent) return;
   if (data.k === 'loose') { hearWhereLooseThingsAre(id, data); return; }
+  if (data.k === 'knock') { hearKnock(data); return; }
   if (data.k !== 'at') { hearOfTheStation(id, data); return; }
   const other = findOtherPlayer(id);
   if (!other) return;
@@ -946,6 +947,24 @@ function performLooseAction(action) {
   } else if (action.what === 'setOff') {
     if (object.kind.use && !object.isSpent && object.armedTime < 0) object.kind.use.activate(object);
   }
+}
+
+// A thing this browser moves has knocked against something. The others hear it where it happened; only the
+// browser that moves a thing knows it knocked. `loudness` is 0 to 1, or -1 for one too faint to be worth words.
+function tellOthersOfKnock(material, volume, weight, x, y, z, loudness) {
+  if (!isWorldShared()) return;
+  const round = function (value) { return Math.round(value * 100) / 100; };
+  sayToOthers({ k: 'knock', m: material, v: round(volume), w: round(weight), x: round(x), y: round(y), z: round(z), l: round(loudness) });
+}
+
+function hearKnock(data) {
+  for (const key of ['v', 'w', 'x', 'y', 'z', 'l']) if (!Number.isFinite(data[key])) return;
+  let isMaterial = false; // (one that some kind of loose thing is made of: it names a sound)
+  for (const kindKey in LOOSE_OBJECT_KINDS) if (LOOSE_OBJECT_KINDS[kindKey].material === data.m) isMaterial = true;
+  if (!isMaterial) return;
+  const x = clampNumber(data.x, 0, GRID_WIDTH), z = clampNumber(data.z, 0, GRID_DEPTH);
+  playLooseObjectKnock(data.m, clampNumber(data.v, 0, 1), clampNumber(data.w, 0.3, 3), x, clampNumber(data.y, -100, 100), z);
+  if (data.l >= 0) showCaption(data.l > 0.55 ? 'objectCrash' : 'objectKnock', { x: x, z: z });
 }
 
 // The things this browser moves that are moving, or have just stopped: where they are, for the others.

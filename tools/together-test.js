@@ -379,12 +379,39 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     carriedA.heldById === ids.other && carriedA.ownerId === ids.other && Math.hypot(carriedA.x - startedAt.x, carriedA.z - startedAt.z) > 1 &&
     Math.hypot(carriedA.x - carriedB.x, carriedA.y - carriedB.y, carriedA.z - carriedB.z) < 0.5, [startedAt, carriedA, carriedB]);
   // They throw it. Where it comes to lie is the same place in both games, and it is the host's to move again.
+  const knocksBefore = await a.evaluate(() => { const d = window.lastReturnDebug; return (d.captionCounts.objectKnock || 0) + (d.captionCounts.objectCrash || 0); });
   await b.evaluate(() => { const d = window.lastReturnDebug; d.player.pitch = 0.2; d.releaseHeldLooseObject(1); });
   for (let turn = 0; turn < 14; turn++) { await both(0.9); if ((await about(b, carriedId)).isAsleep && (await about(a, carriedId)).isAsleep) break; }
   const landedB = await about(b, carriedId), landedA = await about(a, carriedId);
   check('thrown, it comes to lie in the same place in both games, and is the host\'s again',
     landedA.isAsleep && landedB.isAsleep && Math.hypot(landedA.x - landedB.x, landedA.y - landedB.y, landedA.z - landedB.z) < 0.02 &&
     landedA.heldById === 0 && landedA.ownerId === ids.host && landedB.ownerId === ids.host && Math.hypot(landedB.x - carriedB.x, landedB.z - carriedB.z) > 0.5, [landedA, landedB]);
+  const knocksHeard = await a.evaluate((before) => { const d = window.lastReturnDebug; return (d.captionCounts.objectKnock || 0) + (d.captionCounts.objectCrash || 0) - before; }, knocksBefore);
+  check('the host hears it land, though it was the other\'s browser that moved it', knocksHeard >= 1, knocksHeard);
+  // A pump motor is put down in both games, in the same place (so it has the same number in both). It is the
+  // host's to move. The other walks at it for two seconds: it stops them, as it would stop the host.
+  const motorSpot = await a.evaluate(() => { const d = window.lastReturnDebug; const spot = d.findWalkableSpotNear(d.player.x + 2, d.player.z) || d.findWalkableSpotNear(d.player.x, d.player.z + 2); return { x: spot.x, z: spot.z, y: d.getFloorHeightAt(spot.x, spot.z) + 0.5 }; });
+  const motorIds = [];
+  for (const page of [a, b]) motorIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('pumpMotor', spot.x, spot.y, spot.z, 0).id, motorSpot));
+  for (let turn = 0; turn < 10; turn++) { await both(0.9); if ((await about(b, motorIds[1])).isAsleep && (await about(a, motorIds[0])).isAsleep) break; }
+  const walkedInto = await b.evaluate((id) => {
+    const d = window.lastReturnDebug, heavy = d.looseObjects.filter((object) => object.id === id)[0];
+    let from = null;
+    for (const way of [[1.6, 0], [-1.6, 0], [0, 1.6], [0, -1.6]]) {
+      const spot = d.findWalkableSpotNear(heavy.x + way[0], heavy.z + way[1]);
+      if (spot && Math.hypot(spot.x - heavy.x, spot.z - heavy.z) > 1.1 && Math.hypot(spot.x - heavy.x, spot.z - heavy.z) < 2.2) { from = spot; break; }
+    }
+    if (!from) return null;
+    d.teleport(from.x, from.z, Math.atan2(heavy.x - from.x, -(heavy.z - from.z))); d.player.pitch = 0;
+    d.player.velocityX = 0; d.player.velocityZ = 0;
+    const startMetres = Math.hypot(from.x - heavy.x, from.z - heavy.z);
+    d.input.keysDown.add('KeyW');
+    d.simulate(2);
+    d.input.keysDown.delete('KeyW');
+    return { isAsleep: heavy.isAsleep, startMetres: startMetres, endMetres: Math.hypot(d.player.x - heavy.x, d.player.z - heavy.z), isTheHosts: (heavy.ownerId || d.together.hostId) !== d.together.myId };
+  }, motorIds[1]);
+  check('something heavy that the host\'s game moves stops the other walking through it',
+    motorIds[0] === motorIds[1] && walkedInto !== null && walkedInto.isTheHosts && walkedInto.endMetres > 0.4 && walkedInto.endMetres < walkedInto.startMetres - 0.3, [motorIds, walkedInto]);
   // Something breaks: it is gone from both games.
   const brokenId = await a.evaluate(() => {
     const d = window.lastReturnDebug, thing = d.looseObjects.filter((object) => object.kind.shattersAt)[0] || d.looseObjects[d.looseObjects.length - 1];
@@ -409,6 +436,14 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await a.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing');
 
   // The car goes up when everyone is in it, and not before.
+  await b.evaluate(() => {
+    const d = window.lastReturnDebug; // well away from the car, wherever the checks above left them
+    for (let step = 6; step < 20; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+      const spot = d.findWalkableSpotNear(d.playerStart.x + way[0], d.playerStart.z + way[1]);
+      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 5) { d.teleport(spot.x, spot.z, 0); return; }
+    }
+  });
+  await both(0.6);
   await a.evaluate(() => { const d = window.lastReturnDebug; d.game.flags.liftArrived = true; d.teleport(d.playerStart.x, d.playerStart.z, 0); });
   await both(0.9);
   const waiting = [await a.evaluate(() => window.lastReturnDebug.game.mode), await b.evaluate(() => window.lastReturnDebug.game.mode)];

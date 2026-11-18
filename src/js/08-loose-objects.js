@@ -495,6 +495,31 @@ function removeLooseObject(object) {
   if (index >= 0) looseObjects.splice(index, 1);
 }
 
+// Down there with others: a thing another browser moves is not run here, so nothing here would notice you
+// walking into it, and you would go straight through a crate. This is the half of that meeting that is yours:
+// how far the thing pushes back at you, worked out the way it is for a thing that is run here (the heavier it
+// is, the more). The other half, the thing giving way, happens where it is moved, and is then seen here.
+// What somebody is carrying is in nobody's way, as what you carry is not in yours.
+function pushBackFromAnothersThings() {
+  if (!isWorldShared() || game.mode !== 'playing') return;
+  const top = player.floorY + (player.isCrouching ? 1.0 : 1.7);
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const object = looseObjects[objectIndex];
+    if (object.heldById || !isLooseObjectAnothers(object)) continue;
+    const reach = object.prepared.boundsRadius + TUNING.playerRadius;
+    if (Math.abs(object.x - player.x) > reach || Math.abs(object.z - player.z) > reach) continue;
+    const shell = object.prepared.shell, matrix = object.matrix, resistance = getLooseShoveResistance(object.kind.mass), bottom = player.floorY + (object.kind.stepOverHeight || 0);
+    for (let ballIndex = 0; ballIndex < object.prepared.shellCount; ballIndex++) {
+      const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2];
+      looseContactCount = 0;
+      addLooseContactWithWalker(true, resistance, player.x, player.z, TUNING.playerRadius, bottom, top, 0, 0,
+        object.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ, object.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ,
+        object.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ, shell[ballIndex * 4 + 3]);
+    }
+    looseContactCount = 0; // (only the push back is kept: looseState.shoveBackDepth)
+  }
+}
+
 function findLooseObjectById(id) {
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) if (looseObjects[objectIndex].id === id) return looseObjects[objectIndex];
   return null;
@@ -1454,6 +1479,7 @@ function reportLooseObjectKnock(object) {
   const isHeard = speed >= TUNING.looseKnockQuietSpeed;
   const weight = clampNumber(0.55 + object.kind.mass / 14, 0.6, 1.5) * (object.kind.loud || 1);
   playLooseObjectKnock(object.kind.material, isHeard ? 0.3 + loudness * 0.7 : 0.12, weight, object.knockX, object.knockY, object.knockZ);
+  tellOthersOfKnock(object.kind.material, isHeard ? 0.3 + loudness * 0.7 : 0.12, weight, object.knockX, object.knockY, object.knockZ, isHeard ? loudness : -1); // down there with others: they hear it too
   if (!isHeard) { looseState.statistics.knocksQuiet++; return; }
   looseState.statistics.knocksHeard++;
   const radius = interpolateLinear(TUNING.noiseRadiusKnockSoft, TUNING.noiseRadiusKnockHard, loudness) * weight;
@@ -2583,6 +2609,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     stepLooseObjects(TUNING.looseStepSeconds);
   }
 
+  pushBackFromAnothersThings();
   updateHollowAtVentCovers();
   updateHollowAfterKickedObjects();
   for (let objectIndex = looseObjects.length - 1; objectIndex >= 0; objectIndex--) {
