@@ -172,7 +172,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const stationA = await station(a), stationB = await station(b);
   check('both are in the same station, built the same to the tile, at the host\'s threat level',
     stationA.seed === 4471 && stationA.map === stationB.map && stationA.order === stationB.order && stationA.difficulty === 'Standard' && stationB.difficulty === 'Standard', [stationA, stationB]);
-  check('a descent together is never for salvage, which is about things that still lie loose in each browser alone', stationA.order !== 'salvage', stationA.order);
+  check('a descent together can be for salvage', stationA.order === 'salvage' && stationB.order === 'salvage', [stationA.order, stationB.order]);
   const comparison = await b.evaluate(() => {
     const d = window.lastReturnDebug, result = { hostMap: d.together.hostMap, mine: d.level.mapFingerprint, saidWhenSame: document.getElementById('hud-messages').textContent.includes('not built the same') };
     return result;
@@ -349,6 +349,56 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     other: await b.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: document.getElementById('hud-messages').textContent.includes('eycard') }; }) };
   check('a keycard one of you takes is taken in every game, once the host has said so', card.before === 0 && card.host.level === 1 && card.other.level === 1 && card.host.gone && card.other.gone, card);
   check('and only the one who took it is told so', card.other.told && !card.host.told, card);
+
+  // ---- Things that lie loose have one place, in every game ----
+  const lying = async (page) => page.evaluate(() => window.lastReturnDebug.looseObjects.map((object) => [object.id, object.kindKey, Math.round(object.x * 100), Math.round(object.z * 100)].join(':')).join(','));
+  const lyingA = await lying(a), lyingB = await lying(b);
+  check('at the start every loose thing has the same number and lies in the same place in both games', lyingA.length > 20 && lyingA === lyingB, lyingA.length);
+  const about = (page, id) => page.evaluate((id) => {
+    const d = window.lastReturnDebug, object = d.looseObjects.filter((candidate) => candidate.id === id)[0];
+    return object ? { x: object.x, y: object.y, z: object.z, heldById: object.heldById, ownerId: object.ownerId, isAsleep: object.isAsleep, worth: object.worth } : null;
+  }, id);
+  // The other takes something light into their beam, and walks off with it. In the host's game it goes with them.
+  const carriedId = await b.evaluate(() => {
+    const d = window.lastReturnDebug;
+    d.game.flags.hasLeftLift = true;
+    const light = d.looseObjects.filter((object) => object.kind.mass <= 3 && !object.kind.use && !object.kind.shattersAt).sort((first, second) => first.id - second.id)[0];
+    const spot = d.findWalkableSpotNear(light.x + 1.2, light.z) || d.findWalkableSpotNear(light.x, light.z + 1.2);
+    d.teleport(spot.x, spot.z, Math.atan2(light.x - spot.x, -(light.z - spot.z))); d.player.pitch = -0.5;
+    d.simulate(0.1);
+    d.pickUpLooseObject(light, false);
+    return light.id;
+  });
+  await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
+  const startedAt = await about(a, carriedId);
+  await b.evaluate(() => { const d = window.lastReturnDebug; const spot = d.findWalkableSpotNear(d.player.x + 3, d.player.z) || d.findWalkableSpotNear(d.player.x, d.player.z + 3); d.teleport(spot.x, spot.z); });
+  await both(2.4);
+  const carriedB = await about(b, carriedId), carriedA = await about(a, carriedId);
+  const ids = { host: await a.evaluate(() => window.lastReturnDebug.together.myId), other: await b.evaluate(() => window.lastReturnDebug.together.myId) };
+  check('what the other takes into their beam is theirs to move, and in the host\'s game it goes where they carry it',
+    carriedA.heldById === ids.other && carriedA.ownerId === ids.other && Math.hypot(carriedA.x - startedAt.x, carriedA.z - startedAt.z) > 1 &&
+    Math.hypot(carriedA.x - carriedB.x, carriedA.y - carriedB.y, carriedA.z - carriedB.z) < 0.5, [startedAt, carriedA, carriedB]);
+  // They throw it. Where it comes to lie is the same place in both games, and it is the host's to move again.
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.player.pitch = 0.2; d.releaseHeldLooseObject(1); });
+  for (let turn = 0; turn < 14; turn++) { await both(0.9); if ((await about(b, carriedId)).isAsleep && (await about(a, carriedId)).isAsleep) break; }
+  const landedB = await about(b, carriedId), landedA = await about(a, carriedId);
+  check('thrown, it comes to lie in the same place in both games, and is the host\'s again',
+    landedA.isAsleep && landedB.isAsleep && Math.hypot(landedA.x - landedB.x, landedA.y - landedB.y, landedA.z - landedB.z) < 0.02 &&
+    landedA.heldById === 0 && landedA.ownerId === ids.host && landedB.ownerId === ids.host && Math.hypot(landedB.x - carriedB.x, landedB.z - carriedB.z) > 0.5, [landedA, landedB]);
+  // Something breaks: it is gone from both games.
+  const brokenId = await a.evaluate(() => {
+    const d = window.lastReturnDebug, thing = d.looseObjects.filter((object) => object.kind.shattersAt)[0] || d.looseObjects[d.looseObjects.length - 1];
+    d.askToAct({ what: 'shatter', id: thing.id, x: thing.x, y: thing.y, z: thing.z });
+    return thing.id;
+  });
+  await b.waitForFunction((id) => !window.lastReturnDebug.looseObjects.some((object) => object.id === id), brokenId, { timeout: 5000 }).catch(() => {});
+  check('a thing that breaks is gone from both games', (await about(a, brokenId)) === null && (await about(b, brokenId)) === null);
+  // Salvage: the host's bays take the same things out of both games, for the same worth.
+  const sealed = await a.evaluate(() => { const d = window.lastReturnDebug; d.fillHaulBays(); return { taken: d.haulState.taken, left: d.looseObjects.length, bays: d.haulState.bays.map((bay) => bay.state).join(','), progress: d.getHaulProgress() }; });
+  await b.waitForFunction((taken) => window.lastReturnDebug.haulState.taken === taken, sealed.taken, { timeout: 5000 }).catch(() => {});
+  const sealedB = await b.evaluate(() => { const d = window.lastReturnDebug; return { taken: d.haulState.taken, left: d.looseObjects.length, bays: d.haulState.bays.map((bay) => bay.state).join(','), progress: d.getHaulProgress() }; });
+  check('a salvage bay that seals takes the same things out of both games, for the same worth',
+    sealed.taken > 0 && sealed.bays.includes('sealed') && JSON.stringify(sealed) === JSON.stringify(sealedB), [sealed, sealedB]);
 
   // The menu does not stop the host's station.
   await a.keyboard.press('Escape');

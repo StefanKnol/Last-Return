@@ -383,6 +383,9 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     scanHits: 0, isAppraised: false,    // how many pulses have landed on it, and whether that was enough for the scanner to read what it is worth
     wasHandled: false,                  // you have had it in the beam (and the Hollow has not flung it back since): only such things interest it
     isIgnoredByHollow: false,           // the Hollow flung it: it knows that noise, and pays it no heed until you handle the thing again
+    // Down there with others (11-together.js): whose browser moves it (0: the host's), who has it in their beam (0: nobody),
+    // and whether it was moving when its mover last said where it is.
+    ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
     isRemoved: false
   };
   setLooseObjectYaw(object, yaw || 0);
@@ -405,6 +408,7 @@ function clearLooseObjects() {
 
 // A new descent: nothing loose is left over from the last one, and the hints are due again.
 function resetLooseObjectsForNewRun() {
+  looseState.nextId = 1; // the same thing has the same number in every browser that builds this station
   spawnStationLooseObjects(); // clears whatever was loose, and puts the station's own things back where they lay
   looseState.hasShownCarryHint = false;
   looseState.hasShownKnockHint = false;
@@ -424,6 +428,16 @@ function removeLooseObject(object) {
   forgetLooseObjectInTiles(object);
   const index = looseObjects.indexOf(object);
   if (index >= 0) looseObjects.splice(index, 1);
+}
+
+function findLooseObjectById(id) {
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) if (looseObjects[objectIndex].id === id) return looseObjects[objectIndex];
+  return null;
+}
+
+// Is it another browser that moves this thing? (Never, alone.) See "Things that lie loose" in 11-together.js.
+function isLooseObjectAnothers(object) {
+  return isWorldShared() && (object.ownerId || together.hostId) !== together.myId;
 }
 
 // Is this point (in the station) on the surface of the object, where it is now? A hand's width of slack.
@@ -914,7 +928,15 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
     addLooseContactWithWalker(true, getLooseShoveResistance(object.kind.mass), player.x, player.z, TUNING.playerRadius, player.floorY + stepOverHeight, player.floorY + (player.isCrouching ? 1.0 : 1.7),
       looseState.playerStrideX, looseState.playerStrideZ, positionX, positionY, positionZ, radius);
   }
-  if (hollow.isActive) {
+  // The others who are down here walk into things as you do. (What gives way to them is moved here; what they
+  // carry is theirs.)
+  for (let index = 1; index < players.length; index++) {
+    const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
+    if (one === player || object.heldById === one.id) continue;
+    addLooseContactWithWalker(false, getLooseShoveResistance(object.kind.mass), one.x, one.z, TUNING.playerRadius, floorY + stepOverHeight, floorY + (one.isCrouching ? 1.0 : 1.7),
+      one.velocityX, one.velocityZ, positionX, positionY, positionZ, radius);
+  }
+  if (hollow.isActive && !isWorldTheHosts()) {
     const figure = hollow.figure;
     addLooseContactWithWalker(false, 0, figure.x, figure.z, 0.34, figure.y + stepOverHeight, figure.y + 1.9,
       looseState.hollowVelocityX, looseState.hollowVelocityZ, positionX, positionY, positionZ, radius);
@@ -1202,6 +1224,9 @@ function stepLooseObjects(stepSeconds) {
     const object = looseObjects[objectIndex];
     object.isMoving = !object.isAsleep;
     if (object.isAsleep) continue;
+    // Something another browser moves is not moved here: it goes on as it was last said to be going, until that
+    // browser says more. It is still in the way of what is moved here, and knocks into it.
+    object.isAnothers = isLooseObjectAnothers(object);
     looseMoving.push(object);
     object.wasTouching = object.touchedThisStep;
     object.touchedThisStep = false;
@@ -1217,7 +1242,8 @@ function stepLooseObjects(stepSeconds) {
       const object = looseMoving[movingIndex];
       object.beforeVelocityX = object.velocityX; object.beforeVelocityY = object.velocityY; object.beforeVelocityZ = object.velocityZ;
       object.beforeSpinX = object.spinX; object.beforeSpinY = object.spinY; object.beforeSpinZ = object.spinZ;
-      if (object.isHeld) driveHeldLooseObject(object, seconds);
+      if (object.isAnothers) { /* neither the beam nor its weight: only on, as it was going */ }
+      else if (object.isHeld) driveHeldLooseObject(object, seconds);
       else object.velocityY -= TUNING.looseGravity * seconds;
       integrateLooseObject(object, seconds);
       refreshLooseObjectTiles(object);
@@ -1228,10 +1254,11 @@ function stepLooseObjects(stepSeconds) {
     settleLooseTouches();
     for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) {
       const object = looseMoving[movingIndex];
+      if (object.isAnothers) continue; // where it is, is its mover's to say
       object.x += object.moveEast + object.moveWest; object.y += object.moveUp + object.moveDown; object.z += object.moveSouth + object.moveNorth;
     }
   }
-  for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) finishLooseObjectStep(looseMoving[movingIndex], stepSeconds);
+  for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) if (!looseMoving[movingIndex].isAnothers) finishLooseObjectStep(looseMoving[movingIndex], stepSeconds);
 }
 
 // What is left to do for one object when a step is over: the small losses, a check that it is still in the
@@ -1396,7 +1423,15 @@ function damageLooseObject(object, speed) {
   return false;
 }
 
+// It breaks. Down there with others that is something done to the station: it is asked for, and breaks in
+// every browser when the host says so (askToAct). Alone it breaks now.
 function shatterLooseObject(object) {
+  if (object.isShattering) return; // asked for already
+  object.isShattering = true;
+  askToAct({ what: 'shatter', id: object.id, x: object.x, y: object.y, z: object.z });
+}
+
+function shatterLooseObjectNow(object) {
   const x = object.x, y = object.y, z = object.z, wasOwn = object.knockIsOwn, wasWorth = getLooseObjectValue(object), wasAppraised = object.isAppraised;
   const kind = object.kind, isGlass = kind.material === 'glass';
   const isOfTheHollowsOwnMaking = !wasOwn && (game.time - object.kickedByHollowTime < 3 || object.isIgnoredByHollow);
@@ -1457,7 +1492,15 @@ function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
 }
 
 // `isByButton`: it is held for as long as the right mouse button is, and dropped when that is let go.
+// Down there with others, whose beam has a thing is the host's to say, so that two of you cannot have the
+// same one: it is asked for (askToAct) and is in your beam when the host says so. Alone it is at once.
 function pickUpLooseObject(object, isByButton) {
+  if (looseState.held || !object || object.isRemoved || object.heldById) return false;
+  askToAct({ what: 'take', id: object.id, isByButton: Boolean(isByButton) });
+  return looseState.held === object;
+}
+
+function pickUpLooseObjectNow(object, isByButton) {
   if (looseState.held || !object || object.isRemoved) return false;
   wakeLooseObject(object);
   wakeLooseObjectsTouching(object);
@@ -1493,6 +1536,7 @@ function releaseHeldLooseObject(throwStrength) {
   looseState.lettingGoSeconds = 0;
   object.isHeld = false;
   object.lastHandledTime = game.time;
+  askToAct({ what: 'release', id: object.id }); // so that somebody else can take it (it is still yours to move until it lies still)
   if (throwStrength > 0) {
     const speed = TUNING.looseThrowSpeed * throwStrength / (1 + object.kind.mass * TUNING.looseThrowLossPerKilogram);
     const cosinePitch = Math.cos(player.pitch);
@@ -1522,7 +1566,7 @@ function updateLooseCarryInput(dt) {
   if (input.wantsUseCarried) {
     input.wantsUseCarried = false;
     const carried = looseState.held;
-    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0) carried.kind.use.activate(carried);
+    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0) askToAct({ what: 'setOff', id: carried.id });
   }
   // The right mouse button: down on something in reach takes it into the beam, up lets it go as it is moving.
   if (input.isGrabHeld && !looseState.held && player.focusedLooseObject && !player.focusedLooseObject.isRemoved) {
@@ -2053,7 +2097,7 @@ function isPointInHaulBay(bay, x, z, margin) {
 }
 
 function isLooseObjectInHaulBay(object, bay) {
-  return !object.isHeld && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
+  return !object.isHeld && !object.heldById && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
 }
 
 // What lies in a bay is worth this much.
@@ -2114,18 +2158,27 @@ function pulseHaulBay(bay) {
   }
   playHaulBayPing(bay.lampX, bay.lampY, bay.lampZ);
   showCaption('salvageBayPing', { x: bay.doorwayX, z: bay.doorwayZ });
-  emitNoise(bay.doorwayX, bay.doorwayZ, TUNING.noiseRadiusHaulBayPing);
+  if (!isWorldTheHosts()) emitNoise(bay.doorwayX, bay.doorwayZ, TUNING.noiseRadiusHaulBayPing); // (every browser pings; the Hollow hears it once)
 }
 
-// The door is down: what is inside is taken.
+// The door is down: what is inside is taken. Which things those are is said once (down there with others, by the
+// host's game) and taken out of every browser alike (askToAct, 11-together.js).
 function finishSealingHaulBay(bay) {
   let value = 0;
+  const ids = [];
   for (let objectIndex = looseObjects.length - 1; objectIndex >= 0; objectIndex--) {
     const object = looseObjects[objectIndex];
     if (!isLooseObjectInHaulBay(object, bay)) continue;
     value += getLooseObjectValue(object);
-    removeLooseObject(object);
+    ids.push(object.id);
   }
+  bay.isBeingSealed = true; // (asked for once)
+  askToAct({ what: 'sealBay', index: bay.index, ids: ids, value: value });
+}
+
+function sealHaulBayNow(bay, ids, value) {
+  bay.isBeingSealed = false;
+  for (const id of ids) { const object = findLooseObjectById(id); if (object) removeLooseObject(object); }
   bay.state = 'sealed'; bay.taken = value;
   haulState.taken += value;
   bay.interactable.isAvailable = false;
@@ -2144,9 +2197,12 @@ function updateHaulBays(dt) {
   const bay = findOpenHaulBay();
   if (bay === null) return;
   // Are you in it, or in its doorway? Then its door stays up, whatever it holds.
-  const isPlayerInTheWay = isPointInHaulBay(bay, player.x, player.z, 0.35) || distanceBetweenPoints(player.x, player.z, bay.doorwayX, bay.doorwayZ) < 0.95;
+  // (Down there with others: is any of you. And when a bay seals, and what with, is the host's game's to say.)
+  let isPlayerInTheWay = false;
+  for (const one of players) if (isPointInHaulBay(bay, one.x, one.z, 0.35) || distanceBetweenPoints(one.x, one.z, bay.doorwayX, bay.doorwayZ) < 0.95) isPlayerInTheWay = true;
   if (bay.state === 'sealing') {
-    if (isPlayerInTheWay) { bay.state = 'open'; return; } // back under the door before it was down: it goes up again
+    if (isWorldTheHosts() || bay.isBeingSealed) return;
+    if (isPlayerInTheWay) { askToAct({ what: 'bayState', index: bay.index, state: 'open' }); return; } // back under the door before it was down: it goes up again
     if (bay.door.openFraction <= 0) finishSealingHaulBay(bay);
     return;
   }
@@ -2167,10 +2223,11 @@ function updateHaulBays(dt) {
     refreshObjective();
   }
   // Enough in it (or enough in all): it seals, once you, the Hollow and anything in the doorway are out of the way.
+  if (isWorldTheHosts()) return;
   if (inside <= 0 || (inside < bay.quota && progress.done < progress.total)) return;
   if (isPlayerInTheWay || isLooseObjectInDoorway(bay.door)) return;
   if (hollow.isActive && isPointInHaulBay(bay, hollow.figure.x, hollow.figure.z, 0.6)) return;
-  bay.state = 'sealing';
+  askToAct({ what: 'bayState', index: bay.index, state: 'sealing' });
 }
 
 // For tests and debug mode: opens the bays one after another, carries what each one wants into it (the
@@ -2223,7 +2280,7 @@ function fillHaulBays() {
 // not push past it: it has it in its hands and throws it out across the room, and where that comes down it is
 // as loud as a sheet of steel thrown eight metres a second is. That noise does not startle the Hollow.
 function updateHollowAtVentCovers() {
-  if (!hollow.isActive || level.ventMouths.length === 0) return;
+  if (!hollow.isActive || level.ventMouths.length === 0 || isWorldTheHosts()) return; // (the host's Hollow: what it throws, it throws in the host's game)
   const figure = hollow.figure, reach = TUNING.hollowThrowsCoverMetres;
   for (const mouth of level.ventMouths) {
     // Where it is, measured from the middle of the mouth's face: `along` is positive inside the duct, negative out in the room.
@@ -2267,7 +2324,7 @@ function throwVentCoverFromHollow(object, mouth, isHollowInTheRoom) {
 }
 
 function updateHollowAfterKickedObjects() {
-  if (!hollow.isActive) return;
+  if (!hollow.isActive || isWorldTheHosts()) return;
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
     const object = looseObjects[objectIndex];
     if (object.isHeld || !object.wasHandled || object.kind.mass > TUNING.hollowChasesKickedMass) continue;
@@ -2425,8 +2482,13 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
     const object = looseObjects[objectIndex];
     if (!object.isAsleep) continue;
+    if (isLooseObjectAnothers(object)) continue; // woken by its mover, where it is moved
     if (player.isMoving) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + 1.7);
     if (hollow.isActive) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
+    for (let index = 1; index < players.length; index++) {
+      const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
+      if (one !== player) wakeLooseObjectIfWalkedInto(object, one.x, one.z, TUNING.playerRadius, floorY, floorY + 1.7);
+    }
   }
 
   looseState.shoveBackDepth = 0;
@@ -2442,9 +2504,9 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     const object = looseObjects[objectIndex];
     if (object.kind.update) object.kind.update(object, dt);
     if (object.knockSpeed > 0) reportLooseObjectKnock(object);
-    if (object.y < PIT_NO_RETURN_DEPTH) {
-      looseState.statistics.lostDownThePit++;
-      removeLooseObject(object);
+    if (object.y < PIT_NO_RETURN_DEPTH && !object.isLost && !isLooseObjectAnothers(object)) {
+      object.isLost = true; // (asked for once)
+      askToAct({ what: 'lose', id: object.id });
     }
   }
 

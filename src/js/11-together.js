@@ -21,7 +21,9 @@
 //     says what was done and by whom ('did'), and each carries it out when it hears that, the one who asked
 //     included. So the work order, the mains, the keycards and the lift are everybody's.
 //   - Being caught is the host's to say ('caught'), and your own game's to carry out.
-//   - Still each browser's own: the apparitions (on purpose), what you carry, and everything that lies loose.
+//   - What lies loose has one place: each thing is moved by one browser, which tells the others ("Things that
+//     lie loose", further down).
+//   - Still each browser's own: the apparitions (on purpose), and what you carry for a job.
 // ---------------------------------------------------------------------------
 
 const TOGETHER_SENDS_PER_SECOND = 15;    // how often you say where you are
@@ -45,6 +47,8 @@ const together = {
   world: null,           // not the host: how the host last said its station stands (see describeWorld), once it has said
   worldBlend: 1,         // and how far the creatures shown here have come towards that: 0 to 1
   hollowFrom: [],        // where and how the Hollow was shown when the host last said (describeFigure)
+  actingId: 0,           // ... and which of you is doing it
+  looseSayTimer: 0,
   isCarryingOut: false,  // while something done to the station is being carried out here (performActionFor)
   soundMode: '',         // 'share' while the host's creatures are being run, 'mute' while something is done here without a sound of its own
   asked: {}              // what you have asked the host to do and not yet seen done, so that it is asked once
@@ -211,6 +215,7 @@ function endDescentTogether() {
   together.hostMap = null;
   for (const other of together.others) setFigureRaycastable(other.figure, false);
   together.others.length = 0;
+  for (const object of looseObjects) { object.ownerId = 0; if (!object.isHeld) object.heldById = 0; } // every loose thing is yours to move again
   players.length = 0; players.push(player);
   together.world = null;
   if (wasTheHosts) {
@@ -293,6 +298,7 @@ function hearRelay(message) {
     tellLobbyWhatIsChosen(); // as the host: so that their title screen shows it
   } else if (message.t === 'left') {
     together.memberIds = together.memberIds.filter(function (id) { return id !== message.id; });
+    handBackLooseThingsOf(message.id);
     const other = findOtherPlayer(message.id);
     if (other) {
       setFigureRaycastable(other.figure, false);
@@ -353,9 +359,6 @@ function beginFromTitle() {
   if (together.code === '') { beginNewGame(); return; }
   if (isLobbyHost()) {
     const descent = describeChosenDescent();
-    // Salvage is a work order about things that lie loose, and those are still each browser's own.
-    const orders = descent.workOrders.filter(function (key) { return key !== 'salvage'; });
-    descent.workOrders = orders.length > 0 ? orders : WORK_ORDERS.map(function (order) { return order.key; }).filter(function (key) { return key !== 'salvage'; });
     sendToRelay({ t: 'start', d: descent });
     together.isRoundOn = true;
     beginDescentTogether(descent);
@@ -436,6 +439,7 @@ function hearOtherPlayer(id, data) {
   if (data.k === 'gone') {
     // One of the others is back at the title screen. They are still in the lobby.
     const gone = findOtherPlayer(id);
+    handBackLooseThingsOf(id);
     if (gone) {
       setFigureRaycastable(gone.figure, false);
       together.others.splice(together.others.indexOf(gone), 1);
@@ -444,6 +448,7 @@ function hearOtherPlayer(id, data) {
     return;
   }
   if (!together.isInDescent) return;
+  if (data.k === 'loose') { hearWhereLooseThingsAre(id, data); return; }
   if (data.k !== 'at') { hearOfTheStation(id, data); return; }
   const other = findOtherPlayer(id);
   if (!other) return;
@@ -584,6 +589,11 @@ function updateTogether(dt) {
   if (together.sendTimer <= 0) {
     together.sendTimer = Math.max(together.sendTimer + 1 / TOGETHER_SENDS_PER_SECOND, 0);
     sayWhereYouAre();
+  }
+  together.looseSayTimer -= dt;
+  if (together.looseSayTimer <= 0 && game.mode !== 'intro') {
+    together.looseSayTimer = Math.max(together.looseSayTimer + 1 / LOOSE_SAYS_PER_SECOND, 0);
+    sayWhereLooseThingsAre();
   }
   placeOwnBody();
   for (const other of together.others) {
@@ -836,7 +846,7 @@ function sendCreaturesAwayAfterCatch(kind) {
 // Alone it is done now. Down there with others it is asked of the host, and done when the host says so.
 function askToAct(action) {
   if (!isWorldShared()) { performAction(action); return; }
-  if (action.what !== 'use') {
+  if (action.what === 'enter' || action.what === 'leaveLift' || action.what === 'ascend') {
     // These are noticed again every frame until they have been done: asked once is enough.
     const key = action.what + ':' + (action.place || '');
     if (together.asked[key]) return;
@@ -858,18 +868,30 @@ function readAction(data) {
   if (data.what === 'use' && Number.isInteger(data.objectId)) return { what: 'use', objectId: data.objectId };
   if (data.what === 'enter' && typeof data.place === 'string' && ZONE_NAMES.indexOf(data.place) >= 0 && data.place !== '') return { what: 'enter', place: data.place };
   if (data.what === 'leaveLift' || data.what === 'ascend') return { what: data.what };
+  // Things that lie loose (see further down).
+  if ((data.what === 'take' || data.what === 'release' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
+  if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
+    return { what: 'shatter', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
+  }
+  if (data.what === 'bayState' && Number.isInteger(data.index) && (data.state === 'open' || data.state === 'sealing')) return { what: 'bayState', index: data.index, state: data.state };
+  if (data.what === 'sealBay' && Number.isInteger(data.index) && Array.isArray(data.ids) && data.ids.length <= 400 && data.ids.every(Number.isInteger) && Number.isFinite(data.value)) {
+    return { what: 'sealBay', index: data.index, ids: data.ids, value: data.value };
+  }
   return null;
 }
 
 // Carries an action out as the doing of one of you. If that is somebody else, it is done with what they carry,
 // the noise of it is where they stand, and what is only for the one who did it (see wrapForTogether) is left out.
 function performActionFor(actorId, action) {
-  const other = actorId === together.myId ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z, carried: {} }); // (gone since: it is still done)
+  // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
+  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay';
+  const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z, carried: {} }); // (gone since: it is still done)
   const yours = game.carried;
   game.actor = other;
   if (other) game.carried = other.carried;
   together.isCarryingOut = true;
-  try { performAction(action); } finally { game.actor = null; game.carried = yours; together.isCarryingOut = false; }
+  together.actingId = actorId;
+  try { performAction(action); } finally { game.actor = null; game.carried = yours; together.isCarryingOut = false; together.actingId = together.myId; }
 }
 
 function performAction(action) {
@@ -879,6 +901,98 @@ function performAction(action) {
   } else if (action.what === 'enter') notePlaceEntered(action.place);
   else if (action.what === 'leaveLift') noteLiftLeft();
   else if (action.what === 'ascend') beginAscent();
+  else performLooseAction(action);
+}
+
+// ---- Things that lie loose ----
+//
+// Every browser has every loose thing, and at the start they all lie in the same places. What has to be agreed
+// from then on is what moves. Each thing has one browser that moves it, its `ownerId`: the host's, unless one
+// of the others has taken it into their beam, and then theirs until it lies still again. Only that browser
+// runs it (08-loose-objects.js leaves everybody else's alone: isLooseObjectAnothers), and it says where its
+// moving things are LOOSE_SAYS_PER_SECOND times a second ('loose'). Everyone else puts them there.
+// So carrying and throwing feel as they do alone, and a thing has one place.
+// Who has what in their beam, a thing breaking, a thing lost down the shaft, a grenade set off and a salvage bay
+// sealing are done to the station like everything else: asked of the host, done by all in the host's order.
+
+const LOOSE_SAYS_PER_SECOND = 12;
+const LOOSE_NUMBERS = 13; // id, x, y, z, the four of how it is turned, how fast it goes (3), moving or not, worth
+
+function performLooseAction(action) {
+  const actingId = isWorldShared() ? together.actingId : 0;
+  if (action.what === 'bayState' || action.what === 'sealBay') {
+    const bay = haulState.bays[action.index];
+    if (!bay || bay.state === 'sealed') return;
+    if (action.what === 'sealBay') sealHaulBayNow(bay, action.ids, action.value);
+    else if (bay.state === 'open' || bay.state === 'sealing') bay.state = action.state;
+    return;
+  }
+  const object = findLooseObjectById(action.id);
+  if (!object) return; // gone already
+  if (action.what === 'take') {
+    if (object.heldById && isWorldShared()) return; // somebody was quicker
+    object.heldById = actingId; object.ownerId = actingId;
+    object.wasHandled = true; object.isIgnoredByHollow = false; object.lastHandledTime = game.time;
+    if (game.actor) wakeLooseObject(object);
+    else if (!pickUpLooseObjectNow(object, action.isByButton)) askToAct({ what: 'release', id: object.id }); // (your beam has something else by now)
+  } else if (action.what === 'release') {
+    if (object.heldById === actingId) object.heldById = 0;
+  } else if (action.what === 'shatter') {
+    object.x = action.x; object.y = action.y; object.z = action.z;
+    shatterLooseObjectNow(object);
+  } else if (action.what === 'lose') {
+    looseState.statistics.lostDownThePit++;
+    removeLooseObject(object);
+  } else if (action.what === 'setOff') {
+    if (object.kind.use && !object.isSpent && object.armedTime < 0) object.kind.use.activate(object);
+  }
+}
+
+// The things this browser moves that are moving, or have just stopped: where they are, for the others.
+function sayWhereLooseThingsAre() {
+  const round = function (value) { return Math.round(value * 1000) / 1000; };
+  let said = [];
+  for (const object of looseObjects) {
+    if (isLooseObjectAnothers(object)) continue;
+    const isMoving = !object.isAsleep;
+    if (!isMoving && !object.wasMovingWhenSaid) continue;
+    object.wasMovingWhenSaid = isMoving;
+    said.push(object.id, round(object.x), round(object.y), round(object.z), round(object.orientationX), round(object.orientationY), round(object.orientationZ), round(object.orientationW),
+      round(object.velocityX), round(object.velocityY), round(object.velocityZ), isMoving ? 1 : 0, round(object.worth));
+    // It lies still, and it was only yours while it moved: from here it is the host's again.
+    if (!isMoving && !object.isHeld) object.ownerId = together.hostId;
+    if (said.length >= LOOSE_NUMBERS * 16) { sayToOthers({ k: 'loose', o: said }); said = []; }
+  }
+  if (said.length > 0) sayToOthers({ k: 'loose', o: said });
+}
+
+// Where one of the others says its things are. Each is only believed about what is its to move.
+function hearWhereLooseThingsAre(id, data) {
+  const numbers = data.o;
+  if (!Array.isArray(numbers) || numbers.length % LOOSE_NUMBERS !== 0 || numbers.length > LOOSE_NUMBERS * 16 || !numbers.every(Number.isFinite)) return;
+  for (let at = 0; at < numbers.length; at += LOOSE_NUMBERS) {
+    const object = findLooseObjectById(numbers[at]);
+    if (!object || (object.ownerId || together.hostId) !== id || object.isHeld) continue;
+    const isMoving = numbers[at + 11] === 1;
+    if (isMoving) wakeLooseObject(object); // (what its points do when it leaves where it lay, and what lay on it)
+    object.x = clampNumber(numbers[at + 1], 0, GRID_WIDTH); object.y = clampNumber(numbers[at + 2], -200, 200); object.z = clampNumber(numbers[at + 3], 0, GRID_DEPTH);
+    const length = Math.hypot(numbers[at + 4], numbers[at + 5], numbers[at + 6], numbers[at + 7]) || 1;
+    object.orientationX = numbers[at + 4] / length; object.orientationY = numbers[at + 5] / length; object.orientationZ = numbers[at + 6] / length; object.orientationW = numbers[at + 7] / length;
+    object.velocityX = isMoving ? clampNumber(numbers[at + 8], -60, 60) : 0; object.velocityY = isMoving ? clampNumber(numbers[at + 9], -60, 60) : 0; object.velocityZ = isMoving ? clampNumber(numbers[at + 10], -60, 60) : 0;
+    object.spinX = 0; object.spinY = 0; object.spinZ = 0;
+    object.worth = clampNumber(numbers[at + 12], 0, object.kind.value);
+    updateLooseObjectMatrix(object);
+    refreshLooseObjectTiles(object);
+    if (!isMoving) { object.isAsleep = true; object.ownerId = together.hostId; }
+  }
+}
+
+// One of the others is no longer down here: what was theirs to move, or in their beam, is the host's.
+function handBackLooseThingsOf(id) {
+  for (const object of looseObjects) {
+    if (object.heldById === id) object.heldById = 0;
+    if (object.ownerId === id) { object.ownerId = together.hostId; if (isLobbyHost()) wakeLooseObject(object); }
+  }
 }
 
 // ---- Everything else one browser says to the others about the station ----
