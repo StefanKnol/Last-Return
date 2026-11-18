@@ -843,7 +843,7 @@ function updateHud(realDt) {
     elements['chip-extra'].textContent = extraText;
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
-    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase() + (getLooseObjectWorth(carried) > 0 ? ' · ' + getLooseObjectWorth(carried) : '');
+    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase();
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];

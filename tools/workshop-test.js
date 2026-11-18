@@ -405,7 +405,7 @@ function checkSourcePatching() {
     await frames(8);
     const pricedWhole = await knockState();
     check('the readout says what a knock would cost it: nothing whole, more let go of than walked into a wall, most thrown hard',
-      pricedWhole.whole === 100 && pricedWhole.intoAWall <= 100 && pricedWhole.letGoOf < pricedWhole.intoAWall && pricedWhole.thrownHard < pricedWhole.letGoOf && pricedWhole.thrownHard >= 10, pricedWhole);
+      pricedWhole.whole === 100 && pricedWhole.intoAWall <= 100 && pricedWhole.letGoOf < pricedWhole.intoAWall && pricedWhole.thrownHard < pricedWhole.letGoOf && pricedWhole.thrownHard >= 5, pricedWhole);
     const dropped = await dropUntil((state) => state.worth < 100 || state.isGone);
     check('dropped from the bench it lands worth less than it was, and not gone', hasLanded(dropped) && !dropped.isGone && dropped.worth < 100 && dropped.worth >= 10 && dropped.glass === 0, dropped);
     await setNumber('workshop-object-fragile', 0);

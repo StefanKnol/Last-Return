@@ -1416,6 +1416,9 @@ function shatterLooseObject(object) {
   if (!isOfTheHollowsOwnMaking) emitNoise(x, z, TUNING.noiseRadiusShatter);
   const lastKnock = looseState.lastKnock;
   lastKnock.x = x; lastKnock.z = z; lastKnock.speed = kind.shattersAt; lastKnock.carries = TUNING.noiseRadiusShatter; lastKnock.isOwn = wasOwn; lastKnock.time = game.time;
+  // Only a caption, for someone who cannot hear it go: no message. What it cost you is yours to work out.
+  if (wasOwn) showCaption(isGlass ? 'ownObjectShatter' : 'ownObjectBreak');
+  else showCaption(isGlass ? 'objectShatter' : 'objectBreak', { x: x, z: z });
 }
 
 // ---------------------------------------------------------------------------

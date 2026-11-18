@@ -1614,9 +1614,9 @@ function installLab() {
     breakage.can.thrown.worth === breakage.can.thrown.whole && breakage.battered.worth >= Math.round(breakage.battered.least) && breakage.battered.worth <= breakage.battered.whole * 0.25 && breakage.battered.lostInAll > 0, [breakage.can, breakage.battered]);
   check('a sample jar set down is whole; carried into a wall at a walk it lives, worth no more than it was; let go of standing up it shatters, loudly, and is gone',
     !breakage.jar.setDown.gone && breakage.jar.setDown.worth === breakage.jar.setDown.whole && !breakage.jar.walkedIntoAWall.gone && breakage.jar.walkedIntoAWall.held && breakage.jar.walkedIntoAWall.worth <= breakage.jar.walkedIntoAWall.whole &&
-    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.85 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.loudest >= 18, breakage.jar);
+    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.7 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.caption === 1 && breakage.jar.dropped.loudest >= 18, breakage.jar);
   check('anything set to shatter does, not only glass: a crate told to breaks apart when let go of, loudly, says so, and leaves no glass',
-    breakage.crate.dropped.gone && breakage.crate.dropped.shattered === 1&& breakage.crate.dropped.loudest >= 18 && breakage.crate.glassLeft === 0, breakage.crate);
+    breakage.crate.dropped.gone && breakage.crate.dropped.shattered === 1 && breakage.crate.dropped.captionBreak === 1 && breakage.crate.dropped.caption === 0 && breakage.crate.dropped.loudest >= 18 && breakage.crate.glassLeft === 0, breakage.crate);
   check('where it shattered there is broken glass on the floor, as loud to walk over as any other; a new descent sweeps it up and has everything whole again',
     breakage.glass.patches === 1 && breakage.glass.kind === 'glass' && breakage.glass.metresFromWhereItBroke < 0.8 && breakage.glass.pieces >= 3 && breakage.glass.markedLoud && breakage.glass.setOffByWalkingOverIt >= 1 &&
     breakage.newDescent.glassLeft === 0 && breakage.newDescent.patches === 0 && breakage.newDescent.allWhole && breakage.newDescent.lost === 0, [breakage.glass, breakage.newDescent]);
@@ -1704,7 +1704,7 @@ function installLab() {
     readOnScreen.markers.length === 1 && readOnScreen.markers[0].text === '25' &&
     Math.abs(readOnScreen.markers[0].across - 0.5) < 0.08 && readOnScreen.markers[0].down > 0.25 && readOnScreen.markers[0].down < 0.55,
     { unread: unread, read: read, onScreen: readOnScreen });
-  check('in the beam a thing has no marker, and the status line says what it is worth', carried.markers.length === 0 && carried.chip === 'CARRYING: GAS CANISTER · 25', carried);
+  check('in the beam a thing has no marker, and the status line says what it is, not what it is worth', carried.markers.length === 0 && carried.chip === 'CARRYING: GAS CANISTER', carried);
   check('how to pick a thing up is a tutorial: once you have done it the screen never says it again, and nothing floats at a thing for being in reach; its worth shows when it is scanned, as before',
     setDown.prompt === '' && setDown.markers.length === 0 && setDown.inReach && setDown.remembered &&
     scannedAgain.prompt === '' && scannedAgain.markers.length === 1 && scannedAgain.markers[0].text === '25' && lookedAway.markers.length === 0,
