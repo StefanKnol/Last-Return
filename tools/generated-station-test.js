@@ -37,6 +37,11 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
       headroom: tiles.length ? debug.getHeadroomAt(tiles[0][0] + 0.5, tiles[0][1] + 0.5) : 0, ventHeight: debug.ventHeight };
   };
 
+  // What follows is asked of stations in general, a hundred and twenty of them: these are built as the game
+  // builds them, with every room and every loose thing the workshop made. (The checks further down that walk
+  // through one particular station go back to stations built from the code alone: browser-harness.js.)
+  await inGame(() => window.lastReturnDebug.setWorkshopContentUsed(true));
+
   // --- a seed is a promise, part one: note what a few seeds build while the page is still cold ---
   // (A browser runs code differently once it has warmed up. Anything in the planner that leans on that, such as
   // a sort with a random number inside its comparison, shows up as a station that differs between now and later.)
@@ -108,6 +113,8 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('no sort in the planner has a random number inside its comparison', riskySorts.length === 0, riskySorts);
   check('a typed number is used as the seed, a typed word always gives the same seed, an empty box a new one',
     repeat.numberSeed === 4471 && repeat.wordSeed && repeat.emptySeedsDiffer, repeat);
+
+  await inGame(() => window.lastReturnDebug.setWorkshopContentUsed(false)); // one particular station from here on: from the code alone
 
   // --- choose the station for the lift-to-lift run below ---
   // It has to have a vent that is the shortest way between the two rooms it joins, so that the Hollow, which
@@ -200,7 +207,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('walking down the stairs lowers the floor under you smoothly, all the way to the foot',
     stairs.floorAtTop === 0 && stairs.bottom.floor < -0.2 && Math.abs(descent.heights[descent.heights.length - 1] - stairs.bottom.floor) < 0.05 && neverJumps, { stairs: stairs, descent: descent });
   // Measured against the standing eye height in the tuning, so resizing the player does not break this check.
-  const standingEye = await inGame(() => window.lastReturnDebug.tuning.eyeHeightStanding);
+  const standingEye = await inGame(() => window.lastReturnDebug.tuning.playerHeight*window.lastReturnDebug.tuning.playerEyeHeightToBody);
   const eyeAboveFoot = cameraAtFoot - stairs.bottom.floor;
   check('the view follows the floor down', eyeAboveFoot > standingEye - 0.05 && eyeAboveFoot < standingEye + 0.6,
     { cameraAtFoot: cameraAtFoot, foot: stairs.bottom.floor, standingEye: standingEye });
@@ -531,6 +538,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     jobRules.breakerFirstDoesNotCallLift && jobRules.thenUploadCallsLift, jobRules);
 
   // --- the largest size: three keycards ---
+  await inGame(() => window.lastReturnDebug.setWorkshopContentUsed(true)); // (any eight of them: as the game builds them)
   const massive = await inGame(() => {
     const debug = window.lastReturnDebug, bad = [];
     let cardTotal = 0;

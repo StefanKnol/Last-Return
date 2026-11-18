@@ -229,7 +229,9 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await b.evaluate(() => { const d = window.lastReturnDebug; d.player.velocityX = 0; d.player.velocityZ = 0; for (let count = 0; count < 3; count++) d.updateTogether(0.1); });
   await a.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0];
-    d.teleport(other.x, other.z + 1.5, 0); d.player.pitch = -0.2;
+    // (Aimed at the middle of their body, wherever that is for the proportions a player has: a beam this narrow
+    // aimed at a fixed angle went past a thin neck once the body was made shorter.)
+    d.teleport(other.x, other.z + 1.5, 0); d.player.pitch = Math.atan2(other.figure.boundsCenterY - d.getPlayerEyeY(), 1.5);
     d.setScannerSpread(5); d.setScanHeld(true); d.simulate(0.3);
     for (let count = 0; count < 4; count++) d.updateTogether(0.1);
   });

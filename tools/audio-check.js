@@ -78,7 +78,7 @@ async function listen() {
 }
 
 async function measure(filters) {
-  const { browser, page, problems } = await openGame({ dev: true });
+  const { browser, page, problems } = await openGame({ dev: true, workshopContent: true });
   await page.click('#button-workshop');
   await page.click('#workshop-tab-sounds');
   const board = () => window.lastReturnDebug.soundBoard;

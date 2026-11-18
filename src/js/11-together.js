@@ -66,7 +66,7 @@ function describeBuildForLobby() {
 
 function initializeTogether() {
   wrapForTogether();
-  together.ownFigure = createFigure(FIGURE_PROPORTIONS_PLAYER, SURFACE_PLAYER, 'playerImprintSeconds');
+  together.ownFigure = createFigureOfKind('player');
   const tag = document.querySelector('meta[name="last-return-relay"]');
   const place = tag ? tag.content.trim() : '';
   if (place === '' || typeof WebSocket === 'undefined') return;
@@ -395,7 +395,7 @@ function compareStationWithHost() {
 function createOtherPlayer(id) {
   return {
     id: id,
-    figure: createFigure(FIGURE_PROPORTIONS_PLAYER, SURFACE_PLAYER, 'playerImprintSeconds'),
+    figure: createFigureOfKind('player'),
     hasBeenHeardFrom: false,
     x: 0, z: 0, eyeY: 0, yaw: 0, pitch: 0,                    // where they are now, as shown here
     fromX: 0, fromZ: 0, fromEyeY: 0, fromYaw: 0, fromPitch: 0, // where they were shown when they last said where they are
@@ -495,10 +495,9 @@ function placeOtherPlayerFigure(other, movedDistance) {
   const figure = other.figure, pose = figure.pose;
   figure.x = other.x; figure.z = other.z; figure.yaw = other.yaw;
   other.walkPhase += movedDistance * 6;
-  pose.legSwing = Math.sin(other.walkPhase) * 0.5 * other.stride;
+  pose.legSwing = Math.sin(other.walkPhase) * (other.isCrouching ? 0.2 : 0.5) * other.stride; // (crouched: short steps, or the knee behind would be on the floor)
   pose.armSwing = Math.sin(other.walkPhase) * 0.2 * other.stride;
-  pose.kneeBend = other.isCrouching ? 1.2 : 0.05;
-  pose.lean = other.isCrouching ? 0.5 : 0.04;
+  poseFigureAsPlayer(figure, other.isCrouching); // crouched it is as tall as TUNING.playerHeightCrouching (04-figures.js)
   // The scanner arm (04-figures.js): at their side with the elbow bent while they only carry it, held out while
   // they scan. Either way the forearm, and the scanner with it, points where they look.
   pose.armRaise = other.armRaise;
@@ -591,8 +590,7 @@ function echoOtherScanner(other, dt) {
 function placeOwnBody() {
   const figure = together.ownFigure;
   figure.x = player.x; figure.z = player.z; figure.yaw = player.yaw;
-  figure.pose.kneeBend = player.isCrouching ? 1.2 : 0.05;
-  figure.pose.lean = player.isCrouching ? 0.5 : 0.04;
+  poseFigureAsPlayer(figure, player.isCrouching);
   figure.pose.armRaise = 0.2; figure.pose.elbowBend = 1.2;
   updateFigureCapsules(figure);
 }

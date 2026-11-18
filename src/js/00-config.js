@@ -99,10 +99,12 @@ const QUALITY_PRESETS = {
 const TUNING = {
   // ---- The player's body ---------------------------------------------------
   playerRadius: 0.3,            // how wide you are for bumping into walls. Smaller squeezes through tighter gaps.
-  playerHeight: 1.26,
-  playerHeightCrouching: 0.88,
-  eyeHeightStanding: 1.16,      // camera height when standing
-  eyeHeightCrouching: 0.7,     // camera height when crouched
+  playerHeight: 1.2,           // how tall you are, standing: where you bump your head. The body the others see is made to fit it (getFigureBody, 04-figures.js). Vents are 1.15 high: no taller than that and you walk into one upright.
+  playerHeightCrouching: 0.85, // ... and crouched. That body goes down on its haunches as far as it takes (getPlayerCrouchPose). Under about 0.85 you tip a vent cover over by crawling at it.
+  // eyeHeightStanding: 1.16,      // camera height when standing
+  // eyeHeightCrouching: 0.7,     // camera height when crouched
+  playerEyeHeightToBody: 0.94, // camera height when standing in percentage of player height
+  playerEyeHeightToCrouchedBody: 0.94, // camera height when crouched in percentage of player height when crouching
   walkSpeed: 2.2,
   sprintSpeed: 4.4,             // must stay above hollowHuntSpeed or sprinting cannot open a gap
   crouchSpeed: 1.3,

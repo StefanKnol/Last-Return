@@ -30,7 +30,7 @@ const player = {
   yaw: PLAYER_START.yaw, pitch: 0,
   scannerYaw: PLAYER_START.yaw, scannerPitch: 0, // where the scanner in your hand points: it trails a little behind where you look
   scannerDriftRight: 0, scannerDriftBack: 0,     // how far it has been left behind by your steps, in metres: to your right, and toward you
-  eyeHeight: TUNING.eyeHeightStanding, // eyes above the floor you stand on
+  eyeHeight: (TUNING.playerHeight * TUNING.playerEyeHeightToBody), // eyes above the floor you stand on
   floorY: 0,                           // height of that floor: 0 on the lift's level, negative further down
   velocityX: 0, velocityZ: 0,
   stamina: 1,
@@ -152,7 +152,7 @@ function resetPlayerToStart() {
   player.stamina = 1; player.isStaminaLocked = false;
   player.heat = 0; player.isOverheated = false;
   player.sweepTimeRemaining = 0;
-  player.eyeHeight = TUNING.eyeHeightStanding;
+  player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
   player.floorY = getFloorHeightAt(player.x, player.z);
   player.focusedInteractable = null;
   player.focusedLooseObject = null;
@@ -479,7 +479,7 @@ function updatePlayerMovement(dt) {
   player.isMoving = movedDistance > dt * 0.3;
   game.statistics.distanceWalked += movedDistance;
 
-  player.eyeHeight = approachValue(player.eyeHeight, player.isCrouching ? TUNING.eyeHeightCrouching : TUNING.eyeHeightStanding, dt * 3.2);
+  player.eyeHeight = approachValue(player.eyeHeight, player.isCrouching ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody), dt * 3.2);
   player.bobPhase += movedDistance * (player.isSprinting ? 5.2 : 6.4);
 
   // Footsteps are what the Hollow listens for.

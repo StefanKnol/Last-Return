@@ -113,7 +113,7 @@ function landAfterFlying() {
     player.x = index % GRID_WIDTH + 0.5;
     player.z = Math.floor(index / GRID_WIDTH) + 0.5;
   }
-  player.eyeHeight = TUNING.eyeHeightStanding;
+  player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
   player.floorY = getFloorHeightAt(player.x, player.z);
 }
 
@@ -264,7 +264,7 @@ function updateDebugWalker(dt) {
   other.fromX = other.toX = x; other.fromZ = other.toZ = z;
   other.fromYaw = other.toYaw = Math.atan2(lookX, -lookZ);
   other.fromPitch = other.toPitch = isWalking ? -0.15 : 0;
-  other.fromEyeY = other.toEyeY = getFloorHeightAt(x, z) + (isCrouching ? TUNING.eyeHeightCrouching : TUNING.eyeHeightStanding);
+  other.fromEyeY = other.toEyeY = getFloorHeightAt(x, z) + (isCrouching ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody));
   other.blend = 1;
   other.isCrouching = isCrouching;
   other.spreadDegrees = isFallen || isCrouching ? 0 : (isWalking ? 10 : 6);
@@ -295,7 +295,7 @@ function debugTeleportToZone(zone) {
     markDebugUsed();
     player.x = destination.x; player.z = destination.z;
     player.velocityX = 0; player.velocityZ = 0;
-    if (!debugState.options.flyMode) player.eyeHeight = TUNING.eyeHeightStanding;
+    if (!debugState.options.flyMode) player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
     return;
   }
 }

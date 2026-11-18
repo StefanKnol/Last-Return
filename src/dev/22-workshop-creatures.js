@@ -2,7 +2,9 @@
 // Workshop, creature tool: change a creature's proportions and watch its body change.
 //
 // The body on screen is built by the game's own code (04-figures.js) and posed by the game's own code
-// (poseHollow and poseAdvancingStill in 08-entities.js), so it stands, walks and reaches as it will in play.
+// (poseHollow and poseAdvancingStill in 08-entities.js, placeOtherPlayerFigure in 11-together.js), so it stands,
+// walks and reaches as it will in play. A player is one of the creatures here: the body the others see of you
+// when you are down there together, with the scanner in its hand.
 // It can be shown as a solid body, or the way the game shows it: as nothing but the points a scan leaves.
 //
 // The sliders change the FIGURE_PROPORTIONS_... objects themselves, so the whole game uses the new
@@ -17,19 +19,33 @@ const CREATURE_WORKSHOP_SCAN_RAYS = 2600;     // pulses fired at the creature ev
 // Short, so the cloud is the shape of the body now and not a smear of where it has been.
 TUNING.workshopImprintSeconds = 0.5;
 
-const CREATURE_WORKSHOP_KINDS = {
-  hollow: {
-    label: 'The Hollow', constantName: 'HOLLOW', proportions: FIGURE_PROPORTIONS_HOLLOW,
-    surfaceClass: SURFACE_HOLLOW, imprintTuningKey: 'hollowImprintSeconds', color: [1.0, 0.5, 0.42],
-    behaviours: [['roam', 'Roaming'], ['investigate', 'Walking to a noise'], ['hunt', 'Hunting'], ['enraged', 'Enraged'],
-      ['listen', 'Standing still, listening'], ['held', 'Held in the beam'], ['caught', 'Reaching you (the last thing you see)'], ['manual', 'Posed by hand']]
-  },
-  dummy: {
-    label: 'A Still (calibration dummy)', constantName: 'DUMMY', proportions: FIGURE_PROPORTIONS_DUMMY,
-    surfaceClass: SURFACE_STILL, imprintTuningKey: 'stillImprintSeconds', color: [1.0, 0.8, 0.42],
-    behaviours: [['standing', 'Standing in the store'], ['advancing', 'Advancing on you'], ['caught', 'Reaching you'], ['manual', 'Posed by hand']]
-  }
+// What each kind can be set to be doing here, posed by the game's own code (updateCreatureWorkshopPose). A kind
+// that is not named can be stood up and posed by hand, which is enough to look at it and to change its numbers.
+const CREATURE_WORKSHOP_BEHAVIOURS = {
+  hollow: [['roam', 'Roaming'], ['investigate', 'Walking to a noise'], ['hunt', 'Hunting'], ['enraged', 'Enraged'],
+    ['listen', 'Standing still, listening'], ['held', 'Held in the beam'], ['caught', 'Reaching you (the last thing you see)'], ['manual', 'Posed by hand']],
+  dummy: [['standing', 'Standing in the store'], ['advancing', 'Advancing on you'], ['caught', 'Reaching you'], ['manual', 'Posed by hand']],
+  player: [['standing', 'Standing, scanner at their side'], ['scanning', 'Standing, scanning'], ['walking', 'Walking'], ['walkingScanning', 'Walking, scanning'],
+    ['crouched', 'Crouched'], ['crouchedScanning', 'Crouched, scanning'], ['crouchedWalking', 'Creeping along, crouched'], ['manual', 'Posed by hand']]
 };
+
+// The creatures the tool has: every kind in FIGURE_KINDS (04-figures.js). One added there turns up here by itself.
+const CREATURE_WORKSHOP_KINDS = {};
+for (const kindKey in FIGURE_KINDS) {
+  const kind = FIGURE_KINDS[kindKey];
+  CREATURE_WORKSHOP_KINDS[kindKey] = {
+    label: kind.label, proportions: kind.proportions, constantName: kind.proportionsName.replace(/^FIGURE_PROPORTIONS_/, ''),
+    surfaceClass: kind.surfaceClass, imprintTuningKey: kind.imprintTuningKey, color: kind.color,
+    hasHollowBody: kind.bodyPlan === 'hollow', heightTuningKey: kind.heightTuningKey || '',
+    behaviours: CREATURE_WORKSHOP_BEHAVIOURS[kindKey] || [['standing', 'Standing'], ['manual', 'Posed by hand']]
+  };
+}
+
+// Which creature is stood beside the one being worked on, for scale: a Still (person-sized) beside everything
+// else, the Hollow beside a Still.
+function getCreatureWorkshopOtherKindKey() {
+  return creatureWorkshop.kind === 'dummy' ? 'hollow' : 'dummy';
+}
 
 // Which heading each proportion is listed under. One that is not named here goes under "Other".
 const CREATURE_WORKSHOP_GROUPS = [
@@ -40,9 +56,9 @@ const CREATURE_WORKSHOP_GROUPS = [
 ];
 const CREATURE_WORKSHOP_FINGER_NAMES = ['outer', 'middle', 'inner'];
 
-// The pose sliders: key in figure.pose, label, lowest, highest (radians, or 0 to 1), and whether only the Hollow has it.
+// The pose sliders: key in figure.pose, label, lowest, highest (radians, or 0 to 1), and whether only a body of the Hollow's make has it.
 const CREATURE_WORKSHOP_POSE_FIELDS = [
-  ['legSwing', 'Legs: stride', -1, 1, false], ['kneeBend', 'Legs: knees bent', 0, 1.2, false],
+  ['legSwing', 'Legs: stride', -1, 1, false], ['kneeBend', 'Legs: knees bent', 0, 1.2, false], ['squat', 'Legs: down on its haunches', 0, 1.55, false],
   ['armSwing', 'Arms: swing', -1, 1, false], ['armRaise', 'Arms: raised forward', -0.3, 1.6, false], ['elbowBend', 'Arms: elbows bent', 0, 1.6, false],
   ['lean', 'Body: leaning forward', -0.3, 0.8, false], ['headTilt', 'Head: cocked sideways', -1, 1, false],
   ['stretch', 'Drawn up to full height', 0, 1, true], ['fingerSplay', 'Fingers spread', 0, 1, true],
@@ -64,6 +80,9 @@ const creatureWorkshop = {
   figure: null, originalFigure: null, otherFigure: null,
   // Stands in for the `hollow` object when the game's pose code is asked to pose the figure here.
   standIn: { figure: null, walkPhase: 0, currentSpeed: 0, armRaise: 0, heldAmount: 0 },
+  // Stands in for one of the others down there with you when the game's pose code is asked to pose a player here.
+  playerStandIn: { figure: null, x: 0, z: 0, yaw: 0, pitch: 0, isCrouching: false, walkPhase: 0, stride: 0, armRaise: 0.2 },
+  playerPitch: 0,         // a player: how far up or down they look (radians). The scanner points where they look.
   walkedDistance: 0,
   orbit: { yaw: Math.PI + 0.5, pitch: -0.1, distance: 4.4, height: 1.15 },
   drag: null,
@@ -173,7 +192,7 @@ function rebuildCreatureWorkshopStage() {
   finishWorkshopWorld();
 
   const center = getCreatureWorkshopStageCenter();
-  const otherKind = CREATURE_WORKSHOP_KINDS[state.kind === 'hollow' ? 'dummy' : 'hollow'];
+  const otherKind = CREATURE_WORKSHOP_KINDS[getCreatureWorkshopOtherKindKey()];
   state.figure = createFigure(kind.proportions, kind.surfaceClass, state.hasGameImprints ? kind.imprintTuningKey : 'workshopImprintSeconds');
   state.originalFigure = createFigure(state.fileProportions[state.kind], kind.surfaceClass, kind.imprintTuningKey);
   state.otherFigure = createFigure(otherKind.proportions, otherKind.surfaceClass, otherKind.imprintTuningKey);
@@ -183,6 +202,8 @@ function rebuildCreatureWorkshopStage() {
   state.otherFigure.pose.armRaise = 0.04;
   state.standIn.figure = state.figure;
   state.standIn.walkPhase = 0; state.standIn.currentSpeed = 0; state.standIn.armRaise = 0.06; state.standIn.heldAmount = 0;
+  state.playerStandIn.figure = state.figure;
+  state.playerStandIn.walkPhase = 0; state.playerStandIn.stride = 0; state.playerStandIn.armRaise = OTHER_PLAYER_ARM_AT_SIDE;
   state.walkedDistance = 0;
   // Only the body being worked on answers the scanner; the two beside it are there to compare shapes.
   setFigureRaycastable(state.figure, true);
@@ -210,13 +231,27 @@ function updateCreatureWorkshopPose(dt) {
 
   if (behaviour === 'manual') {
     // Left exactly as the sliders put it.
+  } else if (state.kind === 'player') {
+    // What 11-together.js does with one of the others: the arm with the scanner goes out while they scan, the
+    // legs go with how far they came, crouched they are bent at the knees and lean, and the forearm (and the
+    // scanner on it) points where they look.
+    const other = state.playerStandIn;
+    const isScanning = /canning$/.test(behaviour), isWalking = /alking$/.test(behaviour) || behaviour.indexOf('walking') === 0;
+    other.figure = figure; other.x = figure.x; other.z = figure.z; other.yaw = figure.yaw; other.pitch = state.playerPitch;
+    other.isCrouching = behaviour.indexOf('crouched') === 0;
+    const speed = !isWalking ? 0 : (other.isCrouching ? TUNING.crouchSpeed : TUNING.walkSpeed);
+    standIn.currentSpeed = speed; // (for the readout)
+    other.stride = approachValue(other.stride, isWalking ? 1 : 0, dt * 6);
+    other.armRaise = approachValue(other.armRaise, isScanning ? OTHER_PLAYER_ARM_SCANNING : OTHER_PLAYER_ARM_AT_SIDE, dt * 5);
+    if (state.isTurning) other.yaw = wrapAngleToPi(other.yaw + dt * 0.6);
+    placeOtherPlayerFigure(other, speed * dt); // (it walks on the spot)
   } else if (behaviour === 'caught') {
     // What updateDying (11-game.js) does to whichever of them reaches you.
     pose.armRaise = approachValue(pose.armRaise, 1.45, dt * 3);
     pose.fingerSplay = 1;
     pose.headTilt = (Math.random() - 0.5) * 1.1;
     facesCamera = true;
-  } else if (state.kind === 'hollow') {
+  } else if (state.kind === 'hollow') { // (posed as the Hollow itself is: by what it is doing)
     const isHunting = behaviour === 'hunt' || behaviour === 'enraged' || behaviour === 'held';
     const isListening = behaviour === 'listen';
     standIn.heldAmount = approachValue(standIn.heldAmount, behaviour === 'held' ? 1 : 0, dt * 5);
@@ -244,11 +279,11 @@ function updateCreatureWorkshopPose(dt) {
     facesCamera = true;
   } else {
     // A dummy as it stands in the store.
-    pose.legSwing = 0; pose.kneeBend = 0; pose.armSwing = 0; pose.armRaise = 0.04; pose.elbowBend = 0.1; pose.lean = 0; pose.headTilt = 0;
+    pose.legSwing = 0; pose.kneeBend = 0; pose.squat = 0; pose.armSwing = 0; pose.armRaise = 0.04; pose.elbowBend = 0.1; pose.lean = 0; pose.headTilt = 0;
   }
 
   if (facesCamera) figure.yaw += clampNumber(wrapAngleToPi(towardCamera - figure.yaw), -dt * 6, dt * 6);
-  else if (state.isTurning) figure.yaw = wrapAngleToPi(figure.yaw + dt * 0.6);
+  else if (state.isTurning && !(state.kind === 'player' && behaviour !== 'manual')) figure.yaw = wrapAngleToPi(figure.yaw + dt * 0.6); // (a player was turned above, with the rest of its pose)
   updateFigureCapsules(figure);
 
   // The file's shape stands beside it in the same pose, so the two can be compared limb for limb.
@@ -269,6 +304,18 @@ function buildCreatureWorkshopReadout() {
   const lines = [];
   lines.push('height now     ' + getCreatureWorkshopHeight(state.figure).toFixed(2) + ' m');
   if (hasCreatureWorkshopChanges(state.kind)) lines.push('with the file  ' + getCreatureWorkshopHeight(state.originalFigure).toFixed(2) + ' m  (grey, beside it)');
+  const fittedTo = CREATURE_WORKSHOP_KINDS[state.kind].heightTuningKey;
+  if (fittedTo) lines.push('made to be     ' + TUNING[fittedTo].toFixed(2) + ' m  (' + fittedTo + ', 00-config.js: the sliders give it its shape, not its height)');
+  if (state.kind === 'player') {
+    // The body is what the others see. Where you bump your head and where you see from are numbers of their
+    // own, in 00-config.js: these lines are for keeping the three in step. (Marked on the pole as well.)
+    const isCrouched = state.behaviour.indexOf('crouched') === 0, figure = state.figure;
+    const light = getFigureScannerLight(figure, { x: 0, y: 0, z: 0 });
+    lines.push('you bump at    ' + (isCrouched ? TUNING.playerHeightCrouching : TUNING.playerHeight).toFixed(2) + ' m  (' + (isCrouched ? 'playerHeightCrouching' : 'playerHeight') + ', 00-config.js: red)');
+    lines.push('you see from   ' + (isCrouched ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody)).toFixed(2) + ' m  (' + (isCrouched ? '(TUNING.playerHeight * TUNING.playerEyeHeightToBody)' : '(TUNING.playerHeight * TUNING.playerEyeHeightToBody)') + ': teal. Your light starts there for the others)');
+    lines.push('head, middle   ' + (getFigureHeadHeight(figure) - figure.y).toFixed(2) + ' m');
+    lines.push('scanner light  ' + (light.y - figure.y).toFixed(2) + ' m');
+  }
   lines.push('body parts     ' + state.figure.capsuleCount + ' of ' + FIGURE_MAXIMUM_CAPSULES);
   lines.push('moving at      ' + state.standIn.currentSpeed.toFixed(1) + ' m/s  (you sprint ' + TUNING.sprintSpeed + ')');
   lines.push('pole           a mark every 0.5 m');
@@ -330,7 +377,7 @@ function addCreatureWorkshopOverlays(data) {
   if (state.view !== 'scanned') data.figures.push({ figure: state.figure, red: kind.color[0], green: kind.color[1], blue: kind.color[2] });
   if (state.showsOriginal && hasCreatureWorkshopChanges(state.kind)) data.figures.push({ figure: state.originalFigure, red: 0.42, green: 0.5, blue: 0.62 });
   if (state.showsOther) {
-    const other = CREATURE_WORKSHOP_KINDS[state.kind === 'hollow' ? 'dummy' : 'hollow'];
+    const other = CREATURE_WORKSHOP_KINDS[getCreatureWorkshopOtherKindKey()];
     data.figures.push({ figure: state.otherFigure, red: other.color[0] * 0.6, green: other.color[1] * 0.6, blue: other.color[2] * 0.6 });
   }
   // A measuring pole behind the body: a mark every half metre, a longer one every metre,
@@ -345,6 +392,13 @@ function addCreatureWorkshopOverlays(data) {
   }
   const top = getCreatureWorkshopHeight(state.figure);
   pushDebugLine(poleX, top, poleZ, state.figure.x, top, state.figure.z, 1.0, 0.8, 0.2);
+  if (state.kind === 'player') {
+    // A player: where the game has you bump your head (red) and where it has you see from (teal), for this pose.
+    const isCrouched = state.behaviour.indexOf('crouched') === 0;
+    const bump = isCrouched ? TUNING.playerHeightCrouching : TUNING.playerHeight, eye = isCrouched ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
+    pushDebugLine(poleX, bump, poleZ, state.figure.x, bump, state.figure.z, 1.0, 0.35, 0.3);
+    pushDebugLine(poleX, eye, poleZ, state.figure.x, eye, state.figure.z, 0.3, 0.9, 0.85);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +468,7 @@ function renderCreatureWorkshopPanel(body) {
     }, 'Off: they fade in half a second, so the cloud shows the body as it is now. On: every place it has stood in the last seconds stays lit, as in play.');
   }
   addWorkshopCheckbox(body, 'The file\'s shape beside it, in grey (once something is changed)', state.showsOriginal, function (isOn) { state.showsOriginal = isOn; markWorkshopStateChanged(); });
-  addWorkshopCheckbox(body, state.kind === 'hollow' ? 'A Still beside it, for scale (person-sized)' : 'The Hollow beside it, for scale', state.showsOther, function (isOn) { state.showsOther = isOn; markWorkshopStateChanged(); });
+  addWorkshopCheckbox(body, getCreatureWorkshopOtherKindKey() === 'dummy' ? 'A Still beside it, for scale (person-sized)' : 'The Hollow beside it, for scale', state.showsOther, function (isOn) { state.showsOther = isOn; markWorkshopStateChanged(); });
   addWorkshopCheckbox(body, 'Turn it slowly', state.isTurning, function (isOn) { state.isTurning = isOn; markWorkshopStateChanged(); });
   addWorkshopNumber(body, 'Ceiling of the test room (m)', state.ceiling, 2.4, 9, 0.1, function (value) { state.ceiling = value; state.needsStage = true; markWorkshopStateChanged(); });
   addWorkshopNote(body, 'Drag to circle it, wheel to come closer. A and D also circle, E and Q raise and lower the view. Space scans it by hand.');
@@ -427,12 +481,15 @@ function renderCreatureWorkshopPanel(body) {
   }).id = 'workshop-creature-behaviour';
   if (state.behaviour === 'manual') {
     for (const field of CREATURE_WORKSHOP_POSE_FIELDS) {
-      if (field[4] && state.kind !== 'hollow') continue;
+      if (field[4] && !kind.hasHollowBody) continue;
       addWorkshopNumber(body, field[1], clampNumber(state.figure.pose[field[0]], field[2], field[3]), field[2], field[3], 0.01, function (value) {
         state.figure.pose[field[0]] = value;
         markWorkshopStateChanged();
       });
     }
+  } else if (state.kind === 'player') {
+    addWorkshopNumber(body, 'Looking up or down (radians: the scanner points there)', state.playerPitch, -1.45, 1.45, 0.01, function (value) { state.playerPitch = value; markWorkshopStateChanged(); }).element.id = 'workshop-creature-pitch';
+    addWorkshopNote(body, 'The pose is the game\'s own, from 11-together.js: what the others see of you down there. How tall you are is said once, in 00-config.js: playerHeight standing, playerHeightCrouching crouched (and playerEyeHeightToBody and playerEyeHeightToCrouchedBody for how far up those your eyes are). The body is made to fit both. Standing, all of it is made larger or smaller until it is playerHeight tall, so the sliders below give it its shape and not its height. Crouched, it goes down on its haunches as far as it takes. Red and teal on the pole are where you bump your head and where you see from. Choose "Posed by hand" to set every joint yourself.');
   } else {
     addWorkshopNote(body, 'The pose is the game\'s own, from 08-entities.js. Choose "Posed by hand" to set every joint yourself.');
   }
@@ -443,7 +500,7 @@ function renderCreatureWorkshopPanel(body) {
   const addGroup = function (title, keys) {
     const present = keys.filter(function (key) { return typeof live[key] === 'number' || Array.isArray(live[key]); });
     if (present.length === 0) return;
-    addWorkshopHeading(body, title + ' (metres)');
+    addWorkshopHeading(body, title + (kind.heightTuningKey ? ' (as shares of one another: the whole is made ' + TUNING[kind.heightTuningKey] + ' m tall)' : ' (metres)'));
     for (const key of present) {
       listed[key] = true;
       if (Array.isArray(live[key])) live[key].forEach(function (value, index) { addCreatureWorkshopProportionField(body, key, value, index); });
@@ -514,6 +571,7 @@ workshop.tools.creatures = {
     if (typeof stored.isTurning === 'boolean') state.isTurning = stored.isTurning;
     if (typeof stored.hasGameImprints === 'boolean') state.hasGameImprints = stored.hasGameImprints;
     if (Number.isFinite(stored.ceiling)) state.ceiling = clampNumber(stored.ceiling, 2.4, 9);
+    if (Number.isFinite(stored.playerPitch)) state.playerPitch = clampNumber(stored.playerPitch, -1.45, 1.45);
     if (stored.orbit && Number.isFinite(stored.orbit.yaw + stored.orbit.pitch + stored.orbit.distance + stored.orbit.height)) {
       state.orbit.yaw = stored.orbit.yaw; state.orbit.pitch = stored.orbit.pitch; state.orbit.distance = stored.orbit.distance; state.orbit.height = stored.orbit.height;
     }
@@ -531,6 +589,7 @@ workshop.tools.creatures = {
     stored.isTurning = state.isTurning;
     stored.hasGameImprints = state.hasGameImprints;
     stored.ceiling = state.ceiling;
+    stored.playerPitch = state.playerPitch;
     stored.orbit = state.orbit;
     stored.overrides = state.overrides;
     if (state.figure && state.behaviour === 'manual') stored.manualPose = Object.assign({}, state.figure.pose);

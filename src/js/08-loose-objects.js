@@ -96,9 +96,11 @@ const LOOSE_OBJECT_KINDS = {
   // walk they carry as far as the patch of cans they replace did; crouched, you can pick your way through.
   can: {
     label: 'empty can', mass: 0.06, value: 1, material: 'tin', loud: 1.7, lies: 'either', bulky: false, bounce: 0.35, grip: 0.4,
-    stepRadius: 0.035, // its body is what must not pass through a shelf in one step; the feet are within it
-    // The body, and four small feet at each end so that it can stand: a capsule alone has round ends.
-    parts: [{ shape: 'cylinder', from: [0, -0.035, 0], to: [0, 0.035, 0], radius: 0.035 }]
+    stepRadius: 0.035, // its body is what must not pass through a shelf in one step; the balls in the corners of its ends are within it
+    // A cylinder, 13 cm tall and 7 cm across: it stands on either flat end. (It used to be a capsule with four
+    // small feet at each end to stand on, of the same height. As a cylinder from -0.035 to 0.035 it was half
+    // that: 7 cm tall, too small for the scanner to find, and lying 3 cm high where it stood.)
+    parts: [{ shape: 'cylinder', from: [0, -0.065, 0], to: [0, 0.065, 0], radius: 0.035 }]
   },
   carton: {
     label: 'cardboard box', mass: 0.7, value: 2, fragile: 0.5, material: 'card', loud: 0.6, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.7,

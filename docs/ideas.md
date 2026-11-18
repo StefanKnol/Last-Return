@@ -13,6 +13,10 @@
 
 - Even better models
   - player models (overdone and funny, only visible when scanning)
+  - Workshop creature builder, creating new creatures and shaping them (with more body options)
+    - generalize creature movements, crouching, etc
+    - aggression levels
+    - behavior
 
 - random work order numbers and letters
   - same for shaft number and rooms, allowing the same room multiple times with different indicator?
@@ -66,6 +70,7 @@
   - dev backdoor to mess with people :P (play/direct the monsters, play sounds, control doors, disco mode with random lidar dots coming out of a disco ball and music)
     - only on same server host, not other hosted
     - statistics of players (anonymous, but survival time, playtime and count, etc.)
+  - different body shapes to choose from, as skins
 
 ### Implemented
 ~~- Slower detection of beam pointed at monster, so a tap doesn't immediately end in death but raises the monsters 'anger' level.~~

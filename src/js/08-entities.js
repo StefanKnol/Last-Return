@@ -11,7 +11,7 @@ const HOLLOW_STATE_LISTEN = 4;   // standing still, listening harder than usual
 
 
 const hollow = {
-  figure: createFigure(FIGURE_PROPORTIONS_HOLLOW, SURFACE_HOLLOW, 'hollowImprintSeconds'),
+  figure: createFigureOfKind('hollow'),
   isActive: false,
   state: HOLLOW_STATE_ROAM,
   targetX: 0, targetZ: 0,
@@ -819,7 +819,7 @@ function createStills() {
   stills.length = 0;
   const poseRandom = createSeededRandomGenerator(4471);
   const addStill = function (point, isLateArrival) {
-    const figure = createFigure(FIGURE_PROPORTIONS_DUMMY, SURFACE_STILL, 'stillImprintSeconds');
+    const figure = createFigureOfKind('dummy');
     figure.x = point[0]; figure.z = point[1];
     figure.yaw = poseRandom() * TWO_PI;
     figure.pose.armRaise = poseRandom() < 0.3 ? 0.5 + poseRandom() * 0.9 : 0.04;

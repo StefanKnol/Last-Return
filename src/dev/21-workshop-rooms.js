@@ -532,7 +532,7 @@ function showRoomWorkshopFromDoor() {
   const socket = definition.sockets[0];
   const step = WALL_DIRECTIONS[socket[2]];
   const x = WORKSHOP_ORIGIN_X + socket[0] - rect[0] + 0.5 - step[0] * 1.2, z = WORKSHOP_ORIGIN_Z + socket[1] - rect[1] + 0.5 - step[1] * 1.2;
-  placeWorkshopCamera(x, TUNING.eyeHeightStanding, z, Math.atan2(-step[0], step[1]), 0);
+  placeWorkshopCamera(x, (TUNING.playerHeight * TUNING.playerEyeHeightToBody), z, Math.atan2(-step[0], step[1]), 0);
   setWorkshopWalking(true);
 }
 

@@ -17,7 +17,7 @@ const FIGURE_PROPORTIONS_HOLLOW = {
   neckLength: 0.345, headLength: 0.11, headRadius: 0.11, jawLength: 0.125,
   upperArm: 0.62, foreArm: 0.54, handLength: 0.095,
   fingerLengths: [0.175, 0.23, 0.23],   // outer, middle, inner finger
-  torsoRadius: 0.095, limbRadius: 0.055, legRadius: 0.08, fingerRadius: 0.015
+  torsoRadius: 0.095, limbRadius: 0.055, legRadius: 0.1, fingerRadius: 0.01
 };
 
 // The calibration dummy: an ordinary jointed shop mannequin, about 1.75 m tall.
@@ -31,14 +31,143 @@ const FIGURE_PROPORTIONS_DUMMY = {
 // Player model
 const FIGURE_PROPORTIONS_PLAYER = {
   kind: 'player',
-  torsoLength: 0.3, neckLength: 0.1, headRadius: 0.1, headLength: 0.04,
-  shoulderWidth: 0.4, hipWidth: 0.2, upperArm: 0.15, foreArm: 0.15, handLength: 0.05,
-  thigh: 0.3, shin: 0.25, footLength: 0.1, torsoRadius: 0.15, limbRadius: 0.04, legRadius: 0.06, jointRadius: 0.05
+  torsoLength: 0.255, neckLength: 0.15, headRadius: 0.135, headLength: 0,
+  shoulderWidth: 0.465, hipWidth: 0.265, upperArm: 0.14, foreArm: 0.125, handLength: 0.045,
+  thigh: 0.2, shin: 0.2, footLength: 0.15, torsoRadius: 0.175, limbRadius: 0.055, legRadius: 0.08, jointRadius: 0.085
 };
 
+// ---------------------------------------------------------------------------
+// The kinds of creature
+//
+// Everything that has a body is one entry here. To add a creature:
+//   1. give it proportions: an object like the three above, with its own `kind`;
+//   2. add an entry below under that same name.
+// That is all it takes for it to have a body: createFigureOfKind('yourKind') makes one, and the workshop's
+// creature tool lists it by itself, with a slider for every number, "Posed by hand", and "Write to file".
+// What it does in a station is not said here: that is code, the way the Hollow and the Stills are code in
+// 08-entities.js and the other players in 11-together.js.
+//
+//   label             what the workshop calls it
+//   proportions       its numbers, and `proportionsName`, what that object is called in this file (the workshop
+//                     writes changed numbers back under that name)
+//   bodyPlan          how the proportions are put together as capsules: 'person' (upright, two arms, two legs, a
+//                     ball at every joint: a Still, a player) or 'hollow' (hunched, long neck, jaw, three fingers).
+//                     A body of another make is a function like buildPersonCapsules, added to FIGURE_BODY_PLANS.
+//   surfaceClass      the colour a scan gives it (02-world.js), and `imprintTuningKey`, the number in 00-config.js
+//                     that says how long points left on it stay
+//   color             what the workshop and debug mode draw it in: red, green, blue, each 0 to 1
+//   holdsScanner      a 'person' with a scanner in its right hand (a player)
+//   heightTuningKey   a kind that is as tall as that number in 00-config.js says, whatever its proportions come
+//                     to: see getFigureBody. A player has it: how tall you are is said once, as `playerHeight`,
+//                     and that is what you bump your head at, what you see from, and how tall the others see you.
+// ---------------------------------------------------------------------------
+
+const FIGURE_BODY_PLANS = { hollow: buildHollowCapsules, person: buildPersonCapsules };
+
+const FIGURE_KINDS = {
+  hollow: { label: 'The Hollow', proportions: FIGURE_PROPORTIONS_HOLLOW, proportionsName: 'FIGURE_PROPORTIONS_HOLLOW', bodyPlan: 'hollow',
+    surfaceClass: SURFACE_HOLLOW, imprintTuningKey: 'hollowImprintSeconds', color: [1.0, 0.5, 0.42] },
+  dummy: { label: 'A Still (calibration dummy)', proportions: FIGURE_PROPORTIONS_DUMMY, proportionsName: 'FIGURE_PROPORTIONS_DUMMY', bodyPlan: 'person',
+    surfaceClass: SURFACE_STILL, imprintTuningKey: 'stillImprintSeconds', color: [1.0, 0.8, 0.42] },
+  // The body the others see of a player (11-together.js). Nobody sees their own.
+  player: { label: 'A player (as the others see one)', proportions: FIGURE_PROPORTIONS_PLAYER, proportionsName: 'FIGURE_PROPORTIONS_PLAYER', bodyPlan: 'person',
+    surfaceClass: SURFACE_PLAYER, imprintTuningKey: 'playerImprintSeconds', color: [0.35, 0.9, 0.85], holdsScanner: true, heightTuningKey: 'playerHeight' }
+};
+
+// A new body of this kind, for the game: its own proportions, its colour in a scan, its points lasting as long as its kind's do.
+function createFigureOfKind(kindKey) {
+  const kind = FIGURE_KINDS[kindKey];
+  return createFigure(kind.proportions, kind.surfaceClass, kind.imprintTuningKey);
+}
+
+// The proportions a body is really built from. For most kinds, the ones it has. For a kind with a
+// `heightTuningKey` they are made to fit: every length and every thickness is made larger or smaller by the
+// same share, so that the body standing up is exactly as tall as that number says. Its proportions then say
+// what shape it is, and the number how big. (A player's height used to be said twice, as `playerHeight` and as
+// whatever FIGURE_PROPORTIONS_PLAYER added up to, and the two had to be kept in step by hand.)
+// Worked out again only when a number has changed (in the workshop, where they all have sliders).
+const fittedFigureBodies = new WeakMap(); // proportions -> { madeFor, body }
+let figureFittingFigure = null;
+function getFigureBody(figure) {
+  const proportions = figure.proportions, kind = FIGURE_KINDS[proportions.kind];
+  if (!kind || !kind.heightTuningKey || figure === figureFittingFigure) return proportions;
+  const height = TUNING[kind.heightTuningKey], madeFor = height + JSON.stringify(proportions);
+  let fitted = fittedFigureBodies.get(proportions);
+  if (fitted && fitted.madeFor === madeFor) return fitted.body;
+  if (!fitted) { fitted = { madeFor: '', body: null }; fittedFigureBodies.set(proportions, fitted); }
+  const scaledBy = function (share) {
+    const body = {};
+    for (const key in proportions) {
+      const value = proportions[key];
+      body[key] = typeof value === 'number' ? value * share : (Array.isArray(value) ? value.map(function (entry) { return entry * share; }) : value);
+    }
+    return body;
+  };
+  // How tall it stands with everything this many times as big. (Not simply that many times as tall: an ankle is
+  // always 7 cm off the floor.) Measured on a body of its own, which is built as it is given.
+  if (!figureFittingFigure) figureFittingFigure = createFigure(proportions, 0, kind.imprintTuningKey);
+  const measured = figureFittingFigure, pose = measured.pose, build = FIGURE_BODY_PLANS[kind.bodyPlan];
+  pose.legSwing = 0; pose.kneeBend = 0.05; pose.squat = 0; pose.lean = 0.04; pose.headTilt = 0;
+  const heightAt = function (share) { measured.proportions = scaledBy(share); return build(measured); };
+  let smaller = 0.05, larger = 20;
+  for (let halving = 0; halving < 40; halving++) {
+    const middle = (smaller + larger) / 2;
+    if (heightAt(middle) < height) smaller = middle; else larger = middle;
+  }
+  fitted.madeFor = madeFor;
+  fitted.body = scaledBy((smaller + larger) / 2);
+  return fitted.body;
+}
+
+// How a player is bent when crouched, so that the body the others see is as tall as the game has you be then:
+// TUNING.playerHeightCrouching, which is where you bump your head. The body goes down on its haunches and leans
+// forward, both by as much as it takes to bring the top of its head to that height. (It used to be one fixed
+// pose, knees bent and leaning, which came to whatever height the proportions gave it: 0.95 m for a body that
+// crouches under 0.7.)
+// TWEAK: how far it leans forward when it is as far down as it goes (radians), and how far down that is: how far
+// the thighs come forward (1.57 would be level, sitting on its heels).
+const PLAYER_CROUCH_LEAN = 0.5;
+const PLAYER_CROUCH_DEEPEST_SQUAT = 0.75;
+const playerCrouchPose = { madeFor: '', squat: 0, lean: 0.04, figure: null };
+
+// Returns { squat, lean } for the pose. Worked out again only when the body or the height asked for has changed
+// (in the workshop, where both have sliders).
+function getPlayerCrouchPose() {
+  const body = FIGURE_PROPORTIONS_PLAYER, crouch = playerCrouchPose;
+  const madeFor = [TUNING.playerHeightCrouching, TUNING.playerHeight, body.thigh, body.shin, body.torsoLength, body.neckLength, body.headRadius, body.headLength].join();
+  if (madeFor === crouch.madeFor) return crouch;
+  crouch.madeFor = madeFor;
+  if (!crouch.figure) crouch.figure = createFigure(body, 0, 'playerImprintSeconds'); // (never shown: only measured)
+  const figure = crouch.figure, pose = figure.pose;
+  pose.legSwing = 0; pose.kneeBend = 0.05;
+  // How tall the body is when it is this far down, from 0 (standing) to 1 (as far as it goes).
+  const heightAt = function (share) {
+    pose.squat = share * PLAYER_CROUCH_DEEPEST_SQUAT; pose.lean = 0.04 + share * (PLAYER_CROUCH_LEAN - 0.04);
+    return buildPersonCapsules(figure);
+  };
+  let standing = 0, down = 1;
+  if (heightAt(0) <= TUNING.playerHeightCrouching) down = 0;        // it is no taller than that standing up
+  else if (heightAt(1) >= TUNING.playerHeightCrouching) standing = 1; // it cannot get that low: as far down as it goes
+  for (let halving = 0; halving < 24 && standing < down; halving++) {
+    const middle = (standing + down) / 2;
+    if (heightAt(middle) > TUNING.playerHeightCrouching) standing = middle; else down = middle;
+  }
+  heightAt(down);
+  crouch.squat = pose.squat; crouch.lean = pose.lean;
+  return crouch;
+}
+
+// Sets the legs and the back of a player's body for standing up or for crouching. (The arms and the walk are the caller's.)
+function poseFigureAsPlayer(figure, isCrouching) {
+  const crouch = isCrouching ? getPlayerCrouchPose() : null;
+  figure.pose.kneeBend = 0.05;
+  figure.pose.squat = crouch ? crouch.squat : 0;
+  figure.pose.lean = crouch ? crouch.lean : 0.04;
+}
+
 // The scanner a player's figure holds. TWEAK: its length and its thickness, in metres.
-const PLAYER_SCANNER_LENGTH = 0.2;
-const PLAYER_SCANNER_RADIUS = 0.05;
+const PLAYER_SCANNER_LENGTH = 0.15;
+const PLAYER_SCANNER_RADIUS = 0.04;
 
 // Where the light on top of the scanner in a player's hand is: halfway along it, just above. `out` gets x, y, z.
 function getFigureScannerLight(figure, out) {
@@ -64,13 +193,14 @@ function createFigure(proportions, surfaceClass, imprintTuningKey) {
     proportions: proportions,
     // Pose, all angles in radians:
     //   legSwing / armSwing  walking motion          armRaise     arms lifted forward (0 hanging, 1.4 reaching)
+    //   squat                a person-shaped body going down on its haunches: thighs forward, shins back, by this much
     //   kneeBend / elbowBend extra bend              lean         whole body tipped forward
     //   headTilt             head cocked sideways
     //   stretch              Hollow only: 0 hunched, 1 drawn up to full height
     //   fingerSplay          Hollow only: 0 fingers together and curled, 1 spread wide
     //   stoop                Hollow only: 0 as it stands, 1 folded as low as it can go to get under a low ceiling
     //   crawl                Hollow only: 0 on its feet, 1 down on knees and hands, the way it goes through a vent
-    pose: { legSwing: 0, kneeBend: 0, armSwing: 0, armRaise: 0, elbowBend: 0.1, lean: 0, headTilt: 0, stretch: 0, fingerSplay: 0.25, stoop: 0, crawl: 0 },
+    pose: { legSwing: 0, kneeBend: 0, squat: 0, armSwing: 0, armRaise: 0, elbowBend: 0.1, lean: 0, headTilt: 0, stretch: 0, fingerSplay: 0.25, stoop: 0, crawl: 0 },
     capsules: new Float32Array(FIGURE_MAXIMUM_CAPSULES * FIGURE_CAPSULE_STRIDE),
     capsuleCount: 0,
     headHeight: 1.6,
@@ -223,25 +353,34 @@ function buildHollowCapsules(figure) {
   return headTop[1] + body.headRadius;
 }
 
-// The calibration dummy: stiff, symmetrical, with a ball at every joint.
-function buildDummyCapsules(figure) {
-  const body = figure.proportions, pose = figure.pose;
+// A person-shaped body: the calibration dummy, stiff, symmetrical, with a ball at every joint; and a player, who
+// is the same make with a scanner in one hand.
+function buildPersonCapsules(figure) {
+  const body = getFigureBody(figure), pose = figure.pose;
   let next = 0;
   const add = function (start, end, radius) { writeFigureCapsule(figure, next++, start, end, radius); };
 
   const legs = [];
   let lowestFoot = 0;
+  // How far an ankle is above the floor: 7 cm, or more for a leg too thick for that.
+  const ankleHeight = Math.max(0.07, body.legRadius * 0.85);
   for (let side = -1; side <= 1; side += 2) {
     const swing = pose.legSwing * (side < 0 ? 1 : -1);
     const bend = pose.kneeBend + Math.max(0, -swing) * 0.7;
     const hip = [side * body.hipWidth / 2, 0, 0];
-    const knee = [hip[0], -Math.cos(swing) * body.thigh, Math.sin(swing) * body.thigh];
-    const shinAngle = swing - bend;
+    // Squatting: both thighs go forward and both shins back by as much, so the hips come down over the feet.
+    // (A bent knee alone only lifts the foot behind: it does not bring a body down far.)
+    const squat = pose.squat || 0, thighAngle = swing + squat;
+    const knee = [hip[0], -Math.cos(thighAngle) * body.thigh, Math.sin(thighAngle) * body.thigh];
+    const shinAngle = swing - bend - squat;
     const ankle = [knee[0], knee[1] - Math.cos(shinAngle) * body.shin, knee[2] + Math.sin(shinAngle) * body.shin];
     lowestFoot = Math.min(lowestFoot, ankle[1]);
+    // (Far down on its haunches and in mid-stride, the knee of the leg behind is lower than its foot: then it is
+    // the knee that is on the floor. 0.07 is how far an ankle is above the floor.)
+    if (squat > 0) lowestFoot = Math.min(lowestFoot, knee[1] + ankleHeight - body.jointRadius);
     legs.push({ hip: hip, knee: knee, ankle: ankle });
   }
-  const pelvisHeight = -lowestFoot + 0.07;
+  const pelvisHeight = -lowestFoot + ankleHeight;
   for (const leg of legs) { leg.hip[1] += pelvisHeight; leg.knee[1] += pelvisHeight; leg.ankle[1] += pelvisHeight; }
 
   const pelvis = [0, pelvisHeight, 0];
@@ -264,14 +403,17 @@ function buildDummyCapsules(figure) {
 
   // A player holds a scanner in the right hand. That arm goes by armRaise and elbowBend, and is held steady;
   // the other hangs at their side and swings as they walk.
-  const isPlayer = body.kind === 'player';
+  const isPlayer = Boolean(FIGURE_KINDS[body.kind] && FIGURE_KINDS[body.kind].holdsScanner);
   let scannerHand = null, scannerAngle = 0;
   for (let side = -1; side <= 1; side += 2) {
     const shoulder = side < 0 ? shoulderLeft : shoulderRight;
     const isScannerArm = isPlayer && side > 0, isFreeArm = isPlayer && side < 0;
-    const armAngle = (isFreeArm ? 0.06 : pose.armRaise) + pose.lean * 0.4 + (isScannerArm ? 0 : pose.armSwing * (side < 0 ? -1 : 1));
+    // (A player's free arm comes forward as they go down on their haunches, to lie along the thigh: hanging
+    // straight down from a shoulder that low, the hand would be in the floor.)
+    const squat = pose.squat || 0;
+    const armAngle = (isFreeArm ? 0.06 + squat * 0.5 : pose.armRaise) + pose.lean * 0.4 + (isScannerArm ? 0 : pose.armSwing * (side < 0 ? -1 : 1));
     const elbow = [shoulder[0], shoulder[1] - Math.cos(armAngle) * body.upperArm, shoulder[2] + Math.sin(armAngle) * body.upperArm];
-    const foreArmAngle = armAngle + (isFreeArm ? 0.15 : pose.elbowBend);
+    const foreArmAngle = armAngle + (isFreeArm ? 0.15 + squat * 0.4 : pose.elbowBend);
     const wrist = [elbow[0], elbow[1] - Math.cos(foreArmAngle) * body.foreArm, elbow[2] + Math.sin(foreArmAngle) * body.foreArm];
     const hand = [wrist[0], wrist[1] - Math.cos(foreArmAngle) * body.handLength, wrist[2] + Math.sin(foreArmAngle) * body.handLength];
     if (isScannerArm) { scannerHand = hand; scannerAngle = foreArmAngle; }
@@ -297,7 +439,9 @@ function buildDummyCapsules(figure) {
 }
 
 function updateFigureCapsules(figure) {
-  const topHeight = figure.proportions.kind === 'hollow' ? buildHollowCapsules(figure) : buildDummyCapsules(figure);
+  // (A body whose proportions name no kind, such as an apparition's, is a person unless it says it is a Hollow.)
+  const kind = FIGURE_KINDS[figure.proportions.kind];
+  const topHeight = FIGURE_BODY_PLANS[kind ? kind.bodyPlan : (figure.proportions.kind === 'hollow' ? 'hollow' : 'person')](figure);
 
   // The body is built standing at height 0; lift or lower it onto the floor it is really on.
   const capsules = figure.capsules;

@@ -565,7 +565,7 @@ function check(description, condition, detail) {
   await debugPage.keyboard.up('KeyW');
   check('"Fly through walls": looking up and moving forward gains height', flight > 3, flight);
   await clickInPage('debug-option-flyMode');
-  const landed = await inDebugGame(() => [window.lastReturnDebug.player.eyeHeight, window.lastReturnDebug.tuning.eyeHeightStanding]);
+  const landed = await inDebugGame(() => [window.lastReturnDebug.player.eyeHeight, window.lastReturnDebug.tuning.playerHeight*window.lastReturnDebug.tuning.playerEyeHeightToBody]);
   check('switching flying off puts the player back on the floor', Math.abs(landed[0] - landed[1]) < 0.01, landed);
 
   await inDebugGame(() => { document.getElementById('debug-zone').value = '19'; });

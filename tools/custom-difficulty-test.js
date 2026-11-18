@@ -145,6 +145,9 @@ function check(description, condition, detail) {
       d.teleport(14.5, 53.5, Math.PI / 2); d.player.pitch = 0; d.simulate(0.1);
       d.spawnHollow(20.5, 53.5);
       d.hollow.anger = 0; d.hollow.graceTimer = 0;
+      // (The beam is held on the middle of its body. Held level, from as low as a player's eyes may be set, it
+      // is at the height of its legs, and half of it goes between them.)
+      d.player.pitch = Math.atan2(d.hollow.figure.boundsCenterY - d.getPlayerEyeY(), 6);
       d.setScanHeld(true); d.simulate(0.5); d.setScanHeld(false);
       const anger = d.hollow.anger;
       d.hollow.isActive = false;
@@ -166,6 +169,8 @@ function check(description, condition, detail) {
       }
       if (phantom) {
         d.player.yaw = Math.atan2(phantom.figure.x - d.player.x, -(phantom.figure.z - d.player.z));
+        // (Looked at where it stands, not straight ahead: from low eyes a level beam is on its legs.)
+        d.player.pitch = Math.atan2(phantom.figure.boundsCenterY - d.getPlayerEyeY(), Math.max(0.5, Math.hypot(phantom.figure.x - d.player.x, phantom.figure.z - d.player.z)));
         d.player.heat = 0; d.player.isOverheated = false;
         d.setScanHeld(true);
         for (let elapsed = 0; elapsed < 5 && d.phantomDirector.current === phantom; elapsed += 0.1) d.simulate(0.1);

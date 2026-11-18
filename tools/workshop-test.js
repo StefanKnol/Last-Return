@@ -317,6 +317,38 @@ function checkSourcePatching() {
     check('"Write to file" puts the number into FIGURE_PROPORTIONS_HOLLOW and nowhere else', thighIn('HOLLOW', longThigh) && thighIn('DUMMY', dummyThigh));
     check('after that the body is the same as the file', written.thigh === longThigh && written.fileThigh === longThigh && written.changes === 0, written);
 
+    // --- a player is one of the creatures: the body the others see of you down there ---
+    const playerLook = () => inPage(() => {
+      const state = window.lastReturnDebug.creatureWorkshop, figure = state.figure, readout = document.getElementById('workshop-creature-readout');
+      return { kind: state.kind, isAPlayer: figure.proportions.kind === 'player', thigh: figure.proportions.thigh, height: Math.round((figure.boundsCenterY - figure.y) * 200) / 100,
+        armRaise: Math.round(figure.pose.armRaise * 100) / 100, squat: Math.round(figure.pose.squat * 100) / 100, readout: readout ? readout.textContent : '',
+        heightStanding: window.lastReturnDebug.tuning.playerHeight, heightCrouching: window.lastReturnDebug.tuning.playerHeightCrouching };
+    });
+    await page.selectOption('#workshop-creature', 'player');
+    await frames(8);
+    const playerStanding = await playerLook();
+    await page.selectOption('#workshop-creature-behaviour', 'crouchedScanning');
+    await frames(30);
+    const playerCrouched = await playerLook();
+    check('a player is one of the creatures in the tool: standing with the scanner at its side; crouched and scanning it is down on its haunches, as tall as the game has you be when you crouch, with the scanner held out; and the readout says where the game has you bump your head and see from',
+      playerStanding.kind === 'player' && playerStanding.isAPlayer && playerStanding.armRaise < 0.4 && playerStanding.squat === 0 && Math.abs(playerStanding.height - playerStanding.heightStanding) < 0.011 &&
+      playerCrouched.squat > 0.2 && Math.abs(playerCrouched.height - playerCrouched.heightCrouching) < 0.015 && playerCrouched.armRaise > 0.9 &&
+      /you bump at/.test(playerStanding.readout) && /you see from/.test(playerStanding.readout) && /Crouching/.test(playerCrouched.readout), [playerStanding, playerCrouched]);
+    const playerThigh = Math.round((playerStanding.thigh + 0.1) * 1000) / 1000;
+    await setNumber('workshop-proportion-thigh', playerThigh);
+    await frames(6);
+    const playerLongLegged = await playerLook();
+    const creaturesListed = await inPage(() => Array.from(document.querySelectorAll('#workshop-creature option')).map((option) => option.value));
+    check('a player is as tall as the game says you are, standing and crouched, whatever its proportions: with longer thighs it is another shape and the same height; and the tool lists every kind of creature there is',
+      playerLongLegged.thigh === playerThigh && Math.abs(playerLongLegged.height - playerLongLegged.heightCrouching) < 0.015 && Math.abs(playerStanding.height - playerStanding.heightStanding) < 0.011 &&
+      creaturesListed.join() === 'hollow,dummy,player', [playerLongLegged, creaturesListed]);
+    await waitForReload(() => page.click('#workshop-save-creature'));
+    await frames(4);
+    const figuresWithPlayer = fs.readFileSync(figuresPath, 'utf8');
+    const thighNowIn = (figureName, value) => new RegExp('FIGURE_PROPORTIONS_' + figureName + ' = \\{[^}]*thigh: ' + String(value).replace('.', '\\.') + ',').test(figuresWithPlayer);
+    check('"Write to file" puts a player\'s number into FIGURE_PROPORTIONS_PLAYER and nowhere else',
+      thighNowIn('PLAYER', playerThigh) && thighNowIn('HOLLOW', longThigh) && thighNowIn('DUMMY', dummyThigh), playerThigh);
+
     // --- the object tool: a kind written as code to look at, then a new object put together from basic forms ---
     await page.click('#workshop-tab-objects');
     await frames();
