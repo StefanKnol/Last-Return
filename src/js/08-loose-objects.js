@@ -15,6 +15,10 @@
 // ball against something solid), objects are never stacked into towers, and nothing is jointed. An object
 // is described as boxes, balls, capsules, cylinders and cones (`parts`); from those the game makes a shell of
 // small balls that does the touching, which is what lets a box land on a corner and tip over.
+// What a ball finds solid: the station (its floor, rock and furniture), and other loose objects. Of another
+// object it is the boxes themselves, flat faces and all, and for whatever else that object is made of the
+// balls of its shell. So one crate stands level on another, and a crate made of five boards holds what is put
+// in it, carries it, and spills it when it goes over ("What rides in what you carry").
 //
 // To add a kind of object: add an entry to LOOSE_OBJECT_KINDS. Nothing else needs to change.
 // Or make one in the workshop's object tool: that is a file in src/objects/ (see 08-workshop-objects.js).
@@ -94,11 +98,7 @@ const LOOSE_OBJECT_KINDS = {
     label: 'empty can', mass: 0.06, value: 1, material: 'tin', loud: 1.7, lies: 'either', bulky: false, bounce: 0.35, grip: 0.4,
     stepRadius: 0.035, // its body is what must not pass through a shelf in one step; the feet are within it
     // The body, and four small feet at each end so that it can stand: a capsule alone has round ends.
-    parts: [{ shape: 'capsule', from: [0, -0.03, 0], to: [0, 0.03, 0], radius: 0.035 },
-      { shape: 'ball', center: [0.016, -0.053, 0.016], radius: 0.012 }, { shape: 'ball', center: [-0.016, -0.053, 0.016], radius: 0.012 },
-      { shape: 'ball', center: [0.016, -0.053, -0.016], radius: 0.012 }, { shape: 'ball', center: [-0.016, -0.053, -0.016], radius: 0.012 },
-      { shape: 'ball', center: [0.016, 0.053, 0.016], radius: 0.012 }, { shape: 'ball', center: [-0.016, 0.053, 0.016], radius: 0.012 },
-      { shape: 'ball', center: [0.016, 0.053, -0.016], radius: 0.012 }, { shape: 'ball', center: [-0.016, 0.053, -0.016], radius: 0.012 }]
+    parts: [{ shape: 'cylinder', from: [0, -0.035, 0], to: [0, 0.035, 0], radius: 0.035 }]
   },
   carton: {
     label: 'cardboard box', mass: 0.7, value: 2, fragile: 0.5, material: 'card', loud: 0.6, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.7,
@@ -153,6 +153,8 @@ const looseState = {
   isHeldByButton: false,   // it is carried for as long as the right mouse button is down (and not by a press of E, which stays until E again)
   holdTargetX: 0, holdTargetY: 0, holdTargetZ: 0,
   holdBreakTimer: 0,       // how long the carried object has been too far from where the beam wants it
+  heldLoad: 0,             // kilograms of other loose things lying in or on what you carry, as it weighs on the beam right now ("What rides in what you carry")
+  heldLoadPush: 0,         // ... and what they have pressed down on it with since the step in hand began
   lastDamageSaidTime: -10, // when the screen last said that a knock cost something
   holdLength: 0,           // how far out the beam holds it right now: looseHoldDistance, or less while it is pressed against something ahead
   isLettingGo: false,      // E went down with something in the beam and nothing to use: this press lets go or throws
@@ -289,8 +291,11 @@ function addShellBallsForPart(part, balls) {
 function prepareLooseObjectKind(kindKey) {
   const kind = LOOSE_OBJECT_KINDS[kindKey];
   if (kind.prepared) return kind.prepared;
-  const balls = [];
-  for (const part of kind.parts) addShellBallsForPart(part, balls);
+  const balls = [], ballIsOfBox = [];
+  for (const part of kind.parts) {
+    addShellBallsForPart(part, balls);
+    while (ballIsOfBox.length < balls.length) ballIsOfBox.push(part.shape === 'box' ? 1 : 0);
+  }
   // Weigh each ball by its volume, so that a thin shaft does not pull the centre of mass as far as the motor it is on.
   let totalWeight = 0, centreX = 0, centreY = 0, centreZ = 0;
   for (const ball of balls) {
@@ -336,6 +341,9 @@ function prepareLooseObjectKind(kindKey) {
     centreX: centreX, centreY: centreY, centreZ: centreZ, // where the centre of mass is, in the coordinates the parts were given in
     partsRadius: partsRadius,
     shell: shell, shellCount: balls.length, parts: parts,
+    // Its boxes, and which balls of the shell are a box's. Another loose object touches a box itself, flat faces
+    // and all, and not the balls that stand in for it against the station ("Other loose objects", further down).
+    boxes: parts.filter(function (part) { return part.shape === 'box'; }), shellIsOfBox: Uint8Array.from(ballIsOfBox),
     inverseMass: 1 / kind.mass,
     inverseInertiaX: 1 / inertiaX, inverseInertiaY: 1 / inertiaY, inverseInertiaZ: 1 / inertiaZ,
     boundsRadius: boundsRadius, smallestRadius: kind.stepRadius || smallestRadius,
@@ -448,6 +456,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     lastScannedTime: -10,               // when a pulse last landed on it
     settleX: x, settleY: y, settleZ: z, settleSeconds: 0, // where it was when it last went anywhere, and for how long it has not (finishLooseObjectStep)
     hasRestPoints: false,               // it was scanned where it lies, and those points are still on it
+    stationTouchTime: -10, heldLinkTime: -10, heldLinkId: 0, // when it last touched the station itself; when a thing in a beam last bore it, and which thing (isLooseObjectRiding)
     // For a kind that does something (`use`): when it was set off, when it starts doing it, and whether it is used up.
     armedTime: -1, goesOffTime: -1, burstSeconds: 0, burstBudget: 0, burstHitsOnHollow: 0, isSpent: false,
     kickedByHollowTime: -100, chasedSince: -100, // when the Hollow last kicked it, and when it last started going after it
@@ -943,7 +952,45 @@ function addLooseContactWithWalker(isPlayer, resistance, walkerX, walkerZ, walke
 }
 
 // Fills `looseContacts` with everything one ball of `object`'s shell overlaps.
-function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
+// A ball against the boxes of a loose object, which is turned any way it likes: the ball is brought into the
+// object's own frame, where its boxes lie square, and what is found is turned back. Each box is touched itself:
+// its flat faces, its edges and its corners. That is what lets a board hold a can, and one crate stand flat on
+// another. (Against the station an object touches with the balls of its shell, which leave gaps between them
+// that a can goes through. That does not matter there, because nothing in a station is that small.)
+function addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, radius) {
+  const matrix = other.matrix, boxes = other.prepared.boxes;
+  const offsetX = positionX - other.x, offsetY = positionY - other.y, offsetZ = positionZ - other.z;
+  const ownX = matrix[0] * offsetX + matrix[3] * offsetY + matrix[6] * offsetZ;
+  const ownY = matrix[1] * offsetX + matrix[4] * offsetY + matrix[7] * offsetZ;
+  const ownZ = matrix[2] * offsetX + matrix[5] * offsetY + matrix[8] * offsetZ;
+  for (let boxIndex = 0; boxIndex < boxes.length; boxIndex++) {
+    const box = boxes[boxIndex];
+    const localX = ownX - box.centerX, localY = ownY - box.centerY, localZ = ownZ - box.centerZ;
+    let deltaX = localX - clampNumber(localX, -box.halfX, box.halfX), deltaY = localY - clampNumber(localY, -box.halfY, box.halfY), deltaZ = localZ - clampNumber(localZ, -box.halfZ, box.halfZ);
+    const distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+    if (distanceSquared >= radius * radius) continue;
+    let depth;
+    if (distanceSquared > 1e-10) {
+      const distance = Math.sqrt(distanceSquared);
+      deltaX /= distance; deltaY /= distance; deltaZ /= distance;
+      depth = radius - distance;
+    } else {
+      // The centre is inside the box: out through the nearest face.
+      const insideX = box.halfX - Math.abs(localX), insideY = box.halfY - Math.abs(localY), insideZ = box.halfZ - Math.abs(localZ);
+      deltaX = 0; deltaY = 0; deltaZ = 0;
+      if (insideY <= insideX && insideY <= insideZ) { deltaY = localY < 0 ? -1 : 1; depth = insideY + radius; }
+      else if (insideX <= insideZ) { deltaX = localX < 0 ? -1 : 1; depth = insideX + radius; }
+      else { deltaZ = localZ < 0 ? -1 : 1; depth = insideZ + radius; }
+    }
+    const contact = addLooseContact(matrix[0] * deltaX + matrix[1] * deltaY + matrix[2] * deltaZ, matrix[3] * deltaX + matrix[4] * deltaY + matrix[5] * deltaZ,
+      matrix[6] * deltaX + matrix[7] * deltaY + matrix[8] * deltaZ, depth);
+    if (!contact) return;
+    contact.other = other;
+  }
+}
+
+// `isOfBox`: the ball is one of those that stand in for a box of the object.
+function collectLooseContacts(object, positionX, positionY, positionZ, radius, isOfBox) {
   looseContactCount = 0;
   const firstTileX = Math.floor(positionX - radius), lastTileX = Math.floor(positionX + radius);
   const firstTileZ = Math.floor(positionZ - radius), lastTileZ = Math.floor(positionZ + radius);
@@ -1032,8 +1079,14 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius) {
     const offsetX = positionX - other.x, offsetY = positionY - other.y, offsetZ = positionZ - other.z;
     const reach = radius + other.prepared.boundsRadius;
     if (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ >= reach * reach) continue;
-    const shell = other.prepared.shell, matrix = other.matrix;
+    // Its boxes as they are, and of whatever else it is made of the balls that stand in for it. (A ball that
+    // stands in for a box of this object is not held against those: the other's balls are held against the box
+    // itself, in gatherLooseTouchesOnOwnBoxes, and the two answers would not agree.)
+    if (other.prepared.boxes.length > 0) addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, radius);
+    if (isOfBox) continue;
+    const shell = other.prepared.shell, shellIsOfBox = other.prepared.shellIsOfBox, matrix = other.matrix;
     for (let ballIndex = 0; ballIndex < other.prepared.shellCount; ballIndex++) {
+      if (shellIsOfBox[ballIndex] === 1) continue;
       const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], otherRadius = shell[ballIndex * 4 + 3];
       const otherX = other.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
       const otherY = other.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
@@ -1114,7 +1167,8 @@ const LOOSE_SETTLE_PASSES = 8; // TWEAK: how many times the touches are gone ove
 const looseTouches = [];
 for (let touchIndex = 0; touchIndex < LOOSE_MAXIMUM_TOUCHES; touchIndex++) {
   looseTouches.push({ object: null, normalX: 0, normalY: 0, normalZ: 0, depth: 0, armX: 0, armY: 0, armZ: 0, otherArmX: 0, otherArmY: 0, otherArmZ: 0,
-    other: null, isSoft: false, isPlayer: false, velocityX: 0, velocityZ: 0, resistance: 1, wantedSpeed: 0, pushed: 0 });
+    other: null, isSoft: false, isPlayer: false, velocityX: 0, velocityZ: 0, resistance: 1, wantedSpeed: 0, pushed: 0,
+    isObjectFirm: false, isOtherFirm: false }); // the one that is in the beam, when the other rides in it: it is not pushed by what it carries
 }
 let looseTouchCount = 0;
 const looseMoving = []; // the objects that are not at rest, for the step in hand
@@ -1136,6 +1190,165 @@ function getLooseTouchSpeed(touch, alongX, alongY, alongZ) {
 }
 const looseScratchSpeed = { x: 0, y: 0, z: 0 };
 
+// What rides in what you carry
+//
+// A crate in the beam with things in it: they lie on its boards and go where it goes. Such a thing is riding:
+// it touches what you carry (or something else that rides), and not the station. Three things follow.
+//   - It does not come to rest, however still you stand: at rest it would be as good as part of the floor to the
+//     crate, which would then catch on what is inside it the moment you moved on.
+//   - What you carry is not caught on it. Touching it does not shorten how far behind the beam lets the crate
+//     fall, nor let it hold you back, nor turn the crate in the beam's hold: those are for the station and for
+//     what lies on it.
+//   - Its weight is yours to carry (`looseState.heldLoad`): it slows you and makes the beam's hold as slack as
+//     if the crate itself weighed that much more. It is read off how hard the things press down on the crate,
+//     so what lies on top of something else in there counts as well.
+//   - It does not push the crate about. The beam holds a thing by saying how fast it goes, which is as strong a
+//     hold on a pump motor as on a can; but a light crate with a pump motor in it would be shoved down onto the
+//     floor by the motor before the beam had its say. So between the two the crate is firm, like a shelf, and
+//     the weight is felt the way all weight in the beam is: in how slowly it follows (the line above).
+// (Down there with others it is the same in every game: a crate in somebody else's beam bears what is in it here
+// as well, where those things may be this browser's to move.)
+function isLooseObjectInABeam(object) {
+  return object.isHeld || object.heldById !== 0;
+}
+
+function isLooseObjectRiding(object) {
+  return !isLooseObjectInABeam(object) && game.time - object.heldLinkTime < 0.2 && game.time - object.stationTouchTime > 0.2;
+}
+
+// Do two loose objects touch, or come within `slack` of it? Asked ball by ball, the way the steps ask: the
+// balls of each against the boxes of the other, and against the balls of whatever else the other is made of.
+function doLooseObjectsTouch(first, second, slack) {
+  for (let turn = 0; turn < 2; turn++) {
+    const object = turn === 0 ? first : second, other = turn === 0 ? second : first;
+    const shell = object.prepared.shell, matrix = object.matrix, otherShell = other.prepared.shell, otherMatrix = other.matrix;
+    for (let ballIndex = 0; ballIndex < object.prepared.shellCount; ballIndex++) {
+      const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], radius = shell[ballIndex * 4 + 3] + slack;
+      const ballX = object.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
+      const ballY = object.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
+      const ballZ = object.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
+      looseContactCount = 0;
+      addLooseContactsWithBoxesOf(other, ballX, ballY, ballZ, radius);
+      if (looseContactCount > 0) { looseContactCount = 0; return true; }
+      for (let otherIndex = 0; turn === 0 && otherIndex < other.prepared.shellCount; otherIndex++) {
+        if (other.prepared.shellIsOfBox[otherIndex] === 1) continue;
+        const ownX = otherShell[otherIndex * 4], ownY = otherShell[otherIndex * 4 + 1], ownZ = otherShell[otherIndex * 4 + 2], both = radius + otherShell[otherIndex * 4 + 3];
+        const deltaX = ballX - (other.x + otherMatrix[0] * ownX + otherMatrix[1] * ownY + otherMatrix[2] * ownZ);
+        const deltaY = ballY - (other.y + otherMatrix[3] * ownX + otherMatrix[4] * ownY + otherMatrix[5] * ownZ);
+        const deltaZ = ballZ - (other.z + otherMatrix[6] * ownX + otherMatrix[7] * ownY + otherMatrix[8] * ownZ);
+        if (deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ < both * both) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// A thing has just been taken into a beam. What lies in it or on it rides in it from this moment, and what lies
+// on that as well: the steps find that out for themselves, by what touches what, but only once a step has been
+// taken. Down there with others the crate may be told somewhere else before this browser has taken one, and
+// what is in it has to go along (carryLooseRidersAlong).
+function noteWhatRestsOnLooseObject(taken) {
+  taken.heldLinkTime = game.time; taken.heldLinkId = taken.id;
+  const bearers = [taken];
+  for (let bearerIndex = 0; bearerIndex < bearers.length; bearerIndex++) {
+    const bearer = bearers[bearerIndex];
+    for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+      const object = looseObjects[objectIndex];
+      if (bearers.indexOf(object) >= 0 || isLooseObjectInABeam(object) || game.time - object.stationTouchTime < 0.2) continue;
+      const reach = bearer.prepared.boundsRadius + object.prepared.boundsRadius + 0.02;
+      const deltaX = object.x - bearer.x, deltaY = object.y - bearer.y, deltaZ = object.z - bearer.z;
+      if (deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ >= reach * reach || !doLooseObjectsTouch(bearer, object, 0.01)) continue;
+      object.heldLinkTime = game.time; object.heldLinkId = taken.id;
+      bearers.push(object);
+    }
+  }
+}
+
+// Down there with others: a crate in somebody else's beam has just been put where their browser says it is
+// now, from where this browser had it (11-together.js). What rides in it and is this browser's to move goes
+// with it, to the same place in the crate, turned as the crate was turned. Otherwise a board that is told a
+// hand's breadth further on would be on the other side of a can.
+function carryLooseRidersAlong(object, fromX, fromY, fromZ, fromTurnX, fromTurnY, fromTurnZ, fromTurnW) {
+  // The turn from how it was to how it is.
+  const turned = multiplyLooseTurns(object.orientationX, object.orientationY, object.orientationZ, object.orientationW, -fromTurnX, -fromTurnY, -fromTurnZ, fromTurnW);
+  const turnX = turned.x, turnY = turned.y, turnZ = turned.z, turnW = turned.w;
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const rider = looseObjects[objectIndex];
+    if (rider === object || rider.heldLinkId !== object.id || !isLooseObjectRiding(rider) || isLooseObjectAnothers(rider)) continue;
+    const x = rider.x - fromX, y = rider.y - fromY, z = rider.z - fromZ;
+    // (x, y, z) turned by the quaternion: v + 2w(q x v) + 2 q x (q x v).
+    const crossX = turnY * z - turnZ * y, crossY = turnZ * x - turnX * z, crossZ = turnX * y - turnY * x;
+    rider.x = object.x + x + 2 * (turnW * crossX + turnY * crossZ - turnZ * crossY);
+    rider.y = object.y + y + 2 * (turnW * crossY + turnZ * crossX - turnX * crossZ);
+    rider.z = object.z + z + 2 * (turnW * crossZ + turnX * crossY - turnY * crossX);
+    const now = multiplyLooseTurns(turnX, turnY, turnZ, turnW, rider.orientationX, rider.orientationY, rider.orientationZ, rider.orientationW);
+    setLooseObjectOrientation(rider, now.x, now.y, now.z, now.w);
+    refreshLooseObjectTiles(rider);
+  }
+}
+
+// What you carry weighs this much on the beam: itself, and whatever rides in it.
+function getHeldLooseMass() {
+  return looseState.held ? looseState.held.kind.mass + looseState.heldLoad : 0;
+}
+
+// Adds one touch to the list: `object` touches something at (pointX, Y, Z), and is pushed out of it along the
+// normal. `other` is the loose object it touches, or null for the station, you, or what walks down there.
+function addLooseTouch(object, other, normalX, normalY, normalZ, depth, pointX, pointY, pointZ, isSoft, isPlayer, velocityX, velocityZ) {
+  if (looseTouchCount >= LOOSE_MAXIMUM_TOUCHES) return;
+  const touch = looseTouches[looseTouchCount++];
+  touch.object = object;
+  touch.normalX = normalX; touch.normalY = normalY; touch.normalZ = normalZ; touch.depth = depth;
+  touch.armX = pointX - object.x; touch.armY = pointY - object.y; touch.armZ = pointZ - object.z;
+  touch.other = other; touch.isSoft = isSoft; touch.isPlayer = isPlayer;
+  touch.velocityX = velocityX; touch.velocityZ = velocityZ;
+  touch.pushed = 0;
+  touch.isObjectFirm = other !== null && isLooseObjectInABeam(object) && isLooseObjectRiding(other);
+  touch.isOtherFirm = other !== null && isLooseObjectInABeam(other) && isLooseObjectRiding(object);
+  touch.resistance = touch.isObjectFirm ? 0 : getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, normalX, normalY, normalZ);
+  if (other) {
+    touch.otherArmX = pointX - other.x; touch.otherArmY = pointY - other.y; touch.otherArmZ = pointZ - other.z;
+  }
+  // How fast it came in. This is measured from how it was moving before this piece of the step began: the
+  // beam pressing a carried object against a wall, and gravity pressing one into the floor, are pushes and
+  // not hits, and must neither bounce nor be heard.
+  let cameInX = object.beforeVelocityX + object.beforeSpinY * touch.armZ - object.beforeSpinZ * touch.armY - touch.velocityX;
+  let cameInY = object.beforeVelocityY + object.beforeSpinZ * touch.armX - object.beforeSpinX * touch.armZ;
+  let cameInZ = object.beforeVelocityZ + object.beforeSpinX * touch.armY - object.beforeSpinY * touch.armX - touch.velocityZ;
+  if (other) {
+    const otherVelocityX = other.isMoving ? other.beforeVelocityX : other.velocityX, otherVelocityY = other.isMoving ? other.beforeVelocityY : other.velocityY, otherVelocityZ = other.isMoving ? other.beforeVelocityZ : other.velocityZ;
+    const otherSpinX = other.isMoving ? other.beforeSpinX : other.spinX, otherSpinY = other.isMoving ? other.beforeSpinY : other.spinY, otherSpinZ = other.isMoving ? other.beforeSpinZ : other.spinZ;
+    cameInX -= otherVelocityX + otherSpinY * touch.otherArmZ - otherSpinZ * touch.otherArmY;
+    cameInY -= otherVelocityY + otherSpinZ * touch.otherArmX - otherSpinX * touch.otherArmZ;
+    cameInZ -= otherVelocityZ + otherSpinX * touch.otherArmY - otherSpinY * touch.otherArmX;
+  }
+  const closingSpeed = -(cameInX * normalX + cameInY * normalY + cameInZ * normalZ);
+  // What the Hollow has just kicked or thrown knocks other things about on its way: that is the Hollow's
+  // doing as well, and no more startles it than the first thing did. (The second thing takes the first one's
+  // time, so that a row of cans does not carry this on for ever.)
+  if (other && closingSpeed > 0.3) {
+    const isRecent = game.time - object.kickedByHollowTime < 3, isOtherRecent = game.time - other.kickedByHollowTime < 3;
+    if (isRecent && !isOtherRecent) other.kickedByHollowTime = object.kickedByHollowTime;
+    else if (isOtherRecent && !isRecent) object.kickedByHollowTime = other.kickedByHollowTime;
+  }
+  // Another object that lies at rest is as good as part of the floor, until it is hit hard enough to shift it.
+  if (other && other.isAsleep) {
+    if (closingSpeed > TUNING.looseWakeFromSpeed) wakeLooseObject(other);
+    else { other = null; touch.other = null; }
+  }
+  if (other && !touch.isOtherFirm) touch.resistance += getLoosePushResistance(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, normalX, normalY, normalZ);
+  // How fast it should be leaving once this is settled: not at all, or bouncing off if it came in fast.
+  // In the beam it never bounces: the beam takes that up.
+  touch.wantedSpeed = !touch.isSoft && !object.isHeld && closingSpeed > TUNING.looseBounceFromSpeed ? closingSpeed * object.kind.bounce : 0;
+  if (touch.isSoft && !touch.isPlayer && closingSpeed > 0.3) object.kickedByHollowTime = game.time;
+  if (closingSpeed > object.knockSpeed) {
+    object.knockSpeed = closingSpeed;
+    object.knockX = pointX; object.knockY = pointY; object.knockZ = pointZ;
+    // A knock is yours when it is in the beam, when you have just let go of it, or when you walked into it.
+    object.knockIsOwn = object.isHeld || game.time - object.lastHandledTime < 4 || touch.isPlayer;
+  }
+}
+
 // Adds what one object is touching to the list.
 function gatherLooseTouches(object) {
   const shell = object.prepared.shell, matrix = object.matrix;
@@ -1144,62 +1357,52 @@ function gatherLooseTouches(object) {
     const ballX = object.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
     const ballY = object.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
     const ballZ = object.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
-    collectLooseContacts(object, ballX, ballY, ballZ, radius);
-    for (let contactIndex = 0; contactIndex < looseContactCount && looseTouchCount < LOOSE_MAXIMUM_TOUCHES; contactIndex++) {
-      const contact = looseContacts[contactIndex];
-      let other = contact.other;
+    collectLooseContacts(object, ballX, ballY, ballZ, radius, object.prepared.shellIsOfBox[ballIndex] === 1);
+    for (let contactIndex = 0; contactIndex < looseContactCount; contactIndex++) {
+      const contact = looseContacts[contactIndex], other = contact.other;
       // Two moving objects touch each other once, not once from each side: the one made later notes it.
       if (other && other.isMoving && other.id > object.id) continue;
-      const touch = looseTouches[looseTouchCount++];
-      const normalX = contact.normalX, normalY = contact.normalY, normalZ = contact.normalZ;
-      const pointX = ballX - normalX * radius, pointY = ballY - normalY * radius, pointZ = ballZ - normalZ * radius;
-      touch.object = object;
-      touch.normalX = normalX; touch.normalY = normalY; touch.normalZ = normalZ; touch.depth = contact.depth;
-      touch.armX = pointX - object.x; touch.armY = pointY - object.y; touch.armZ = pointZ - object.z;
-      touch.other = other; touch.isSoft = contact.isSoft; touch.isPlayer = contact.isPlayer;
-      touch.velocityX = contact.velocityX; touch.velocityZ = contact.velocityZ;
-      touch.pushed = 0;
-      touch.resistance = getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, normalX, normalY, normalZ);
-      if (other) {
-        touch.otherArmX = pointX - other.x; touch.otherArmY = pointY - other.y; touch.otherArmZ = pointZ - other.z;
-      }
-      // How fast it came in. This is measured from how it was moving before this piece of the step began: the
-      // beam pressing a carried object against a wall, and gravity pressing one into the floor, are pushes and
-      // not hits, and must neither bounce nor be heard.
-      let cameInX = object.beforeVelocityX + object.beforeSpinY * touch.armZ - object.beforeSpinZ * touch.armY - touch.velocityX;
-      let cameInY = object.beforeVelocityY + object.beforeSpinZ * touch.armX - object.beforeSpinX * touch.armZ;
-      let cameInZ = object.beforeVelocityZ + object.beforeSpinX * touch.armY - object.beforeSpinY * touch.armX - touch.velocityZ;
-      if (other) {
-        const otherVelocityX = other.isMoving ? other.beforeVelocityX : other.velocityX, otherVelocityY = other.isMoving ? other.beforeVelocityY : other.velocityY, otherVelocityZ = other.isMoving ? other.beforeVelocityZ : other.velocityZ;
-        const otherSpinX = other.isMoving ? other.beforeSpinX : other.spinX, otherSpinY = other.isMoving ? other.beforeSpinY : other.spinY, otherSpinZ = other.isMoving ? other.beforeSpinZ : other.spinZ;
-        cameInX -= otherVelocityX + otherSpinY * touch.otherArmZ - otherSpinZ * touch.otherArmY;
-        cameInY -= otherVelocityY + otherSpinZ * touch.otherArmX - otherSpinX * touch.otherArmZ;
-        cameInZ -= otherVelocityZ + otherSpinX * touch.otherArmY - otherSpinY * touch.otherArmX;
-      }
-      const closingSpeed = -(cameInX * normalX + cameInY * normalY + cameInZ * normalZ);
-      // What the Hollow has just kicked or thrown knocks other things about on its way: that is the Hollow's
-      // doing as well, and no more startles it than the first thing did. (The second thing takes the first one's
-      // time, so that a row of cans does not carry this on for ever.)
-      if (other && closingSpeed > 0.3) {
-        const isRecent = game.time - object.kickedByHollowTime < 3, isOtherRecent = game.time - other.kickedByHollowTime < 3;
-        if (isRecent && !isOtherRecent) other.kickedByHollowTime = object.kickedByHollowTime;
-        else if (isOtherRecent && !isRecent) object.kickedByHollowTime = other.kickedByHollowTime;
-      }
-      // Another object that lies at rest is as good as part of the floor, until it is hit hard enough to shift it.
-      if (other && other.isAsleep) {
-        if (closingSpeed > TUNING.looseWakeFromSpeed) wakeLooseObject(other);
-        else { other = null; touch.other = null; }
-      }
-      if (other) touch.resistance += getLoosePushResistance(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, normalX, normalY, normalZ);
-      // How fast it should be leaving once this is settled: not at all, or bouncing off if it came in fast.
-      // In the beam it never bounces: the beam takes that up.
-      touch.wantedSpeed = !touch.isSoft && !object.isHeld && closingSpeed > TUNING.looseBounceFromSpeed ? closingSpeed * object.kind.bounce : 0;
-      if (touch.isSoft && !touch.isPlayer && closingSpeed > 0.3) object.kickedByHollowTime = game.time;
-      if (closingSpeed > object.knockSpeed) {
-        object.knockSpeed = closingSpeed;
-        object.knockX = pointX; object.knockY = pointY; object.knockZ = pointZ;
-        // A knock is yours when it is in the beam, when you have just let go of it, or when you walked into it.
-        object.knockIsOwn = object.isHeld || game.time - object.lastHandledTime < 4 || touch.isPlayer;
+      addLooseTouch(object, other, contact.normalX, contact.normalY, contact.normalZ, contact.depth,
+        ballX - contact.normalX * radius, ballY - contact.normalY * radius, ballZ - contact.normalZ * radius, contact.isSoft, contact.isPlayer, contact.velocityX, contact.velocityZ);
+    }
+  }
+  if (object.prepared.boxes.length > 0) gatherLooseTouchesOnOwnBoxes(object);
+}
+
+// The other half of two loose objects touching, for an object that has boxes: what the others put against them.
+// The balls of its own shell found where it goes into another object. Here the balls of the others' shells are
+// held against its boxes, so that what lies in a crate lies on its boards whichever of the two was made first.
+// (The pushes are the same ones, turned round: they are noted for this object, away from the other's ball.)
+function gatherLooseTouchesOnOwnBoxes(object) {
+  const reach = object.prepared.boundsRadius, stamp = ++looseStampCounter;
+  const firstTileX = Math.max(0, Math.floor(object.x - reach)), lastTileX = Math.min(GRID_WIDTH - 1, Math.floor(object.x + reach));
+  const firstTileZ = Math.max(0, Math.floor(object.z - reach)), lastTileZ = Math.min(GRID_DEPTH - 1, Math.floor(object.z + reach));
+  for (let tileZ = firstTileZ; tileZ <= lastTileZ; tileZ++) {
+    for (let tileX = firstTileX; tileX <= lastTileX; tileX++) {
+      const list = tileLooseLists[tileZ * GRID_WIDTH + tileX];
+      for (let listIndex = 0; list !== null && listIndex < list.length; listIndex++) {
+        const other = list[listIndex];
+        if (other === object || other.touchStamp === stamp) continue;
+        other.touchStamp = stamp;
+        if (other.isMoving && other.id > object.id) continue; // (it notes the two of them itself)
+        const apartX = other.x - object.x, apartY = other.y - object.y, apartZ = other.z - object.z, both = reach + other.prepared.boundsRadius;
+        if (apartX * apartX + apartY * apartY + apartZ * apartZ >= both * both) continue;
+        const shell = other.prepared.shell, matrix = other.matrix;
+        for (let ballIndex = 0; ballIndex < other.prepared.shellCount; ballIndex++) {
+          const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], radius = shell[ballIndex * 4 + 3];
+          const ballX = other.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
+          const ballY = other.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
+          const ballZ = other.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
+          const awayX = ballX - object.x, awayY = ballY - object.y, awayZ = ballZ - object.z;
+          if (awayX * awayX + awayY * awayY + awayZ * awayZ >= (reach + radius) * (reach + radius)) continue;
+          looseContactCount = 0;
+          addLooseContactsWithBoxesOf(object, ballX, ballY, ballZ, radius);
+          for (let contactIndex = 0; contactIndex < looseContactCount; contactIndex++) {
+            const contact = looseContacts[contactIndex];
+            addLooseTouch(object, other, -contact.normalX, -contact.normalY, -contact.normalZ, contact.depth,
+              ballX - contact.normalX * radius, ballY - contact.normalY * radius, ballZ - contact.normalZ * radius, false, false, 0, 0);
+          }
+        }
       }
     }
   }
@@ -1218,14 +1421,29 @@ function settleLooseTouches() {
       touch.pushed = Math.max(0, before + (touch.wantedSpeed - leavingSpeed) / touch.resistance);
       const push = touch.pushed - before;
       if (push === 0) continue;
-      pushLooseObject(object, touch.armX, touch.armY, touch.armZ, touch.normalX * push, touch.normalY * push, touch.normalZ * push);
-      if (touch.other) pushLooseObject(touch.other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, -touch.normalX * push, -touch.normalY * push, -touch.normalZ * push);
+      if (!touch.isObjectFirm) pushLooseObject(object, touch.armX, touch.armY, touch.armZ, touch.normalX * push, touch.normalY * push, touch.normalZ * push);
+      if (touch.other && !touch.isOtherFirm) pushLooseObject(touch.other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, -touch.normalX * push, -touch.normalY * push, -touch.normalZ * push);
     }
   }
   for (let touchIndex = 0; touchIndex < count; touchIndex++) {
     const touch = looseTouches[touchIndex], object = touch.object, other = touch.other;
-    object.touchedThisStep = true;
-    if (other) other.touchedThisStep = true;
+    // What rides in what you carry (see isLooseObjectRiding). Being borne by the thing in the beam is handed on
+    // from one to the next as the time the beam last had it, so two things in a crate that has been put down
+    // cannot keep each other riding.
+    let isCarriedAlong = false;
+    if (other) {
+      const isBorneByOther = isLooseObjectInABeam(other) || isLooseObjectRiding(other), isBorneByObject = isLooseObjectInABeam(object) || isLooseObjectRiding(object);
+      if (isBorneByOther && other.heldLinkTime > object.heldLinkTime) { object.heldLinkTime = other.heldLinkTime; object.heldLinkId = other.heldLinkId; }
+      else if (isBorneByObject && object.heldLinkTime > other.heldLinkTime) { other.heldLinkTime = object.heldLinkTime; other.heldLinkId = object.heldLinkId; }
+      isCarriedAlong = (object.isHeld && isLooseObjectRiding(other)) || (other.isHeld && isLooseObjectRiding(object));
+      // How hard it presses down on what you carry: a push on the one is the same push, turned round, on the other.
+      if (object.isHeld) looseState.heldLoadPush -= touch.normalY * touch.pushed;
+      else if (other.isHeld) looseState.heldLoadPush += touch.normalY * touch.pushed;
+    } else if (!touch.isSoft) {
+      object.stationTouchTime = game.time;
+    }
+    if (!(isCarriedAlong && object.isHeld)) object.touchedThisStep = true;
+    if (other && !(isCarriedAlong && other.isHeld)) other.touchedThisStep = true;
     if (touch.isSoft) continue;
     // Grip: a push against the slide, no stronger than the surface can give for how hard the two are pressed together.
     if (touch.pushed > 0) {
@@ -1236,11 +1454,11 @@ function settleLooseTouches() {
       const slide = Math.sqrt(slideX * slideX + slideY * slideY + slideZ * slideZ);
       if (slide >= 1e-4) {
         slideX /= slide; slideY /= slide; slideZ /= slide;
-        let slideResistance = getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, slideX, slideY, slideZ);
-        if (other) slideResistance += getLoosePushResistance(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX, slideY, slideZ);
+        let slideResistance = touch.isObjectFirm ? 0 : getLoosePushResistance(object, touch.armX, touch.armY, touch.armZ, slideX, slideY, slideZ);
+        if (other && !touch.isOtherFirm) slideResistance += getLoosePushResistance(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX, slideY, slideZ);
         const grip = Math.min(object.kind.grip * touch.pushed, slide / slideResistance);
-        pushLooseObject(object, touch.armX, touch.armY, touch.armZ, -slideX * grip, -slideY * grip, -slideZ * grip);
-        if (other) pushLooseObject(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX * grip, slideY * grip, slideZ * grip);
+        if (!touch.isObjectFirm) pushLooseObject(object, touch.armX, touch.armY, touch.armZ, -slideX * grip, -slideY * grip, -slideZ * grip);
+        if (other && !touch.isOtherFirm) pushLooseObject(other, touch.otherArmX, touch.otherArmY, touch.otherArmZ, slideX * grip, slideY * grip, slideZ * grip);
       }
     }
     // Out again. Four corners resting on the floor all ask for the same move, so the moves are not added up:
@@ -1287,8 +1505,9 @@ function driveHeldLooseObject(object, stepSeconds) {
   const kind = object.kind;
   // TWEAK: these two lines are how carrying feels. `follow` is how fast it wants to close the gap to that place
   // (per second); `response` how quickly it gets up to that speed. A heavy object is slower at both.
-  const follow = TUNING.looseHoldFollowRate / (1 + kind.mass * TUNING.looseHoldLagPerKilogram);
-  const response = Math.min(1, TUNING.looseHoldResponseRate / (1 + kind.mass * TUNING.looseHoldLagPerKilogram) * stepSeconds);
+  const mass = kind.mass + looseState.heldLoad; // with what rides in it
+  const follow = TUNING.looseHoldFollowRate / (1 + mass * TUNING.looseHoldLagPerKilogram);
+  const response = Math.min(1, TUNING.looseHoldResponseRate / (1 + mass * TUNING.looseHoldLagPerKilogram) * stepSeconds);
   let wantedX = (looseState.holdTargetX - object.x) * follow + looseState.playerVelocityX;
   let wantedY = (looseState.holdTargetY - object.y) * follow;
   let wantedZ = (looseState.holdTargetZ - object.z) * follow + looseState.playerVelocityZ;
@@ -1317,7 +1536,7 @@ function driveHeldLooseObject(object, stepSeconds) {
   }
   let turnX = 0, turnY = 0, turnZ = 0;
   if (angle > 0) {
-    const rate = angle * TUNING.looseHoldTurnRate / (1 + kind.mass * TUNING.looseHoldLagPerKilogram) / sine;
+    const rate = angle * TUNING.looseHoldTurnRate / (1 + mass * TUNING.looseHoldLagPerKilogram) / sine;
     turnX = errorX * rate; turnY = errorY * rate; turnZ = errorZ * rate;
   }
   object.spinX += (turnX - object.spinX) * response;
@@ -1357,10 +1576,13 @@ function stepLooseObjects(stepSeconds) {
     looseMoving.push(object);
     object.wasTouching = object.touchedThisStep;
     object.touchedThisStep = false;
+    if (isLooseObjectInABeam(object)) { object.heldLinkTime = game.time; object.heldLinkId = object.id; }
     const speed = Math.sqrt(object.velocityX * object.velocityX + object.velocityY * object.velocityY + object.velocityZ * object.velocityZ) +
       Math.sqrt(object.spinX * object.spinX + object.spinY * object.spinY + object.spinZ * object.spinZ) * object.prepared.boundsRadius;
     piecesNeeded = Math.max(piecesNeeded, speed * stepSeconds / (object.prepared.smallestRadius * 0.5));
   }
+  looseState.heldLoadPush = 0;
+  if (!looseState.held) looseState.heldLoad = 0;
   if (looseMoving.length === 0) return;
   const pieces = clampNumber(Math.ceil(piecesNeeded), 1, 12);
   const seconds = stepSeconds / pieces;
@@ -1386,6 +1608,12 @@ function stepLooseObjects(stepSeconds) {
     }
   }
   for (let movingIndex = 0; movingIndex < looseMoving.length; movingIndex++) if (!looseMoving[movingIndex].isAnothers) finishLooseObjectStep(looseMoving[movingIndex], stepSeconds);
+  // What rides in what you carry weighs on it by how hard it pressed down in this step: its weight, when it lies
+  // still in there. It rattles, so the figure is taken over about a third of a second.
+  if (looseState.held) {
+    const pressing = Math.max(0, looseState.heldLoadPush) / (TUNING.looseGravity * stepSeconds);
+    looseState.heldLoad += (pressing - looseState.heldLoad) * Math.min(1, stepSeconds * 3);
+  }
 }
 
 // What is left to do for one object when a step is over: the small losses, a check that it is still in the
@@ -1417,7 +1645,7 @@ function finishLooseObjectStep(object, stepSeconds) {
   // where it was when this count began, for long enough: it is at rest.
   const settleX = object.x - object.settleX, settleY = object.y - object.settleY, settleZ = object.z - object.settleZ;
   const speedSquared = object.velocityX * object.velocityX + object.velocityY * object.velocityY + object.velocityZ * object.velocityZ;
-  if (object.isHeld || !object.touchedThisStep || speedSquared > TUNING.looseSettleSpeed * TUNING.looseSettleSpeed ||
+  if (object.isHeld || isLooseObjectRiding(object) || !object.touchedThisStep || speedSquared > TUNING.looseSettleSpeed * TUNING.looseSettleSpeed ||
       settleX * settleX + settleY * settleY + settleZ * settleZ > TUNING.looseSettleMetres * TUNING.looseSettleMetres) {
     object.settleX = object.x; object.settleY = object.y; object.settleZ = object.z; object.settleSeconds = 0;
   } else {
@@ -1431,8 +1659,8 @@ function finishLooseObjectStep(object, stepSeconds) {
     }
   }
 
-  // Rest: slow, touching something, and for long enough.
-  if (!object.isHeld && object.touchedThisStep &&
+  // Rest: slow, touching something, and for long enough. (Not while it rides in what you carry.)
+  if (!object.isHeld && !isLooseObjectRiding(object) && object.touchedThisStep &&
       object.velocityX * object.velocityX + object.velocityY * object.velocityY + object.velocityZ * object.velocityZ < TUNING.looseRestSpeed * TUNING.looseRestSpeed &&
       object.spinX * object.spinX + object.spinY * object.spinY + object.spinZ * object.spinZ < TUNING.looseRestSpin * TUNING.looseRestSpin) {
     object.restSeconds += stepSeconds;
@@ -1596,7 +1824,7 @@ function getHeldLooseObject() {
 function getCarrySpeedFactor() {
   const held = looseState.held;
   if (!held) return 1;
-  return 1 / (1 + held.kind.mass * TUNING.carrySlowdownPerKilogram);
+  return 1 / (1 + getHeldLooseMass() * TUNING.carrySlowdownPerKilogram);
 }
 
 function canSprintWhileCarrying() {
@@ -1615,7 +1843,7 @@ function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   updateScanEmitterAtLens(eyeX, eyeY, eyeZ);
   const distance = looseState.holdLength + held.prepared.partsRadius;
   looseState.holdTargetX = scanEmitter.x + scannerBasis.forwardX * distance;
-  looseState.holdTargetY = scanEmitter.y + scannerBasis.forwardY * distance - held.kind.mass * TUNING.looseHoldSagPerKilogram;
+  looseState.holdTargetY = scanEmitter.y + scannerBasis.forwardY * distance - getHeldLooseMass() * TUNING.looseHoldSagPerKilogram;
   looseState.holdTargetZ = scanEmitter.z + scannerBasis.forwardZ * distance;
 }
 
@@ -1978,11 +2206,18 @@ const STATION_VALUABLES_ON_A_SURFACE = [['jar', 5], ['toolCase', 3]];
 // so a build without that file has none, and leaves such a tile bare.
 const STATION_STAND_IN_KIND = 'canister';
 
+// Is there such a kind, and may a station have it? (Not one from the workshop, in a station built from the code alone.)
+function isLooseKindInStations(kindKey) {
+  return Boolean(LOOSE_OBJECT_KINDS[kindKey]) && (isWorkshopContentUsed || LOOSE_OBJECT_KINDS[kindKey].isDesigned !== true);
+}
+
 function drawFromLooseTable(table, random) {
+  // (A kind from the workshop is left out of a station that is built from the code alone: isWorkshopContentUsed, 03-levelgen.js.)
+  const isLeftOut = function (entry) { return !isWorkshopContentUsed && LOOSE_OBJECT_KINDS[entry[0]].isDesigned === true; };
   let total = 0;
-  for (const entry of table) total += entry[1];
+  for (const entry of table) if (!isLeftOut(entry)) total += entry[1];
   let draw = random() * total;
-  for (const entry of table) { draw -= entry[1]; if (draw < 0) return entry[0]; }
+  for (const entry of table) { if (isLeftOut(entry)) continue; draw -= entry[1]; if (draw < 0) return entry[0]; }
   return table[0][0];
 }
 
@@ -2148,7 +2383,7 @@ function planStationLooseObjects() {
     let kindKey = drawFromLooseTable(STATION_VALUABLES_ON_THE_FLOOR, random);
     // What cannot be shoved aside does not go where it would stand in the only way through.
     if (LOOSE_OBJECT_KINDS[kindKey].mass >= TUNING.looseShoveBlockMass * 0.6 && !isLooseTileEasyToPass(index)) kindKey = STATION_STAND_IN_KIND;
-    if (!LOOSE_OBJECT_KINDS[kindKey]) continue;
+    if (!isLooseKindInStations(kindKey)) continue;
     let lies = LOOSE_OBJECT_KINDS[kindKey].lies;
     let yaw = random() * TWO_PI;
     const sideDraw = lies === 'either' ? random() : 1, isTurnedTheOtherWay = random() < 0.5; // drawn exactly as they always were
@@ -2165,7 +2400,7 @@ function planStationLooseObjects() {
       }
       if (!fits) {
         kindKey = STATION_STAND_IN_KIND;
-        if (!LOOSE_OBJECT_KINDS[kindKey]) continue;
+        if (!isLooseKindInStations(kindKey)) continue;
         lies = LOOSE_OBJECT_KINDS[kindKey].lies;
       }
     }
@@ -2721,7 +2956,10 @@ function rememberPlayerMovement(dt) {
 }
 
 function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
-  updateLooseCarryInput(dt);
+  // (Down there with others this goes on while you have the menu open, read a page or are dead: then with no
+  // hand on the keys, and with you standing where you are. See updateStationWithoutYou in 11-game.js.)
+  const isAtTheControls = game.mode === 'playing';
+  if (isAtTheControls) updateLooseCarryInput(dt);
   updateHaulBays(dt);
   if (looseObjects.length === 0) { rememberPlayerMovement(dt); return; }
   computeLooseHoldTarget(eyeX, eyeY, eyeZ);
@@ -2744,7 +2982,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     const object = looseObjects[objectIndex];
     if (!object.isAsleep) continue;
     if (isLooseObjectAnothers(object)) continue; // woken by its mover, where it is moved
-    if (player.isMoving) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + TUNING.playerHeight);
+    if (player.isMoving && isAtTheControls) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + TUNING.playerHeight);
     if (hollow.isActive) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
     for (let index = 1; index < players.length; index++) {
       const one = players[index], floorY = getFloorHeightAt(one.x, one.z);

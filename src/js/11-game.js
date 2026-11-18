@@ -98,6 +98,7 @@ function isInteractableWantedNow(interactable) {
   if (objectId === OBJECT_LIFT_TERMINAL) {
     return flags.powerOn && !flags.uploadStarted && getUnfinishedQuests('upload').length === 0 && !(flags.spoolsUploaded && getUnfinishedQuests('lift').length > 0);
   }
+  if (objectId === OBJECT_LIFT_PANEL) return liftDoor.forcedState !== true && liftDoor.openFraction < 1; // only while the door is shut on you
   if (objectId === OBJECT_NOTE_SECURITY || objectId === OBJECT_NOTE_LOCKER || objectId === OBJECT_NOTE_LAB || objectId === OBJECT_NOTE_ARCHIVE) return false;
   return true; // spools and keycards are always worth going for
 }
@@ -443,6 +444,19 @@ function useInteractable(interactable) {
         showMessage('LIFT CONTROL: car at this level. Doors open.', 3, 'info');
       }
       break;
+    case OBJECT_LIFT_PANEL:
+      // The panel in the car. Its door comes down behind the last one out, and nobody should ever be behind it.
+      // If somebody is all the same (down there with others, say, having come down late), this opens it again.
+      // It then goes by the rule it always had: open while anybody is in the car or its doorway, down after.
+      if (liftDoor.forcedState === true || liftDoor.openFraction >= 1) {
+        showMessage('LIFT: door open.', 2.5, 'info');
+      } else {
+        liftDoor.forcedState = true;
+        game.isLiftDoorClosingBehindYou = true;
+        playInterfaceBlip(520);
+        showMessage('LIFT: door opening.', 2.5, 'info');
+      }
+      break;
     case OBJECT_GENERATOR:
       if (flags.powerOn) break;
       if (!doQuestsAllowTheMains()) break; // a quest holds up the mains (an empty tank), and has said so
@@ -671,8 +685,7 @@ function noteLiftLeft() {
   game.isLiftDoorClosingBehindYou = true;
   saveCheckpoint();
   refreshObjective();
-  scheduleEvent(1.4, function () { playLiftDepartSound(); });
-  fireGameEvent('leftLift');
+  fireGameEvent('leftLift'); // (the car is heard going up when its door is down: updateGameProgress)
 }
 
 // The car goes up.
@@ -718,10 +731,16 @@ function updateGameProgress(dt) {
   if (game.isLiftDoorClosingBehindYou) {
     let isInTheWay = false; // somebody in the car, or in its doorway
     for (const one of players) if (distanceOutsideLiftCar(one.x, one.z) < 1.2) isInTheWay = true;
+    // Down there with others, somebody who came down with you and has not been heard from yet is in the car: their
+    // browser is still building the station. (The host could be out and the door down before they had arrived.)
+    if (isSomebodyStillOnTheirWayDown()) isInTheWay = true;
     if (isInTheWay && liftDoor.openFraction > 0) liftDoor.forcedState = true;
     else if (!isInTheWay) {
       liftDoor.forcedState = false;
-      if (liftDoor.openFraction <= 0) game.isLiftDoorClosingBehindYou = false; // down, with you outside: that is that
+      if (liftDoor.openFraction <= 0) {
+        game.isLiftDoorClosingBehindYou = false; // down, with you outside: that is that (until somebody uses the panel in the car)
+        playLiftDepartSound();
+      }
     }
   }
 
@@ -811,10 +830,16 @@ function updateStation(dt) {
 
 // Down there with others the station does not stop for the one who is reading, has the menu open, or is dead.
 // This is a frame of it going on without you. (Alone, it waits for you, as it always did.)
+// Everything goes on but what you would be doing yourself: what walks down there, the doors, the work order,
+// and whatever lies loose that is this browser's to move (all of it, for the host: a thing that was falling
+// when the host opened the menu used to hang in the air in everybody's game until the menu was shut).
+// What you hear of it goes on too, while you are only looking at a menu or a page.
 function updateStationWithoutYou(dt, hasTimeMoved) {
   if (!hasTimeMoved) { game.time += dt; currentPointTime = game.time; }
+  updateLooseObjects(dt, player.x, getPlayerEyeY(), player.z);
   updateStation(dt);
   updateGameProgress(dt);
+  if (game.mode === 'paused' || game.mode === 'reading') updateAtmosphere(dt);
 }
 
 function updateAscending(dt) {
@@ -1050,7 +1075,9 @@ function startApplication() {
     teleport: function (x, z, yaw) { player.x = x; player.z = z; if (yaw !== undefined) player.yaw = yaw; },
     grantPower: function () { game.flags.powerOn = true; refreshObjective(); },
     grantKeycard: function () { setKeycardLevel(3); },
-    keycardObjectIds: KEYCARD_OBJECT_IDS,
+    keycardObjectIds: KEYCARD_OBJECT_IDS, liftPanelObjectId: OBJECT_LIFT_PANEL,
+    // Whether the stations built from now on use what the workshop made (see isWorkshopContentUsed in 03-levelgen.js).
+    setWorkshopContentUsed: function (isUsed) { isWorkshopContentUsed = isUsed !== false; },
     missionObjectIds: { fuelCan: OBJECT_FUEL_CAN, winchBreaker: OBJECT_WINCH_BREAKER, firstCore: OBJECT_CORE_FIRST, firstExtraGenerator: OBJECT_EXTRA_GENERATOR_FIRST, firstExtraFuelCan: OBJECT_EXTRA_FUEL_CAN_FIRST },
     // Quests (09-quests.js): the descriptions, this station's, and the questions the game asks of them.
     quests: QUESTS, questItems: QUEST_ITEMS, findQuest: findQuest, isQuestUnfinished: isQuestUnfinished, getUnfinishedQuests: getUnfinishedQuests,

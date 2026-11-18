@@ -486,6 +486,9 @@ function sayWhereYouAre() {
     vx: round(player.velocityX), vz: round(player.velocityZ), r: round(game.mode === 'playing' ? player.audibleRadius : 0) });
 }
 
+// TWEAK: how far forward the arm with the scanner is raised (radians): held out while they scan, and at their side.
+const OTHER_PLAYER_ARM_SCANNING = 1.1, OTHER_PLAYER_ARM_AT_SIDE = 0.2;
+
 // Stands their body where they are shown, in the pose of what they are doing. `movedDistance` is how far they
 // came since the last frame: their legs go with it.
 function placeOtherPlayerFigure(other, movedDistance) {
@@ -514,7 +517,7 @@ function advanceOtherPlayer(other, dt) {
   other.pitch = interpolateLinear(other.fromPitch, other.toPitch, other.blend);
   const movedDistance = distanceBetweenPoints(previousX, previousZ, other.x, other.z);
   other.stride = approachValue(other.stride, movedDistance > dt * 0.3 ? 1 : 0, dt * 6);
-  other.armRaise = approachValue(other.armRaise, other.spreadDegrees > 0 ? 1.1 : 0.2, dt * 5); // TWEAK: scanner arm held out, and at their side
+  other.armRaise = approachValue(other.armRaise, other.spreadDegrees > 0 ? OTHER_PLAYER_ARM_SCANNING : OTHER_PLAYER_ARM_AT_SIDE, dt * 5);
   placeOtherPlayerFigure(other, movedDistance);
 }
 
@@ -594,6 +597,14 @@ function placeOwnBody() {
   updateFigureCapsules(figure);
 }
 
+// The host's game: has one of those who came down with you not said where they are yet? Then their browser is
+// still building the station, and they are in the lift car, where everyone starts. (The car's door waits for them.)
+function isSomebodyStillOnTheirWayDown() {
+  if (!isWorldYoursToShare()) return false;
+  for (const other of together.others) if (!other.hasBeenHeardFrom && !other.isDown) return true;
+  return false;
+}
+
 // Every frame, whatever the game is doing (11-game.js calls this).
 function updateTogether(dt) {
   if (!together.isInDescent) return;
@@ -605,12 +616,16 @@ function updateTogether(dt) {
   together.looseSayTimer -= dt;
   if (together.looseSayTimer <= 0 && game.mode !== 'intro') {
     together.looseSayTimer = Math.max(together.looseSayTimer + 1 / LOOSE_SAYS_PER_SECOND, 0);
+    claimWhatRidesInYourBeam();
     sayWhereLooseThingsAre();
   }
   placeOwnBody();
   if (game.mode !== 'intro') showFallenScannerLights();
   for (const other of together.others) {
-    presentOtherPlayer(other, dt, game.mode === 'playing' || (isLobbyHost() && game.mode !== 'intro')); // the host's creatures feel their light whatever the host is doing
+    // What their scanners light up is lit here whatever you are doing yourself: with the menu open, reading a
+    // page, or dead. It goes onto your map, and the host's creatures feel their light. (It used to stop for
+    // anyone but the host who was not at the controls, so a room scanned while you had the menu open stayed dark.)
+    presentOtherPlayer(other, dt, game.mode !== 'intro');
   }
   if (isLobbyHost()) {
     // Who is on their feet down here, for what hunts and what opens. (Never nobody: with everyone down it is you.)
@@ -889,7 +904,7 @@ function readAction(data) {
   }
   if (data.what === 'restart' && Number.isInteger(data.id)) return { what: 'restart', id: data.id };
   // Things that lie loose (see further down).
-  if ((data.what === 'take' || data.what === 'release' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
+  if ((data.what === 'take' || data.what === 'release' || data.what === 'carry' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
     return { what: 'shatter', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
   }
@@ -1012,8 +1027,22 @@ function performLooseAction(action) {
     object.wasHandled = true; object.isIgnoredByHollow = false; object.lastHandledTime = game.time;
     if (game.actor) wakeLooseObject(object);
     else if (!pickUpLooseObjectNow(object, action.isByButton)) askToAct({ what: 'release', id: object.id }); // (your beam has something else by now)
+    if (object.heldById) noteWhatRestsOnLooseObject(object); // what is in a crate goes where the crate goes, from now
   } else if (action.what === 'release') {
     if (object.heldById === actingId) object.heldById = 0;
+  } else if (action.what === 'carry') {
+    // What rides in what one of you carries is theirs to move, like the thing in their beam itself (see
+    // claimWhatRidesInYourBeam). Only for one who has something in their beam, and only what is at it.
+    if (object.heldById) return;
+    let isAtTheirs = !isWorldShared();
+    for (const other of looseObjects) {
+      if (other.heldById !== actingId) continue;
+      const reach = other.prepared.boundsRadius + object.prepared.boundsRadius + 0.5;
+      if (Math.hypot(other.x - object.x, other.y - object.y, other.z - object.z) < reach) isAtTheirs = true;
+    }
+    if (!isAtTheirs) return;
+    object.ownerId = actingId;
+    wakeLooseObject(object);
   } else if (action.what === 'shatter') {
     object.x = action.x; object.y = action.y; object.z = action.z;
     shatterLooseObjectNow(object);
@@ -1043,6 +1072,23 @@ function hearKnock(data) {
   if (data.l >= 0) showCaption(data.l > 0.55 ? 'objectCrash' : 'objectKnock', { x: x, z: z });
 }
 
+// A crate in your beam, with things in it: they ride in it (isLooseObjectRiding in 08-loose-objects.js), and
+// they are yours to move for as long as they do, like the crate. A crate and what is in it have to be moved by
+// one browser: told about twelve times a second where somebody else's crate is, no browser can keep its own cans
+// in it, and the one who carries it could not feel what they weigh. So each thing that rides in what you carry
+// and is not yours yet is asked for ('carry'). It is the host's again when it lies still, like anything else
+// (sayWhereLooseThingsAre).
+function claimWhatRidesInYourBeam() {
+  const held = getHeldLooseObject();
+  if (!held) return;
+  for (const object of looseObjects) {
+    if (object.heldLinkId !== held.id || !isLooseObjectAnothers(object) || !isLooseObjectRiding(object)) continue;
+    if (game.time - (object.carryAskedTime || -10) < 0.5) continue; // (asked a moment ago: the host's answer is on its way)
+    object.carryAskedTime = game.time;
+    askToAct({ what: 'carry', id: object.id });
+  }
+}
+
 // The things this browser moves that are moving, or have just stopped: where they are, for the others.
 function sayWhereLooseThingsAre() {
   const round = function (value) { return Math.round(value * 1000) / 1000; };
@@ -1068,8 +1114,13 @@ function hearWhereLooseThingsAre(id, data) {
   for (let at = 0; at < numbers.length; at += LOOSE_NUMBERS) {
     const object = findLooseObjectById(numbers[at]);
     if (!object || (object.ownerId || together.hostId) !== id || object.isHeld) continue;
+    // What rides in the crate in your own beam stays where your game has it. It has been asked for
+    // (claimWhatRidesInYourBeam) and is about to be yours; where its mover had it a moment ago is where your
+    // crate was a moment ago, and put back there it would be under the board by now.
+    if (looseState.held && object.heldLinkId === looseState.held.id && isLooseObjectRiding(object)) continue;
     const isMoving = numbers[at + 11] === 1;
     if (isMoving) wakeLooseObject(object); // (what its points do when it leaves where it lay, and what lay on it)
+    const fromX = object.x, fromY = object.y, fromZ = object.z, fromTurnX = object.orientationX, fromTurnY = object.orientationY, fromTurnZ = object.orientationZ, fromTurnW = object.orientationW;
     object.x = clampNumber(numbers[at + 1], 0, GRID_WIDTH); object.y = clampNumber(numbers[at + 2], -200, 200); object.z = clampNumber(numbers[at + 3], 0, GRID_DEPTH);
     const length = Math.hypot(numbers[at + 4], numbers[at + 5], numbers[at + 6], numbers[at + 7]) || 1;
     object.orientationX = numbers[at + 4] / length; object.orientationY = numbers[at + 5] / length; object.orientationZ = numbers[at + 6] / length; object.orientationW = numbers[at + 7] / length;
@@ -1078,6 +1129,8 @@ function hearWhereLooseThingsAre(id, data) {
     object.worth = clampNumber(numbers[at + 12], 0, object.kind.value);
     updateLooseObjectMatrix(object);
     refreshLooseObjectTiles(object);
+    // It is in somebody's beam: what rides in it here goes with it (until it is theirs to move as well).
+    if (object.heldById) carryLooseRidersAlong(object, fromX, fromY, fromZ, fromTurnX, fromTurnY, fromTurnZ, fromTurnW);
     if (!isMoving) { object.isAsleep = true; object.ownerId = together.hostId; }
   }
 }

@@ -20,6 +20,7 @@ const OBJECT_KEYCARD_3 = 12;
 const KEYCARD_OBJECT_IDS = [0, OBJECT_KEYCARD, OBJECT_KEYCARD_2, OBJECT_KEYCARD_3]; // by card number
 const OBJECT_FUEL_CAN = 13;
 const OBJECT_WINCH_BREAKER = 14;
+const OBJECT_LIFT_PANEL = 15;   // the panel in the lift car, beside its door: it opens the door again for whoever is shut in
 const OBJECT_CORE_FIRST = 20;   // core samples are numbered 20, 21, 22 ...
 const MAXIMUM_CORE_SAMPLES = 6;
 const OBJECT_EXTRA_GENERATOR_FIRST = 30; // the generators a station has besides Generator 2 are numbered 30, 31, 32
@@ -249,7 +250,8 @@ function furnishLiftLobby(random) {
   addPipeAlongX(5.1, 7.9, 1.0, 52.07, 0.025);
   addPipeAlongX(5.1, 7.9, 1.0, 54.93, 0.025);
   addPipeAlongZ(52.1, 54.9, 1.0, 5.07, 0.025);
-  addBoxProp(7.95, 1.3, 54.4, 0.04, 0.22, 0.14, { surfaceClass: SURFACE_METAL, blocksMovement: false });
+  const carPanel = addBoxProp(7.95, 1.3, 54.4, 0.04, 0.22, 0.14, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
+  registerInteractable(OBJECT_LIFT_PANEL, 7.9, 1.3, 54.4, 'Open the lift door', [carPanel]);
   addCeilingLamp(6.5, 53.5, 2.5, true);
   addBoxBetween(9.0, 0, 55.0, 9.34, 1.35, 55.6, { surfaceClass: SURFACE_METAL });
   const terminalScreen = addBoxBetween(9.34, 0.95, 55.08, 9.39, 1.3, 55.52,

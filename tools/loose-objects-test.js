@@ -954,6 +954,126 @@ function installLab() {
   check('take a thing out from under another in the heap and what lay on it wakes, comes down and comes to rest again',
     pile.somethingOnTop >= 1 && pile.wokeWhenItWent && pile.cameDown && pile.afterwards.atRest === pile.afterwards.of && pile.afterwards.allInTheOpen, pile);
 
+  // --- a crate that holds things ---
+  // Two loose things touch each other's boxes as they are, flat faces and all (against the station a thing
+  // touches with the balls of its shell, which leave gaps a can goes through). So an open crate holds what is put
+  // in it, carries it, and spills it when it goes over. The crate here is this suite's own: five boards.
+  const crated = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    d.looseObjectKinds.testCrate = { label: 'test crate', mass: 3, value: 10, fragile: 0.1, material: 'case', loud: 0.6, lies: 'upright', bulky: true, bounce: 0.15, grip: 0.6,
+      parts: [{ shape: 'box', center: [0.25, 0, 0], half: [0.02, 0.2, 0.25] }, { shape: 'box', center: [-0.25, 0, 0], half: [0.02, 0.2, 0.25] },
+        { shape: 'box', center: [0, 0, 0.25], half: [0.25, 0.2, 0.02] }, { shape: 'box', center: [0, 0, -0.25], half: [0.25, 0.2, 0.02] },
+        { shape: 'box', center: [0, -0.2, 0], half: [0.25, 0.02, 0.25] }] };
+    // Where a thing is in the crate's own frame, from the middle of the top of its bottom board.
+    const inCrate = function (thing, crate) {
+      const m = crate.matrix, board = crate.prepared.boxes[4], x = thing.x - crate.x, y = thing.y - crate.y, z = thing.z - crate.z;
+      return { x: m[0] * x + m[3] * y + m[6] * z - board.centerX, y: m[1] * x + m[4] * y + m[7] * z - board.centerY - board.halfY, z: m[2] * x + m[5] * y + m[8] * z - board.centerZ };
+    };
+    const isInIt = function (thing, crate) {
+      const at = inCrate(thing, crate);
+      return d.looseObjects.indexOf(thing) >= 0 && Math.abs(at.x) < 0.23 && Math.abs(at.z) < 0.23 && at.y > -0.01 && at.y < 0.6;
+    };
+    // The lowest point of a thing, above the top of the crate's bottom board (in the world: the crate stands level).
+    const aboveTheBoard = function (thing, crate) {
+      const shell = thing.prepared.shell, m = thing.matrix, board = crate.prepared.boxes[4];
+      let lowest = Infinity;
+      for (let ball = 0; ball < thing.prepared.shellCount; ball++) lowest = Math.min(lowest, thing.y + m[3] * shell[ball * 4] + m[4] * shell[ball * 4 + 1] + m[5] * shell[ball * 4 + 2] - shell[ball * 4 + 3]);
+      return lowest - (crate.y + board.centerY + board.halfY);
+    };
+    const untilAtRest = function (seconds) {
+      for (let step = 0; step < seconds * 30; step++) { d.simulate(1 / 30); if (d.looseObjects.every((object) => object.isAsleep)) return lab.round((step + 1) / 30); }
+      return -1;
+    };
+
+    // One thing let go of in it, with the crate made first and with the thing made first (the one made later is
+    // the one that notes what the two do to each other).
+    result.letGoOf = {};
+    for (const kindKey of ['can', 'jar', 'canister', 'pipe']) {
+      for (const isCrateFirst of [true, false]) {
+        d.clearLooseObjects();
+        lab.stand(spot.x - 2.5, spot.z, Math.PI / 2);
+        let crate = isCrateFirst ? d.createLooseObject('testCrate', spot.x, 0.25, spot.z, 0) : null;
+        const thing = d.createLooseObject(kindKey, spot.x + 0.04, 0.6, spot.z + 0.03, 0.3);
+        if (!crate) crate = d.createLooseObject('testCrate', spot.x, 0.25, spot.z, 0);
+        const atRestAfter = untilAtRest(8);
+        result.letGoOf[kindKey + (isCrateFirst ? ', crate first' : ', thing first')] = { isInIt: isInIt(thing, crate), aboveTheBoard: lab.round(aboveTheBoard(thing, crate)), atRestAfter: atRestAfter,
+          crateMoved: lab.round(Math.hypot(crate.x - spot.x, crate.z - spot.z)) };
+      }
+    }
+
+    // Filled, picked up, walked with, stood with, turned with, walked on with.
+    d.clearLooseObjects();
+    lab.stand(spot.x - 2.5, spot.z, Math.PI / 2);
+    p.pitch = -0.3;
+    const crate = d.createLooseObject('testCrate', spot.x - 1.1, 0.25, spot.z, 0);
+    d.simulate(1);
+    const contents = ['can', 'can', 'can', 'jar', 'canister'];
+    const things = contents.map((kindKey, index) => d.createLooseObject(kindKey, crate.x + [-0.12, 0.12, -0.12, 0.12, 0][index], crate.y + (index < 4 ? 0 : 0.3), crate.z + [-0.12, -0.12, 0.12, 0.12, 0][index], index));
+    const weight = things.reduce((sum, thing) => sum + thing.kind.mass, 0);
+    result.filled = { atRestAfter: untilAtRest(8), inIt: things.filter((thing) => isInIt(thing, crate)).length, of: things.length };
+    const before = lab.knocks();
+    d.pickUpLooseObject(crate, false);
+    d.simulate(1.5);
+    let asleepWhileCarried = 0, fewestInIt = things.length;
+    const carryFor = function (seconds, turn) {
+      for (let step = 0; step < seconds * 30; step++) {
+        if (turn) p.yaw += turn / (seconds * 30);
+        d.simulate(1 / 30);
+        asleepWhileCarried = Math.max(asleepWhileCarried, things.filter((thing) => thing.isAsleep).length);
+        fewestInIt = Math.min(fewestInIt, things.filter((thing) => isInIt(thing, crate)).length);
+      }
+    };
+    result.pickedUp = { held: d.getHeldLooseObject() === crate, liftedBy: lab.round(crate.y - 0.22), inIt: things.filter((thing) => isInIt(thing, crate)).length };
+    d.input.keysDown.add('KeyW'); carryFor(0.7);
+    result.walking = { speed: lab.round(Math.hypot(p.velocityX, p.velocityZ)), wantedSpeed: lab.round(d.tuning.walkSpeed / (1 + (crate.kind.mass + weight) * d.tuning.carrySlowdownPerKilogram)), emptyHanded: d.tuning.walkSpeed };
+    d.input.keysDown.clear(); carryFor(3);
+    result.standing = { load: lab.round(d.looseState.heldLoad), weight: lab.round(weight), speedFactor: lab.round(d.getCarrySpeedFactor()) };
+    carryFor(1.2, Math.PI / 2);
+    d.input.keysDown.add('KeyW'); carryFor(0.5);
+    d.input.keysDown.clear(); carryFor(0.6);
+    result.carried = { held: d.getHeldLooseObject() === crate, fewestInIt: fewestInIt, asleepWhileCarried: asleepWhileCarried, knocks: lab.since(before) };
+    // Set down: look at the floor, let go. It all comes to rest in it.
+    for (let step = 0; step < 30; step++) { p.pitch += (-0.75 - p.pitch) * 0.2; d.simulate(1 / 30); }
+    d.releaseHeldLooseObject(0);
+    result.setDown = { atRestAfter: untilAtRest(10), inIt: things.filter((thing) => isInIt(thing, crate)).length, load: d.looseState.heldLoad, speedFactor: d.getCarrySpeedFactor() };
+    // Tipped right over: it spills.
+    d.setLooseObjectOrientation(crate, Math.sin(1.15), 0, 0, Math.cos(1.15));
+    crate.y += 0.45;
+    d.wakeLooseObject(crate);
+    for (const thing of things) d.wakeLooseObject(thing);
+    // (Some of it may lie under the crate, if that ends upside down over it: it is on the floor all the same.)
+    result.tippedOver = { atRestAfter: untilAtRest(12), crateStandsUpright: lab.round(crate.matrix[4]),
+      onTheFloor: things.filter((thing) => thing.y < thing.prepared.boundsRadius + 0.06).length, allInTheOpen: d.looseObjects.every((object) => lab.isInTheOpen(object.x, object.y, object.z)) };
+
+    // Flat faces: one crate (the game's own, a plain box) set down on another stands on it, level.
+    d.clearLooseObjects();
+    const lower = d.createLooseObject('crate', spot.x, 0.23, spot.z, 0);
+    d.simulate(1);
+    const upper = d.createLooseObject('crate', spot.x + 0.03, lower.y + 0.47, spot.z + 0.02, 0.2);
+    const stackedAfter = untilAtRest(8);
+    result.stacked = { atRestAfter: stackedAfter, apart: lab.round(upper.y - lower.y), tilt: lab.round(Math.acos(Math.min(1, upper.matrix[4])) * 180 / Math.PI), aside: lab.round(Math.hypot(upper.x - lower.x, upper.z - lower.z)) };
+
+    d.clearLooseObjects();
+    delete d.looseObjectKinds.testCrate;
+    p.pitch = 0;
+    return result;
+  }, spot);
+  check('what is let go of in an open crate lies on its bottom board, not in it or under it, whichever of the two was made first: a can, a jar, a canister, a length of pipe',
+    Object.keys(crated.letGoOf).every((key) => { const entry = crated.letGoOf[key]; return (entry.isInIt || key.indexOf('pipe') === 0) && entry.aboveTheBoard > -0.006 && entry.atRestAfter >= 0 && entry.crateMoved < 0.1; }) &&
+    crated.letGoOf['pipe, crate first'].aboveTheBoard > 0.1 && crated.letGoOf['pipe, thing first'].aboveTheBoard > 0.1, crated.letGoOf);
+  check('a crate with three cans, a jar and a canister in it is picked up with all of it in it, and carried: walked with, stood with, turned and walked on with, nothing falls out and the beam keeps hold',
+    crated.filled.inIt === crated.filled.of && crated.filled.atRestAfter >= 0 && crated.pickedUp.held && crated.pickedUp.liftedBy > 0.08 && crated.pickedUp.inIt === 5 &&
+    crated.carried.held && crated.carried.fewestInIt === 5 && crated.carried.knocks.pulled === 0, [crated.filled, crated.pickedUp, crated.carried]);
+  check('what rides in a carried crate does not come to rest in it, and its weight is yours: the beam bears it to within a tenth, and you walk as slowly as with one thing that heavy',
+    crated.carried.asleepWhileCarried === 0 && Math.abs(crated.standing.load - crated.standing.weight) < crated.standing.weight * 0.1 &&
+    Math.abs(crated.walking.speed - crated.walking.wantedSpeed) < 0.12 && crated.walking.wantedSpeed < crated.walking.emptyHanded - 0.3, [crated.standing, crated.walking, crated.carried]);
+  check('set down, it all comes to rest in the crate, and the weight is off you',
+    crated.setDown.atRestAfter >= 0 && crated.setDown.inIt === 5 && crated.setDown.load === 0 && crated.setDown.speedFactor === 1, crated.setDown);
+  check('tipped right over, it spills: the crate ends on its side or on its top, all that was in it lies on the floor, and everything comes to rest',
+    crated.tippedOver.crateStandsUpright < 0.3 && crated.tippedOver.onTheFloor === 5 && crated.tippedOver.atRestAfter >= 0 && crated.tippedOver.allInTheOpen, crated.tippedOver);
+  check('one crate set down on another stands on it level: 44 cm apart, not tilted, not slid off',
+    crated.stacked.atRestAfter >= 0 && Math.abs(crated.stacked.apart - 0.44) < 0.012 && crated.stacked.tilt < 2 && crated.stacked.aside < 0.08, crated.stacked);
+
   // --- a door ---
   const wedged = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
@@ -1550,40 +1670,63 @@ function installLab() {
     result.size = { worth: d.looseObjectKinds.ventCover.value, width: sheet[0] * 2, height: sheet[1] * 2, mouthHeight: d.ventHeight };
     result.counts = [];
     // Loads a station and looks at where each of its covers is. Returns them: { item, object }.
-    const survey = function (size) {
-      d.loadStation('generated', 3, size, 'mixed', 'one');
-      d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
-      d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
-      const all = d.stationLooseObjects.map((item, index) => ({ item: item, object: d.looseObjects[index] })).filter((entry) => entry.item.kindKey === 'ventCover');
-      result.counts.push({ station: size, vents: d.level.ventCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length });
-      for (const entry of all) {
-        const object = entry.object, mouth = mouthOf(object), fromMouth = Math.hypot(mouth.faceX - object.x, mouth.faceZ - object.z), up = Math.abs(object.matrix[4]);
-        const where = size + ': the cover at ' + object.x.toFixed(1) + ', ' + object.z.toFixed(1);
-        if (entry.item.on === 'vent') { if (d.isVentAt(object.x, object.z) || up < 0.99 || fromMouth > 0.2 || along(mouth, object.x, object.z) > -0.05) result.wrong.push(where + ' should stand upright in front of the mouth of its vent, out in the room'); }
-        else if (d.isVentAt(object.x, object.z) || up > 0.1 || object.y - mouth.floorY > 0.12 || fromMouth > 3.2) result.wrong.push(where + ' should lie flat on the floor near its vent');
+    // Like every station in these checks they are built from the code alone, without the rooms and the objects
+    // from the workshop, so that making a room or an object does not make them other stations (browser-harness.js).
+    // And which of them has what these checks need is looked for, not written down: the first of forty seeds whose
+    // covers are `asWanted`, so that a change to how stations are planned does not break this either. What is counted,
+    // and what is found wrong, is of the station that was chosen (or, if none will do, of the last one looked at).
+    const survey = function (size, asWanted) {
+      let all = [], counts = null, wrong = [];
+      for (let seed = 1; seed <= 40; seed++) {
+        d.loadStation('generated', seed, size, 'mixed', 'one');
+        d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
+        d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
+        all = d.stationLooseObjects.map((item, index) => ({ item: item, object: d.looseObjects[index] })).filter((entry) => entry.item.kindKey === 'ventCover');
+        counts = { station: size, seed: seed, vents: d.level.ventCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length };
+        wrong = [];
+        for (const entry of all) {
+          const object = entry.object, mouth = mouthOf(object), fromMouth = Math.hypot(mouth.faceX - object.x, mouth.faceZ - object.z), up = Math.abs(object.matrix[4]);
+          const where = size + ' ' + seed + ': the cover at ' + object.x.toFixed(1) + ', ' + object.z.toFixed(1);
+          if (entry.item.on === 'vent') { if (d.isVentAt(object.x, object.z) || up < 0.99 || fromMouth > 0.2 || along(mouth, object.x, object.z) > -0.05) wrong.push(where + ' should stand upright in front of the mouth of its vent, out in the room'); }
+          else if (d.isVentAt(object.x, object.z) || up > 0.1 || object.y - mouth.floorY > 0.12 || fromMouth > 3.2) wrong.push(where + ' should lie flat on the floor near its vent');
+        }
+        if (asWanted(all)) break;
       }
+      result.counts.push(counts);
+      for (const line of wrong) result.wrong.push(line);
       return all;
+    };
+    // A way to walk right over a cover that lies on the floor: the first of the four ways along which there are
+    // three and a half metres of nothing from 1.3 m short of it, at shin height and at chest height. Or null.
+    const wayOver = function (cover) {
+      for (const yaw of [Math.PI / 2, -Math.PI / 2, 0, Math.PI]) {
+        const fromX = cover.x - Math.sin(yaw) * 1.3, fromZ = cover.z + Math.cos(yaw) * 1.3;
+        if (!d.isSpaceOpenAt(fromX, 1, fromZ)) continue;
+        if (lab.distanceAhead(fromX, fromZ, yaw) > 3.5 && (!d.castScannerRay(fromX, d.getFloorHeightAt(fromX, fromZ) + 0.35, fromZ, Math.sin(yaw), 0, -Math.cos(yaw), 60) || d.rayHit.distance > 3.5)) return { x: fromX, z: fromZ, yaw: yaw };
+      }
+      return null;
     };
     const into = function (mouth, metres) { return d.castScannerRay(mouth.faceX - mouth.outwardX * 0.7, mouth.floorY + 0.6, mouth.faceZ - mouth.outwardZ * 0.7, mouth.outwardX, 0, mouth.outwardZ, metres) ? { metres: lab.round(d.rayHit.distance), colour: d.rayHit.surfaceClass, isTheCover: d.rayHit.looseObject !== null } : { metres: 99, colour: -1, isTheCover: false }; };
 
-    // A massive station, which has covers of both sorts. One that lies flat is a plate on the floor: walked
-    // over, it stays where it is and makes no sound.
-    const lyingOnes = survey('massive').filter((entry) => entry.item.on === 'floor');
+    // A massive station that has covers of both sorts, one of them lying where there is room to walk over it.
+    // One that lies flat is a plate on the floor: walked over, it stays where it is and makes no sound.
+    const lyingOnes = survey('massive', (all) => all.some((entry) => entry.item.on === 'vent') && all.some((entry) => entry.item.on === 'floor' && wayOver(entry.object) !== null))
+      .filter((entry) => entry.item.on === 'floor' && wayOver(entry.object) !== null);
     if (lyingOnes.length === 0) return result;
-    const lying = lyingOnes[0].object;
-    lab.stand(lying.x - 1.3, lying.z, Math.PI / 2);
+    const lying = lyingOnes[0].object, way = wayOver(lying);
+    lab.stand(way.x, way.z, way.yaw);
     d.simulate(0.5);
     result.scanLying = d.castScannerRay(lying.x - 0.3, lying.y + 0.8, lying.z, 0.3, -0.954, 0, 3) ? { colour: d.rayHit.surfaceClass, isTheCover: d.rayHit.looseObject === lying } : { colour: -1, isTheCover: false };
     let before = lab.knocks();
-    const lyingAt = { x: lying.x, z: lying.z }, walkedFrom = p.x;
+    const lyingAt = { x: lying.x, z: lying.z }, walkedFrom = { x: p.x, z: p.z };
     d.input.keysDown.add('KeyW');
     d.simulate(1.4);
     d.input.keysDown.clear();
     d.simulate(0.5);
-    result.walkedOver = { youWalked: lab.round(Math.abs(p.x - walkedFrom)), itMoved: lab.round(Math.hypot(lying.x - lyingAt.x, lying.z - lyingAt.z)), knocks: lab.since(before) };
+    result.walkedOver = { youWalked: lab.round(Math.hypot(p.x - walkedFrom.x, p.z - walkedFrom.z)), itMoved: lab.round(Math.hypot(lying.x - lyingAt.x, lying.z - lyingAt.z)), knocks: lab.since(before) };
 
     // A large station, with five that stand, for the rest.
-    const standing = survey('large').filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
+    const standing = survey('large', (all) => all.filter((entry) => entry.item.on === 'vent').length >= 5).filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
     if (standing.length < 5) return result;
 
     // One taken off with the beam: quietly, and then the vent is open.
