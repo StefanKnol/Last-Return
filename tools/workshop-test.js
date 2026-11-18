@@ -346,43 +346,26 @@ function checkSourcePatching() {
     // is on that number; a Still is as tall as its proportions come to, so all of them are changed together.
     const configPath = path.join(root, 'src', 'js', '00-config.js');
     const tallPlayer = Math.round((playerStanding.heightStanding + 0.25) * 100) / 100;
-    console.log('STEP 1 before: await page.selectOption(#workshop-creature-behavi ' + new Date().toISOString().slice(14, 23));
     await page.selectOption('#workshop-creature-behaviour', 'standing');
-    console.log('STEP 2 before: await setNumber(workshop-creature-height, tallPl ' + new Date().toISOString().slice(14, 23));
     await setNumber('workshop-creature-height', tallPlayer);
-    console.log('STEP 3 before: await frames(30); ' + new Date().toISOString().slice(14, 23));
     await frames(30);
-    console.log('STEP 4 before: const playerTaller = await playerLook(); ' + new Date().toISOString().slice(14, 23));
     const playerTaller = await playerLook();
-    console.log('STEP 5 before: await page.selectOption(#workshop-creature, dum ' + new Date().toISOString().slice(14, 23));
     await page.selectOption('#workshop-creature', 'dummy');
-    console.log('STEP 6 before: await frames(6); ' + new Date().toISOString().slice(14, 23));
     await frames(6);
-    console.log('STEP 7 before: const stillBefore = await inPage(() => { const sta ' + new Date().toISOString().slice(14, 23));
     const stillBefore = await inPage(() => { const state = window.lastReturnDebug.creatureWorkshop, figure = state.figure; return { height: (figure.boundsCenterY - figure.y) * 2, thigh: figure.proportions.thigh, shin: figure.proportions.shin }; });
-    console.log('STEP 8 before: await setNumber(workshop-creature-height, 1.5); ' + new Date().toISOString().slice(14, 23));
     await setNumber('workshop-creature-height', 1.5);
-    console.log('STEP 9 before: await frames(6); ' + new Date().toISOString().slice(14, 23));
     await frames(6);
-    console.log('STEP 10 before: const stillAfter = await inPage(() => { const stat ' + new Date().toISOString().slice(14, 23));
     const stillAfter = await inPage(() => { const state = window.lastReturnDebug.creatureWorkshop, figure = state.figure; return { height: (figure.boundsCenterY - figure.y) * 2, thigh: figure.proportions.thigh, shin: figure.proportions.shin, changes: Object.keys(state.overrides.dummy).length }; });
-    console.log('STEP 11 before: await page.click(#workshop-reset-creature); ' + new Date().toISOString().slice(14, 23));
     await page.click('#workshop-reset-creature');
-    console.log('STEP 12 before: await frames(4); ' + new Date().toISOString().slice(14, 23));
     await frames(4);
-    console.log('STEP 13 before: const stillBack = await inPage(() => { const state ' + new Date().toISOString().slice(14, 23));
     const stillBack = await inPage(() => { const state = window.lastReturnDebug.creatureWorkshop; return { thigh: state.figure.proportions.thigh, changes: Object.keys(state.overrides.dummy).length }; });
     check('a creature\'s height can be set: a player\'s is the number the game goes by, and the body follows it at once; a Still is made smaller as a whole, the same shape, and "Back to the file" undoes that',
       Math.abs(playerTaller.height - tallPlayer) < 0.011 && playerTaller.heightStanding === tallPlayer &&
       Math.abs(stillAfter.height - 1.5) < 0.02 && stillAfter.thigh < stillBefore.thigh && Math.abs(stillAfter.thigh / stillAfter.shin - stillBefore.thigh / stillBefore.shin) < 0.02 && stillAfter.changes > 10 &&
       stillBack.thigh === stillBefore.thigh && stillBack.changes === 0, [tallPlayer, playerTaller.height, stillBefore, stillAfter, stillBack]);
-    console.log('STEP 14 before: await page.selectOption(#workshop-creature, pla ' + new Date().toISOString().slice(14, 23));
     await page.selectOption('#workshop-creature', 'player');
-    console.log('STEP 15 before: await frames(4); ' + new Date().toISOString().slice(14, 23));
     await frames(4);
-    console.log('STEP 16 before: await waitForReload(() => page.click(#workshop-sa ' + new Date().toISOString().slice(14, 23));
     await waitForReload(() => page.click('#workshop-save-creature'));
-    console.log('STEP 17 before: await frames(4); ' + new Date().toISOString().slice(14, 23));
     await frames(4);
     const configWithPlayer = fs.readFileSync(configPath, 'utf8');
     check('"Write to file" puts a player\'s height into TUNING in 00-config.js, beside the comment that was there',
