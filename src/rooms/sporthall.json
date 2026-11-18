@@ -1,0 +1,27 @@
+{
+  "name": "SPORT HALL",
+  "width": 13,
+  "depth": 20,
+  "ceiling": 5.5,
+  "tiers": [0,1],
+  "isFlooded": false,
+  "useInStations": true,
+  "doors": [
+    { "wall": "north", "at": 11 },
+    { "wall": "north", "at": 1 },
+    { "wall": "south", "at": 11 },
+    { "wall": "south", "at": 1 }
+  ],
+  "itemSpot": null,
+  "items": [
+    { "type": "ceilingLamp", "x": 4, "z": 3, "angle": 0 },
+    { "type": "sign", "text": "{name}", "wall": "east", "along": 10, "centerY": 3, "width": 3, "height": 0.4, "isScrawled": false },
+    { "type": "sign", "text": "{name}", "wall": "west", "along": 10, "centerY": 3, "width": 3, "height": 0.4, "isScrawled": false },
+    { "type": "cylinder", "x": 7, "z": 1, "radius": 0.15, "sizeY": 3, "bottom": 0, "surface": "metal", "isSolid": true },
+    { "type": "cylinder", "x": 7, "z": 19, "radius": 0.15, "sizeY": 3, "bottom": 0, "surface": "metal", "isSolid": true },
+    { "type": "box", "x": 7, "z": 1.15, "angle": 0, "sizeX": 2, "sizeZ": 0.05, "sizeY": 1.25, "bottom": 2.3, "surface": "plain", "isSolid": true },
+    { "type": "box", "x": 7, "z": 18.85, "angle": 0, "sizeX": 2, "sizeZ": 0.05, "sizeY": 1.25, "bottom": 2.3, "surface": "plain", "isSolid": true },
+    { "type": "cylinder", "x": 7, "z": 1.51, "radius": 0.35, "sizeY": 0.1, "bottom": 2.6, "surface": "metal", "isSolid": false },
+    { "type": "cylinder", "x": 7, "z": 18.49, "radius": 0.35, "sizeY": 0.1, "bottom": 2.6, "surface": "metal", "isSolid": false }
+  ]
+}
