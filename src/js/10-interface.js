@@ -984,13 +984,20 @@ function showDeathScreen(kind) {
     paragraph.textContent = lineText;
     lines.appendChild(paragraph);
   }
-  // One life (a custom threat level can ask for it): there is no checkpoint to go back to.
-  if (!game.difficulty.checkpointsEnabled) {
+  // Down there with others there is no checkpoint: your scanner lies where you fell, and one of them can carry it back.
+  const isForOthersToUndo = isWorldShared();
+  if (isForOthersToUndo) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = game.isDescentLost ? 'Nobody is left to carry anybody back. This descent is over.'
+      : 'Your scanner lies where you fell, still lit. If one of the others carries it to the lift, or into an open salvage bay, it restarts.';
+    lines.appendChild(paragraph);
+  } else if (!game.difficulty.checkpointsEnabled) {
+    // One life (a custom threat level can ask for it): there is no checkpoint to go back to.
     const paragraph = document.createElement('p');
     paragraph.textContent = 'One life. This descent is over.';
     lines.appendChild(paragraph);
   }
-  elements['button-retry'].hidden = !game.difficulty.checkpointsEnabled;
+  elements['button-retry'].hidden = isForOthersToUndo || !game.difficulty.checkpointsEnabled;
   setHudVisible(false);
   closeMapOverlay();
   showOnlyScreen('screen-death');

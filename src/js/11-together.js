@@ -524,14 +524,25 @@ function advanceOtherPlayer(other, dt) {
 const scannerLight = { x: 0, y: 0, z: 0 };
 function showScannerLight(other) {
   if (!other.hasBeenHeardFrom) return;
-  if (other.isFallen) { scannerLight.x = other.x; scannerLight.z = other.z; scannerLight.y = getFloorHeightAt(other.x, other.z) + 0.1; }
-  else getFigureScannerLight(other.figure, scannerLight);
+  if (other.isFallen) return; // their scanner is a thing that lies somewhere now, and is lit there (showFallenScannerLights)
+  getFigureScannerLight(other.figure, scannerLight);
   // A few points that last a quarter of a second, put down again every frame. They are not returns of anything.
   for (let count = 0; count < 3; count++) {
     addScanPoint(scannerLight.x + (Math.random() - 0.5) * 0.03, scannerLight.y + (Math.random() - 0.5) * 0.02, scannerLight.z + (Math.random() - 0.5) * 0.03,
       1, SURFACE_SCANNER_LIGHT, 1, true);
   }
   pointCloud.totalReturns -= 3;
+}
+
+// The scanners of the fallen, wherever they lie or are being carried: lit.
+function showFallenScannerLights() {
+  for (const object of looseObjects) {
+    if (!object.fallenPlayerId) continue;
+    for (let count = 0; count < 3; count++) {
+      addScanPoint(object.x + (Math.random() - 0.5) * 0.03, object.y + 0.07 + (Math.random() - 0.5) * 0.02, object.z + (Math.random() - 0.5) * 0.03, 1, SURFACE_SCANNER_LIGHT, 1, true);
+    }
+    pointCloud.totalReturns -= 3;
+  }
 }
 
 // One of the others, for one frame: where they are now, their light, and what their scanner shows.
@@ -597,6 +608,7 @@ function updateTogether(dt) {
     sayWhereLooseThingsAre();
   }
   placeOwnBody();
+  if (game.mode !== 'intro') showFallenScannerLights();
   for (const other of together.others) {
     presentOtherPlayer(other, dt, game.mode === 'playing' || (isLobbyHost() && game.mode !== 'intro')); // the host's creatures feel their light whatever the host is doing
   }
@@ -606,6 +618,7 @@ function updateTogether(dt) {
     if (game.mode !== 'dying' && game.mode !== 'dead') players.push(player);
     for (const other of together.others) if (other.hasBeenHeardFrom && !other.isDown) players.push(other);
     if (players.length === 0) players.push(player);
+    if (game.mode !== 'intro') updateFallenScanners(dt);
     together.worldSendTimer -= dt;
     if (together.worldSendTimer <= 0 && game.mode !== 'intro') {
       together.worldSendTimer = Math.max(together.worldSendTimer + 1 / WORLD_SENDS_PER_SECOND, 0);
@@ -859,6 +872,7 @@ function askToAct(action) {
 
 // The host's game: this is done now, by this one of you. Everyone is told, and it is carried out here.
 function decideAction(actorId, action) {
+  if (action.what === 'fall') action.id = looseState.nextId; // a new thing: it gets the same number in every browser, the host's next
   sayToOthers({ k: 'did', p: actorId, a: action });
   performActionFor(actorId, action);
 }
@@ -868,7 +882,12 @@ function readAction(data) {
   if (!data || typeof data !== 'object') return null;
   if (data.what === 'use' && Number.isInteger(data.objectId)) return { what: 'use', objectId: data.objectId };
   if (data.what === 'enter' && typeof data.place === 'string' && ZONE_NAMES.indexOf(data.place) >= 0 && data.place !== '') return { what: 'enter', place: data.place };
-  if (data.what === 'leaveLift' || data.what === 'ascend') return { what: data.what };
+  if (data.what === 'leaveLift' || data.what === 'ascend' || data.what === 'allDown') return { what: data.what };
+  // A scanner where somebody fell, and its restarting.
+  if (data.what === 'fall' && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
+    return { what: 'fall', x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH), id: Number.isInteger(data.id) ? data.id : 0 };
+  }
+  if (data.what === 'restart' && Number.isInteger(data.id)) return { what: 'restart', id: data.id };
   // Things that lie loose (see further down).
   if ((data.what === 'take' || data.what === 'release' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
@@ -885,7 +904,7 @@ function readAction(data) {
 // the noise of it is where they stand, and what is only for the one who did it (see wrapForTogether) is left out.
 function performActionFor(actorId, action) {
   // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
-  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay';
+  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown';
   const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z, carried: {} }); // (gone since: it is still done)
   const yours = game.carried;
   game.actor = other;
@@ -902,7 +921,64 @@ function performAction(action) {
   } else if (action.what === 'enter') notePlaceEntered(action.place);
   else if (action.what === 'leaveLift') noteLiftLeft();
   else if (action.what === 'ascend') beginAscent();
+  else if (action.what === 'fall') dropFallenScanner(action);
+  else if (action.what === 'restart') restartFallenScanner(action.id);
+  else if (action.what === 'allDown') {
+    game.isDescentLost = true;
+    if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // it says so
+  }
   else performLooseAction(action);
+}
+
+// ---- Being caught, and being carried back ----
+//
+// Down there with others there are no checkpoints. Whoever is caught leaves their scanner where they fell: a
+// loose thing like any other, with its light still on. One of the others carries it to the lift (to within
+// TOGETHER_RESTART_METRES of the car) or into a salvage bay that stands open, and puts it down. When it has
+// lain there for TOGETHER_RESTART_SECONDS it restarts, loudly, and its owner is on their feet where it lay.
+// A scanner lost down the shaft is lost, and so is its owner, for this descent. When every one of you is down,
+// nobody is left to carry anybody, and the descent is over.
+
+const TOGETHER_RESTART_METRES = 2.5; // TWEAK: how near the lift car counts as "at the lift"
+const TOGETHER_RESTART_SECONDS = 3;  // TWEAK: how long it lies there before it restarts
+
+function dropFallenScanner(action) {
+  const actingId = together.actingId;
+  for (const object of looseObjects) if (object.fallenPlayerId === actingId) return; // theirs lies somewhere already
+  const scanner = createLooseObject('scanner', action.x, action.y, action.z, 0);
+  if (action.id > 0) { scanner.id = action.id; looseState.nextId = Math.max(looseState.nextId, action.id + 1); }
+  scanner.fallenPlayerId = actingId;
+  scanner.wasHandled = false;
+}
+
+function restartFallenScanner(id) {
+  const scanner = findLooseObjectById(id);
+  if (!scanner || !scanner.fallenPlayerId) return;
+  const x = scanner.x, z = scanner.z, ownerId = scanner.fallenPlayerId;
+  removeLooseObject(scanner);
+  playLiftBell();
+  if (!isWorldTheHosts()) emitNoise(x, z, TUNING.noiseRadiusDoor);
+  const other = findOtherPlayer(ownerId);
+  if (other) { other.isDown = false; other.isFallen = false; }
+  if (ownerId === together.myId) standUpAgainAt(x, z);
+  else if (game.mode !== 'title') showMessage('A scanner restarts. One of the others is back on their feet.', 5, 'info');
+}
+
+// The host's game: is a fallen scanner lying where it can be restarted, and has it lain there long enough? And
+// is anybody still on their feet?
+function updateFallenScanners(dt) {
+  let isAnyoneUp = game.mode !== 'dying' && game.mode !== 'dead';
+  for (const other of together.others) if (other.hasBeenHeardFrom && !other.isDown && !other.isFallen) isAnyoneUp = true;
+  if (!isAnyoneUp && !game.isDescentLost && game.mode === 'dead') decideAction(together.myId, { what: 'allDown' });
+  if (game.isDescentLost) return;
+  for (const object of looseObjects) {
+    if (!object.fallenPlayerId) continue;
+    let canRestart = !object.heldById && distanceOutsideLiftCar(object.x, object.z) < TOGETHER_RESTART_METRES;
+    const bay = findOpenHaulBay();
+    if (!object.heldById && bay && isLooseObjectInHaulBay(object, bay)) canRestart = true;
+    object.restartSeconds = canRestart ? object.restartSeconds + dt : 0;
+    if (object.restartSeconds >= TOGETHER_RESTART_SECONDS) { decideAction(together.myId, { what: 'restart', id: object.id }); return; }
+  }
 }
 
 // ---- Things that lie loose ----
@@ -1025,7 +1101,8 @@ function hearOfTheStation(id, data) {
     else if (data.k === 'back' && other) other.isDown = false;
     else if (data.k === 'ask') {
       const action = readAction(data.a);
-      if (action && action.what !== 'ascend') decideAction(id, action); // when the car goes up is the host's to say
+      // When the car goes up, when a scanner is restarted and when everyone is down are the host's game's to say.
+      if (action && action.what !== 'ascend' && action.what !== 'restart' && action.what !== 'allDown') decideAction(id, action);
     }
     return;
   }

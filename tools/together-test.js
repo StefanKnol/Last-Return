@@ -316,24 +316,58 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, isDown: other.isDown, players: d.players.length, metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
   check('the host\'s Hollow catching the other is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
   check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
-  await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
-  await a.waitForFunction(() => window.lastReturnDebug.together.others[0].isFallen, null, { timeout: 5000 }).catch(() => {});
-  const fallen = await a.evaluate(() => {
-    const d = window.lastReturnDebug, other = d.together.others[0], writtenBefore = d.pointCloud.writeIndex;
-    d.updateTogether(0.1);
-    return { isFallen: other.isFallen, bodyHit: d.fireScanPulse(other.x, other.eyeY - 0.4, other.z + 0.9, 0, 0, -1, false) && d.rayHit.figure === other.figure, light: d.pointCloud.writeIndex - writtenBefore };
-  });
-  check('dead, their body is gone and their scanner lies where they fell, still lit', fallen.isFallen && !fallen.bodyHit && fallen.light > 0, fallen);
-  // The station does not stop for the dead.
+  await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
+  // The station does not stop for the dead, and there is no checkpoint to come back from.
   await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 });
   const timeBefore = await b.evaluate(() => window.lastReturnDebug.game.time);
   for (let count = 0; count < 4; count++) await b.screenshot({ type: 'jpeg', quality: 5 });
   check('the station goes on while you lie dead', await b.evaluate((before) => window.lastReturnDebug.game.time > before, timeBefore));
-  await b.evaluate(() => window.lastReturnDebug.retryFromCheckpoint());
-  await a.waitForFunction(() => !window.lastReturnDebug.together.others[0].isDown, null, { timeout: 5000 }).catch(() => {});
+  const noWayBack = await b.evaluate(() => { const d = window.lastReturnDebug; d.retryFromCheckpoint(); return { mode: d.game.mode, retryHidden: document.getElementById('button-retry').hidden, told: document.getElementById('death-lines').textContent }; });
+  check('down there with others there is no checkpoint to come back from: it is for the others to carry your scanner back',
+    noWayBack.mode === 'dead' && noWayBack.retryHidden && /carries it to the lift/.test(noWayBack.told), noWayBack);
+  // Their scanner lies where they fell, in both games, lit; their body is gone.
+  await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
+  await a.waitForFunction(() => window.lastReturnDebug.together.others[0].isFallen && window.lastReturnDebug.looseObjects.some((object) => object.fallenPlayerId > 0), null, { timeout: 5000 }).catch(() => {});
+  const fallen = await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0], scanner = d.looseObjects.filter((object) => object.fallenPlayerId === other.id)[0], writtenBefore = d.pointCloud.writeIndex;
+    d.updateTogether(0.1);
+    return { isFallen: other.isFallen, bodyHit: d.fireScanPulse(other.x, other.eyeY - 0.4, other.z + 0.9, 0, 0, -1, false) && d.rayHit.figure === other.figure, light: d.pointCloud.writeIndex - writtenBefore,
+      scanner: scanner ? { id: scanner.id, metresFromThem: Math.hypot(scanner.x - other.x, scanner.z - other.z) } : null };
+  });
+  const scannerInTheirs = await b.evaluate((id) => window.lastReturnDebug.looseObjects.some((object) => object.id === id && object.fallenPlayerId === window.lastReturnDebug.together.myId), fallen.scanner ? fallen.scanner.id : -1);
+  check('dead, their body is gone and their scanner lies where they fell, still lit, the same thing in both games',
+    fallen.isFallen && !fallen.bodyHit && fallen.light > 0 && fallen.scanner !== null && fallen.scanner.metresFromThem < 0.5 && scannerInTheirs, fallen);
+  // The host carries it to the lift and puts it down. It restarts, and they are on their feet there.
+  await a.evaluate((id) => {
+    const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.id === id)[0];
+    const spot = d.findWalkableSpotNear(scanner.x + 1, scanner.z) || d.findWalkableSpotNear(scanner.x, scanner.z + 1);
+    d.teleport(spot.x, spot.z, Math.atan2(scanner.x - spot.x, -(scanner.z - spot.z))); d.player.pitch = -0.6;
+    d.simulate(0.1);
+    d.pickUpLooseObject(scanner, false);
+  }, fallen.scanner.id);
+  await a.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
   await both(0.6);
-  check('back on their feet, they are one of the players again', await a.evaluate(() => window.lastReturnDebug.players.length === 2 && !window.lastReturnDebug.together.others[0].isDown));
-  await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
+  const notYet = await b.evaluate(() => window.lastReturnDebug.game.mode);
+  await a.evaluate(() => {
+    const d = window.lastReturnDebug;
+    // The nearest walkable spot to the car that is outside it.
+    let best = null;
+    for (let step = 1; step < 6 && !best; step += 0.5) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+      const spot = d.findWalkableSpotNear(d.playerStart.x + way[0] * 1.2, d.playerStart.z + way[1] * 1.2);
+      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 2.2) { best = spot; break; }
+    }
+    d.teleport(best.x, best.z, Math.atan2(d.playerStart.x - best.x, -(d.playerStart.z - best.z))); d.player.pitch = -0.4;
+    // (The walk there is left out: what is in the beam is brought along, as it would have come.)
+    const carried = d.getHeldLooseObject();
+    carried.x = d.player.x; carried.y = d.getPlayerEyeY() - 0.3; carried.z = d.player.z; carried.velocityX = 0; carried.velocityY = 0; carried.velocityZ = 0;
+    d.simulate(1.5);
+    d.releaseHeldLooseObject(0);
+  });
+  for (let turn = 0; turn < 12; turn++) { await both(0.9); if (await b.evaluate(() => window.lastReturnDebug.game.mode === 'playing')) break; }
+  const restarted = { other: await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, metresFromCar: Math.hypot(d.player.x - d.playerStart.x, d.player.z - d.playerStart.z), scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }),
+    host: await a.evaluate(() => { const d = window.lastReturnDebug; return { players: d.players.length, isDown: d.together.others[0].isDown, isFallen: d.together.others[0].isFallen, scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }) };
+  check('carried, it does nothing; put down at the lift, it restarts and they are on their feet there, and one of the players again',
+    notYet === 'dead' && restarted.other.mode === 'playing' && restarted.other.metresFromCar < 7 && restarted.other.scanners === 0 && restarted.host.scanners === 0 && restarted.host.players === 2 && !restarted.host.isDown, [notYet, restarted]);
 
   // What one of you does to the station is done in every game: the other takes the first keycard.
   const taken = await b.evaluate(() => {
@@ -468,6 +502,23 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   check('a position no player could be at is held to the station, and nothing hangs on it',
     wild.x <= 512 && wild.z === 0 && wild.eyeY <= 100 && Math.abs(wild.yaw) <= Math.PI && wild.pitch <= 1.6 && wild.spread <= 60, wild);
+
+  // ---- Everyone down ----
+  await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.spawnHollow(other.x + 0.3, other.z); d.hollow.graceTimer = 0; });
+  await play(a, 0.2);
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 5000 }).catch(() => {});
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.hollow.isActive = true; d.hollow.figure.x = d.player.x + 0.3; d.hollow.figure.z = d.player.z; d.hollow.graceTimer = 0; d.hollow.crawlspace = null; });
+  await play(a, 0.2);
+  for (let count = 0; count < 40 && await a.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await a.screenshot({ type: 'jpeg', quality: 5 });
+  for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
+  await pause(200);
+  await a.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
+  await b.waitForFunction(() => window.lastReturnDebug.game.isDescentLost, null, { timeout: 5000 }).catch(() => {});
+  const allDown = [await a.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, lost: window.lastReturnDebug.game.isDescentLost, told: document.getElementById('death-lines').textContent })),
+    await b.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, lost: window.lastReturnDebug.game.isDescentLost, told: document.getElementById('death-lines').textContent }))];
+  check('when every one of you is down, nobody is left to carry anybody back, and everyone is told the descent is over',
+    allDown[0].mode === 'dead' && allDown[1].mode === 'dead' && allDown[0].lost && allDown[1].lost && /Nobody is left/.test(allDown[0].told) && /Nobody is left/.test(allDown[1].told), allDown);
 
   // ---- A lobby lasts longer than one descent ----
   // A third joins while the two are down. They wait at the title screen.

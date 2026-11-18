@@ -35,6 +35,7 @@ const game = {
   ascentTimer: 0,
   hasShownHollowHint: false,
   hasShownVentHint: false,
+  isDescentLost: false,          // down there with others: every one of you is down, and nobody is left to carry anybody back
   actor: null,                   // somebody else whose action is being carried out here right now, or null: getActingPlayer
   hasShownNoisyFloorHint: false, // the first time something loose underfoot gives you away, you are told what it was
   attract: { yaw: -0.9, pitch: 0, timer: 0, sweepTimer: 4, sweepProgress: -1, rayBudget: 0, centerRange: -1 }
@@ -149,6 +150,7 @@ function resetWorldState() {
   game.statistics.elapsed = 0; game.statistics.distanceWalked = 0; game.statistics.deaths = 0;
   game.interference = 0; game.danger = 0;
   game.hasShownHollowHint = false;
+  game.isDescentLost = false;
   game.hasShownVentHint = false;
   game.hasShownNoisyFloorHint = false;
   noisyFloorCounts.byPlayer = 0; noisyFloorCounts.byPlayerCrouched = 0; noisyFloorCounts.byHollow = 0;
@@ -589,14 +591,35 @@ function updateDying(dt) {
     game.mode = 'dead';
     game.fade = 0;
     sendCreaturesAwayAfterCatch(sequence.kind); // down there with others, as their host: it does not stand over you while the others play on
+    if (isWorldShared()) askToAct({ what: 'fall', x: player.x, y: getFloorHeightAt(player.x, player.z) + 0.25, z: player.z }); // your scanner lies where you fell
     silenceGameplaySounds();
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
     showDeathScreen(sequence.kind);
   }
 }
 
+// On your feet again where your scanner was restarted (11-together.js): down there with others that is how
+// you come back, and not from a checkpoint.
+function standUpAgainAt(x, z) {
+  if (game.mode !== 'dead' && game.mode !== 'dying') return;
+  player.x = x; player.z = z;
+  player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
+  steadyHeldScanner();
+  player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
+  player.sweepTimeRemaining = 0;
+  input.keysDown.clear();
+  game.interference = 0; game.danger = 0; game.fade = 0;
+  game.deathSequence = null;
+  showOnlyScreen(null);
+  setHudVisible(true);
+  game.mode = 'playing';
+  focusGameView();
+  requestPointerLockOnCanvas();
+  showMessage('Scanner restarted. Somebody carried it back.', 5, 'info');
+}
+
 function retryFromCheckpoint() {
-  if (game.mode !== 'dead') return;
+  if (game.mode !== 'dead' || isWorldShared()) return;
   if (!game.difficulty.checkpointsEnabled) return; // one life: the only way on is to start over
   player.x = game.checkpoint.x; player.z = game.checkpoint.z; player.yaw = game.checkpoint.yaw;
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;

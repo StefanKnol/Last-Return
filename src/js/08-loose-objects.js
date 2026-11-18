@@ -81,6 +81,13 @@ const LOOSE_OBJECT_KINDS = {
     use: { prompt: 'Arm the scan grenade', button: 'ARM', activate: armScanGrenade },
     update: updateScanGrenade
   },
+  // A scanner: what is left of a player who was caught, down there with others (11-together.js). Its light stays
+  // on. Carried back to the lift, or into an open salvage bay, it is restarted and they are on their feet again.
+  // Nothing puts one in a station: one lies where somebody fell.
+  scanner: {
+    label: 'scanner', mass: 1.4, value: 0, material: 'case', loud: 1, lies: 'either', bulky: false, bounce: 0.15, grip: 0.6,
+    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.16, 0.05, 0.05] }]
+  },
   // ---- litter: what lies about a station that nobody has swept in forty years ----
   // An empty can. Six of them lie wherever the noisy floor's draw says "cans" (03-noisy-floor.js). Kicked at a
   // walk they carry as far as the patch of cans they replace did; crouched, you can pick your way through.
@@ -451,6 +458,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // Down there with others (11-together.js): whose browser moves it (0: the host's), who has it in their beam (0: nobody),
     // and whether it was moving when its mover last said where it is.
     ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
+    fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
     isRemoved: false
   };
   setLooseObjectYaw(object, yaw || 0);
@@ -2279,7 +2287,7 @@ function finishSealingHaulBay(bay) {
   const ids = [];
   for (let objectIndex = looseObjects.length - 1; objectIndex >= 0; objectIndex--) {
     const object = looseObjects[objectIndex];
-    if (!isLooseObjectInHaulBay(object, bay)) continue;
+    if (!isLooseObjectInHaulBay(object, bay) || object.fallenPlayerId) continue; // (somebody's scanner is not salvage)
     value += getLooseObjectValue(object);
     ids.push(object.id);
   }
@@ -2335,6 +2343,8 @@ function updateHaulBays(dt) {
   }
   // Enough in it (or enough in all): it seals, once you, the Hollow and anything in the doorway are out of the way.
   if (isWorldTheHosts()) return;
+  // Somebody's scanner lies in it, about to be restarted: the door does not come down on the one who gets up.
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) if (looseObjects[objectIndex].fallenPlayerId && isLooseObjectInHaulBay(looseObjects[objectIndex], bay)) return;
   if (inside <= 0 || (inside < bay.quota && progress.done < progress.total)) return;
   if (isPlayerInTheWay || isLooseObjectInDoorway(bay.door)) return;
   if (hollow.isActive && isPointInHaulBay(bay, hollow.figure.x, hollow.figure.z, 0.6)) return;

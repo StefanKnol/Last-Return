@@ -212,7 +212,8 @@ function installLab() {
       }
       if (Math.hypot(x, y, z) / total > 1e-6) wrong.push(kindKey + ': centre of mass is off');
       if (!(prepared.boundsRadius > 0.05 && prepared.boundsRadius < 1) || !(prepared.smallestRadius >= 0.01)) wrong.push(kindKey + ': size');
-      if (kindKey !== 'scanGrenade' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scan grenade is a tool, and a scanner is what is left of a player: neither is salvage.)
+      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length };
