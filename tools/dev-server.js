@@ -110,12 +110,17 @@ function deleteDesignedFile(root, folder, key) {
   return 'src/' + folder + '/' + key + '.json';
 }
 
-function saveProportions(root, figureName, values) {
+// `settings` are numbers of TUNING in 00-config.js that belong to the creature (how tall a player is): they are
+// written in the same go, so that the page is rebuilt once for both files.
+function saveProportions(root, figureName, values, settings) {
   if (!FIGURE_NAME_PATTERN.test(figureName)) throw new Error('Not a figure name: "' + figureName + '".');
-  const filePath = path.join(root, 'src', 'js', '04-figures.js');
+  const filePath = path.join(root, 'src', 'js', '04-figures.js'), configPath = path.join(root, 'src', 'js', '00-config.js');
   const result = patchObjectNumbers(fs.readFileSync(filePath, 'utf8'), 'FIGURE_PROPORTIONS_' + figureName, values);
+  const configResult = Object.keys(settings).length > 0 ? patchObjectNumbers(fs.readFileSync(configPath, 'utf8'), 'TUNING', settings) : { changedKeys: [], missingKeys: [], source: '' };
   if (result.changedKeys.length > 0) fs.writeFileSync(filePath, result.source);
-  return { file: 'src/js/04-figures.js', changedKeys: result.changedKeys, missingKeys: result.missingKeys };
+  if (configResult.changedKeys.length > 0) fs.writeFileSync(configPath, configResult.source);
+  return { file: 'src/js/04-figures.js' + (configResult.changedKeys.length > 0 ? ' and src/js/00-config.js' : ''), changedKeys: result.changedKeys, missingKeys: result.missingKeys,
+    changedSettings: configResult.changedKeys, missingSettings: configResult.missingKeys };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +234,7 @@ function startDevServer(options) {
     '/dev/delete-room': function (body) { return { file: deleteDesignedFile(root, 'rooms', String(body.key)) }; },
     '/dev/save-object': function (body) { return { file: saveDesignedFile(root, 'objects', String(body.key), body.object) }; },
     '/dev/delete-object': function (body) { return { file: deleteDesignedFile(root, 'objects', String(body.key)) }; },
-    '/dev/save-proportions': function (body) { return saveProportions(root, String(body.figure), body.values || {}); }
+    '/dev/save-proportions': function (body) { return saveProportions(root, String(body.figure), body.values || {}, body.settings || {}); }
   };
 
   const server = http.createServer(function (request, response) {

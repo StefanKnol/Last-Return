@@ -36,7 +36,9 @@ for (const kindKey in FIGURE_KINDS) {
   CREATURE_WORKSHOP_KINDS[kindKey] = {
     label: kind.label, proportions: kind.proportions, constantName: kind.proportionsName.replace(/^FIGURE_PROPORTIONS_/, ''),
     surfaceClass: kind.surfaceClass, imprintTuningKey: kind.imprintTuningKey, color: kind.color,
-    hasHollowBody: kind.bodyPlan === 'hollow', heightTuningKey: kind.heightTuningKey || '',
+    hasHollowBody: kind.bodyPlan === 'hollow', bodyPlan: kind.bodyPlan, heightTuningKey: kind.heightTuningKey || '',
+    // The numbers in 00-config.js that are this creature's as well: how tall it is, standing and crouched.
+    settingKeys: [kind.heightTuningKey, kind.crouchHeightTuningKey].filter(Boolean),
     behaviours: CREATURE_WORKSHOP_BEHAVIOURS[kindKey] || [['standing', 'Standing'], ['manual', 'Posed by hand']]
   };
 }
@@ -75,8 +77,11 @@ const creatureWorkshop = {
   hasGameImprints: false, // scanner views: points on the body last as long as the game lets them (smeared), or briefly (sharp)
   ceiling: 4,             // of the test room. The Hollow only draws itself up as far as the ceiling allows.
   needsStage: false,
+  needsProportionFields: false, // the height slider has changed every proportion: their sliders are to be put out again
   fileProportions: {},    // per kind: what 04-figures.js held when the page loaded
   overrides: {},          // per kind: key -> { base: the file's value when the slider was moved, value: the slider's }
+  fileSettings: {},       // a creature's numbers in 00-config.js (how tall a player is): what that file held when the page loaded
+  settingOverrides: {},   // ... and which of them a slider here has changed: key -> { base, value }, as above
   figure: null, originalFigure: null, otherFigure: null,
   // Stands in for the `hollow` object when the game's pose code is asked to pose the figure here.
   standIn: { figure: null, walkPhase: 0, currentSpeed: 0, armRaise: 0, heldAmount: 0 },
@@ -101,8 +106,13 @@ function getCreatureWorkshopStageCenter() {
   return [WORKSHOP_ORIGIN_X + CREATURE_WORKSHOP_STAGE_SIZE / 2, WORKSHOP_ORIGIN_Z + CREATURE_WORKSHOP_STAGE_SIZE / 2];
 }
 
+// The numbers of this kind in 00-config.js that a slider here has changed.
+function getCreatureWorkshopChangedSettings(kindKey) {
+  return CREATURE_WORKSHOP_KINDS[kindKey].settingKeys.filter(function (key) { return Boolean(creatureWorkshop.settingOverrides[key]); });
+}
+
 function hasCreatureWorkshopChanges(kindKey) {
-  return Object.keys(creatureWorkshop.overrides[kindKey]).length > 0;
+  return Object.keys(creatureWorkshop.overrides[kindKey]).length > 0 || getCreatureWorkshopChangedSettings(kindKey).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +122,7 @@ function hasCreatureWorkshopChanges(kindKey) {
 function refreshCreatureWorkshopSaveButton() {
   const state = creatureWorkshop;
   if (!state.saveButton) return;
-  const count = Object.keys(state.overrides[state.kind]).length;
+  const count = Object.keys(state.overrides[state.kind]).length + getCreatureWorkshopChangedSettings(state.kind).length;
   state.saveButton.textContent = count > 0 ? 'Write to file * (' + count + ')' : 'Same as the file';
 }
 
@@ -130,15 +140,45 @@ function setCreatureWorkshopProportion(key, value, fingerIndex) {
   markWorkshopStateChanged();
 }
 
+// One of a creature's numbers in 00-config.js: how tall it is. The whole game uses it at once, like the proportions.
+function setCreatureWorkshopSetting(key, value) {
+  const state = creatureWorkshop;
+  TUNING[key] = value;
+  if (value === state.fileSettings[key]) delete state.settingOverrides[key];
+  else state.settingOverrides[key] = { base: state.fileSettings[key], value: value };
+  refreshCreatureWorkshopSaveButton();
+  markWorkshopStateChanged();
+}
+
+// How tall the body being worked on stands when it is doing nothing.
+function getCreatureWorkshopStandingHeight() {
+  const kind = CREATURE_WORKSHOP_KINDS[creatureWorkshop.kind];
+  return kind.heightTuningKey ? TUNING[kind.heightTuningKey] : measureFigureHeight(kind.proportions, kind.bodyPlan);
+}
+
+// A creature whose height is not a number of its own (the Hollow, a Still): it is as tall as its proportions
+// come to. So to make it this tall, every one of them is made larger or smaller by the same share. They are
+// set like so many sliders moved at once, and written to the file like them.
+function setCreatureWorkshopHeight(height) {
+  const state = creatureWorkshop, kind = CREATURE_WORKSHOP_KINDS[state.kind];
+  const fitted = fitFigureProportionsToHeight(kind.proportions, kind.bodyPlan, height);
+  const round = function (value) { return Math.round(value * 1000) / 1000; };
+  for (const key in fitted) {
+    if (typeof fitted[key] === 'number') setCreatureWorkshopProportion(key, round(fitted[key]));
+    else if (Array.isArray(fitted[key])) fitted[key].forEach(function (value, index) { setCreatureWorkshopProportion(key, round(value), index); });
+  }
+}
+
 function resetCreatureWorkshopProportions() {
   const state = creatureWorkshop;
   if (!hasCreatureWorkshopChanges(state.kind)) return;
   const live = CREATURE_WORKSHOP_KINDS[state.kind].proportions, file = state.fileProportions[state.kind];
   for (const key in file) live[key] = cloneCreatureWorkshopValue(file[key]);
   state.overrides[state.kind] = {};
+  for (const key of CREATURE_WORKSHOP_KINDS[state.kind].settingKeys) { TUNING[key] = state.fileSettings[key]; delete state.settingOverrides[key]; }
   markWorkshopStateChanged();
   renderWorkshopPanel();
-  setWorkshopStatus('Back to the numbers in 04-figures.js.', 'info');
+  setWorkshopStatus('Back to the numbers in 04-figures.js' + (CREATURE_WORKSHOP_KINDS[state.kind].settingKeys.length > 0 ? ' and 00-config.js.' : '.'), 'info');
 }
 
 function describeCreatureWorkshopChanges() {
@@ -146,31 +186,41 @@ function describeCreatureWorkshopChanges() {
   return Object.keys(overrides).map(function (key) {
     const value = overrides[key].value;
     return key + ': ' + (Array.isArray(value) ? '[' + value.map(formatWorkshopNumber).join(', ') + ']' : formatWorkshopNumber(value));
-  }).join(', ');
+  }).concat(getCreatureWorkshopChangedSettings(creatureWorkshop.kind).map(function (key) {
+    return key + ': ' + formatWorkshopNumber(creatureWorkshop.settingOverrides[key].value) + ' (in 00-config.js)';
+  })).join(', ');
 }
 
 function saveCreatureWorkshop() {
   const state = creatureWorkshop;
   const kind = CREATURE_WORKSHOP_KINDS[state.kind], overrides = state.overrides[state.kind];
-  const keys = Object.keys(overrides);
-  if (keys.length === 0) { setWorkshopStatus('Nothing to write: the body is the same as in 04-figures.js.', 'info'); return; }
+  const keys = Object.keys(overrides), settingKeys = getCreatureWorkshopChangedSettings(state.kind);
+  if (keys.length === 0 && settingKeys.length === 0) { setWorkshopStatus('Nothing to write: the body is the same as in 04-figures.js.', 'info'); return; }
   if (!workshop.hasServer) {
     copyWorkshopText(describeCreatureWorkshopChanges(), 'changed values (no dev server to write them: paste them into FIGURE_PROPORTIONS_' + kind.constantName + ')');
     return;
   }
-  const values = {};
+  const values = {}, settings = {};
   for (const key of keys) values[key] = overrides[key].value;
-  callWorkshopServer('/dev/save-proportions', { figure: kind.constantName, values: values }).then(function (result) {
+  for (const key of settingKeys) settings[key] = state.settingOverrides[key].value;
+  callWorkshopServer('/dev/save-proportions', { figure: kind.constantName, values: values, settings: settings }).then(function (result) {
     // What was written is now what the file holds.
     for (const key of keys) {
       if (result.missingKeys.indexOf(key) >= 0) continue;
       state.fileProportions[state.kind][key] = cloneCreatureWorkshopValue(values[key]);
       delete overrides[key];
     }
+    for (const key of settingKeys) {
+      if ((result.missingSettings || []).indexOf(key) >= 0) continue;
+      state.fileSettings[key] = settings[key];
+      delete state.settingOverrides[key];
+    }
     saveWorkshopState();
     renderWorkshopPanel();
-    if (result.missingKeys.length > 0) setWorkshopStatus('Written, except ' + result.missingKeys.join(', ') + ': not found in FIGURE_PROPORTIONS_' + kind.constantName + '.', 'warning');
-    else setWorkshopStatus('Wrote ' + keys.length + ' number(s) to FIGURE_PROPORTIONS_' + kind.constantName + ' in src/js/04-figures.js.', 'good');
+    const missing = result.missingKeys.concat(result.missingSettings || []);
+    if (missing.length > 0) setWorkshopStatus('Written, except ' + missing.join(', ') + ': not found in FIGURE_PROPORTIONS_' + kind.constantName + ' or in TUNING.', 'warning');
+    else setWorkshopStatus('Wrote ' + keys.length + ' number(s) to FIGURE_PROPORTIONS_' + kind.constantName + ' in src/js/04-figures.js' +
+      (settingKeys.length > 0 ? ' and ' + settingKeys.join(', ') + ' to TUNING in src/js/00-config.js.' : '.'), 'good');
   }).catch(function (error) {
     setWorkshopStatus('Not written: ' + error.message, 'warning');
   });
@@ -312,7 +362,7 @@ function buildCreatureWorkshopReadout() {
     const isCrouched = state.behaviour.indexOf('crouched') === 0, figure = state.figure;
     const light = getFigureScannerLight(figure, { x: 0, y: 0, z: 0 });
     lines.push('you bump at    ' + (isCrouched ? TUNING.playerHeightCrouching : TUNING.playerHeight).toFixed(2) + ' m  (' + (isCrouched ? 'playerHeightCrouching' : 'playerHeight') + ', 00-config.js: red)');
-    lines.push('you see from   ' + (isCrouched ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody)).toFixed(2) + ' m  (' + (isCrouched ? '(TUNING.playerHeight * TUNING.playerEyeHeightToBody)' : '(TUNING.playerHeight * TUNING.playerEyeHeightToBody)') + ': teal. Your light starts there for the others)');
+    lines.push('you see from   ' + (isCrouched ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody)).toFixed(2) + ' m  (' + (isCrouched ? 'playerEyeHeightToCrouchedBody' : 'playerEyeHeightToBody') + ' of that: teal. Your light starts there for the others)');
     lines.push('head, middle   ' + (getFigureHeadHeight(figure) - figure.y).toFixed(2) + ' m');
     lines.push('scanner light  ' + (light.y - figure.y).toFixed(2) + ' m');
   }
@@ -342,6 +392,8 @@ function placeCreatureWorkshopCamera() {
 function updateCreatureWorkshop(dt) {
   const state = creatureWorkshop, orbit = state.orbit, keys = input.keysDown;
   if (state.needsStage) rebuildCreatureWorkshopStage();
+  // (Not while a hand is still on a slider or in a number box: putting the panel out again would take it away.)
+  if (state.needsProportionFields && !(document.activeElement && document.activeElement.tagName === 'INPUT')) { state.needsProportionFields = false; renderWorkshopPanel(); }
   orbit.yaw = wrapAngleToPi(orbit.yaw + ((keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0)) * dt * 1.4);
   orbit.distance += ((keys.has('KeyS') ? 1 : 0) - (keys.has('KeyW') ? 1 : 0)) * dt * 2.5;
   orbit.height += ((keys.has('KeyE') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0)) * dt * 1.2;
@@ -450,6 +502,24 @@ function renderCreatureWorkshopPanel(body) {
   state.readoutElement.id = 'workshop-creature-readout';
   state.readoutTimer = 0;
 
+  // How tall it is. A kind that has a number for that in 00-config.js gets a slider on the number (and one on how
+  // tall it is crouched, if it has that too); any other is made larger or smaller as a whole.
+  addWorkshopHeading(body, 'Height');
+  if (kind.heightTuningKey) {
+    for (const key of kind.settingKeys) {
+      const field = addWorkshopNumber(body, (key === kind.heightTuningKey ? 'Standing' : 'Crouched') + ' (m): ' + key + ' in 00-config.js', TUNING[key], 0.3, 3, 0.01, function (value) { setCreatureWorkshopSetting(key, value); });
+      field.element.title = 'In 00-config.js: ' + formatWorkshopNumber(state.fileSettings[key]);
+      field.element.id = key === kind.heightTuningKey ? 'workshop-creature-height' : 'workshop-creature-height-crouched';
+    }
+    addWorkshopNote(body, 'The body is made to fit these, whatever its proportions are: they give it its shape.');
+  } else {
+    const field = addWorkshopNumber(body, 'Standing (m): every number below, larger or smaller by the same share', Math.round(getCreatureWorkshopStandingHeight() * 100) / 100, 0.3, 4, 0.01, function (value) {
+      setCreatureWorkshopHeight(value);
+      state.needsProportionFields = true; // the sliders below have all moved: they are put out again (updateCreatureWorkshop), once the hand is off this one
+    });
+    field.element.id = 'workshop-creature-height';
+  }
+
   addWorkshopHeading(body, 'Look');
   addWorkshopSelect(body, 'Shown as', state.view, [['solid', 'A solid body'], ['scanned', 'What the scanner shows (as in the game)'], ['both', 'Both at once']], function (view) {
     state.view = view;
@@ -543,6 +613,17 @@ workshop.tools.creatures = {
   initialize: function (stored) {
     const state = creatureWorkshop;
     const storedOverrides = stored.overrides && typeof stored.overrides === 'object' ? stored.overrides : {};
+    // The creatures' numbers in 00-config.js, the same way: only if the file still holds what it held when the slider was moved.
+    const storedSettings = stored.settings && typeof stored.settings === 'object' ? stored.settings : {};
+    for (const kindKey in CREATURE_WORKSHOP_KINDS) {
+      for (const key of CREATURE_WORKSHOP_KINDS[kindKey].settingKeys) {
+        state.fileSettings[key] = TUNING[key];
+        const override = storedSettings[key];
+        if (!override || !Number.isFinite(override.value) || override.base !== TUNING[key] || override.value === TUNING[key]) continue;
+        TUNING[key] = override.value;
+        state.settingOverrides[key] = { base: state.fileSettings[key], value: override.value };
+      }
+    }
     for (const kindKey in CREATURE_WORKSHOP_KINDS) {
       const live = CREATURE_WORKSHOP_KINDS[kindKey].proportions;
       const file = {};
@@ -592,6 +673,7 @@ workshop.tools.creatures = {
     stored.playerPitch = state.playerPitch;
     stored.orbit = state.orbit;
     stored.overrides = state.overrides;
+    stored.settings = state.settingOverrides;
     if (state.figure && state.behaviour === 'manual') stored.manualPose = Object.assign({}, state.figure.pose);
   },
   save: saveCreatureWorkshop,

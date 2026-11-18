@@ -12,12 +12,12 @@ const FIGURE_CAPSULE_STRIDE = 7; // startX, startY, startZ, endX, endY, endZ, ra
 // fingers on each hand. Standing hunched it is about 2.2 m tall; when it straightens up to listen, about 2.5 m.
 const FIGURE_PROPORTIONS_HOLLOW = {
   kind: 'hollow',
-  thigh: 0.75, shin: 0.79, footLength: 0.295, hipWidth: 0.285,
-  lowerSpine: 0.4, upperSpine: 0.465, shoulderWidth: 0.265,
-  neckLength: 0.345, headLength: 0.11, headRadius: 0.11, jawLength: 0.125,
-  upperArm: 0.62, foreArm: 0.54, handLength: 0.095,
-  fingerLengths: [0.175, 0.23, 0.23],   // outer, middle, inner finger
-  torsoRadius: 0.095, limbRadius: 0.055, legRadius: 0.1, fingerRadius: 0.01
+  thigh: 0.66, shin: 0.735, footLength: 0.28, hipWidth: 0.265,
+  lowerSpine: 0.355, upperSpine: 0.415, shoulderWidth: 0.25,
+  neckLength: 0.3, headLength: 0.15, headRadius: 0.1, jawLength: 0.15,
+  upperArm: 0.56, foreArm: 0.5, handLength: 0.085,
+  fingerLengths: [0.17, 0.21, 0.21],   // outer, middle, inner finger
+  torsoRadius: 0.085, limbRadius: 0.04, legRadius: 0.085, fingerRadius: 0.005
 };
 
 // The calibration dummy: an ordinary jointed shop mannequin, about 1.75 m tall.
@@ -60,6 +60,8 @@ const FIGURE_PROPORTIONS_PLAYER = {
 //   heightTuningKey   a kind that is as tall as that number in 00-config.js says, whatever its proportions come
 //                     to: see getFigureBody. A player has it: how tall you are is said once, as `playerHeight`,
 //                     and that is what you bump your head at, what you see from, and how tall the others see you.
+//   crouchHeightTuningKey  ... and the number that says how tall it is crouched (getPlayerCrouchPose). Only named
+//                     here so that the workshop can put a slider on it beside the other.
 // ---------------------------------------------------------------------------
 
 const FIGURE_BODY_PLANS = { hollow: buildHollowCapsules, person: buildPersonCapsules };
@@ -71,7 +73,8 @@ const FIGURE_KINDS = {
     surfaceClass: SURFACE_STILL, imprintTuningKey: 'stillImprintSeconds', color: [1.0, 0.8, 0.42] },
   // The body the others see of a player (11-together.js). Nobody sees their own.
   player: { label: 'A player (as the others see one)', proportions: FIGURE_PROPORTIONS_PLAYER, proportionsName: 'FIGURE_PROPORTIONS_PLAYER', bodyPlan: 'person',
-    surfaceClass: SURFACE_PLAYER, imprintTuningKey: 'playerImprintSeconds', color: [0.35, 0.9, 0.85], holdsScanner: true, heightTuningKey: 'playerHeight' }
+    surfaceClass: SURFACE_PLAYER, imprintTuningKey: 'playerImprintSeconds', color: [0.35, 0.9, 0.85], holdsScanner: true,
+    heightTuningKey: 'playerHeight', crouchHeightTuningKey: 'playerHeightCrouching' }
 };
 
 // A new body of this kind, for the game: its own proportions, its colour in a scan, its points lasting as long as its kind's do.
@@ -87,36 +90,49 @@ function createFigureOfKind(kindKey) {
 // whatever FIGURE_PROPORTIONS_PLAYER added up to, and the two had to be kept in step by hand.)
 // Worked out again only when a number has changed (in the workshop, where they all have sliders).
 const fittedFigureBodies = new WeakMap(); // proportions -> { madeFor, body }
-let figureFittingFigure = null;
+let figureMeasuringFigure = null;          // the body the measuring is done on (measureFigureHeight)
 function getFigureBody(figure) {
   const proportions = figure.proportions, kind = FIGURE_KINDS[proportions.kind];
-  if (!kind || !kind.heightTuningKey || figure === figureFittingFigure) return proportions;
+  if (!kind || !kind.heightTuningKey || figure === figureMeasuringFigure) return proportions;
   const height = TUNING[kind.heightTuningKey], madeFor = height + JSON.stringify(proportions);
   let fitted = fittedFigureBodies.get(proportions);
   if (fitted && fitted.madeFor === madeFor) return fitted.body;
   if (!fitted) { fitted = { madeFor: '', body: null }; fittedFigureBodies.set(proportions, fitted); }
-  const scaledBy = function (share) {
-    const body = {};
-    for (const key in proportions) {
-      const value = proportions[key];
-      body[key] = typeof value === 'number' ? value * share : (Array.isArray(value) ? value.map(function (entry) { return entry * share; }) : value);
-    }
-    return body;
-  };
-  // How tall it stands with everything this many times as big. (Not simply that many times as tall: an ankle is
-  // always 7 cm off the floor.) Measured on a body of its own, which is built as it is given.
-  if (!figureFittingFigure) figureFittingFigure = createFigure(proportions, 0, kind.imprintTuningKey);
-  const measured = figureFittingFigure, pose = measured.pose, build = FIGURE_BODY_PLANS[kind.bodyPlan];
-  pose.legSwing = 0; pose.kneeBend = 0.05; pose.squat = 0; pose.lean = 0.04; pose.headTilt = 0;
-  const heightAt = function (share) { measured.proportions = scaledBy(share); return build(measured); };
+  fitted.madeFor = madeFor;
+  fitted.body = fitFigureProportionsToHeight(proportions, kind.bodyPlan, height);
+  return fitted.body;
+}
+
+// These proportions with every length and every thickness `share` times as big: the same shape, another size.
+function scaleFigureProportions(proportions, share) {
+  const scaled = {};
+  for (const key in proportions) {
+    const value = proportions[key];
+    scaled[key] = typeof value === 'number' ? value * share : (Array.isArray(value) ? value.map(function (entry) { return entry * share; }) : value);
+  }
+  return scaled;
+}
+
+// How tall a body of these proportions stands, put together by this body plan: to the top of its head, as it
+// stands when it is doing nothing. Measured on a body of its own, which is built exactly as it is given.
+function measureFigureHeight(proportions, bodyPlan) {
+  if (!figureMeasuringFigure) figureMeasuringFigure = createFigure(proportions, 0, 'playerImprintSeconds');
+  const measured = figureMeasuringFigure, pose = measured.pose;
+  pose.legSwing = 0; pose.kneeBend = bodyPlan === 'person' ? 0.05 : 0; pose.squat = 0; pose.armSwing = 0; pose.armRaise = 0; pose.elbowBend = 0.1;
+  pose.lean = bodyPlan === 'person' ? 0.04 : 0; pose.headTilt = 0; pose.stretch = 0; pose.fingerSplay = 0.25; pose.stoop = 0; pose.crawl = 0;
+  measured.proportions = proportions;
+  return FIGURE_BODY_PLANS[bodyPlan](measured);
+}
+
+// These proportions, made larger or smaller as a whole until the body stands `height` tall. (Not simply by the
+// share the two heights differ by: an ankle is always at least 7 cm off the floor, whatever size the leg is.)
+function fitFigureProportionsToHeight(proportions, bodyPlan, height) {
   let smaller = 0.05, larger = 20;
   for (let halving = 0; halving < 40; halving++) {
     const middle = (smaller + larger) / 2;
-    if (heightAt(middle) < height) smaller = middle; else larger = middle;
+    if (measureFigureHeight(scaleFigureProportions(proportions, middle), bodyPlan) < height) smaller = middle; else larger = middle;
   }
-  fitted.madeFor = madeFor;
-  fitted.body = scaledBy((smaller + larger) / 2);
-  return fitted.body;
+  return scaleFigureProportions(proportions, (smaller + larger) / 2);
 }
 
 // How a player is bent when crouched, so that the body the others see is as tall as the game has you be then:
@@ -124,10 +140,14 @@ function getFigureBody(figure) {
 // forward, both by as much as it takes to bring the top of its head to that height. (It used to be one fixed
 // pose, knees bent and leaning, which came to whatever height the proportions gave it: 0.95 m for a body that
 // crouches under 0.7.)
-// TWEAK: how far it leans forward when it is as far down as it goes (radians), and how far down that is: how far
-// the thighs come forward (1.57 would be level, sitting on its heels).
+// TWEAK: how the two go together. It leans further forward the further down it goes, until it leans
+// PLAYER_CROUCH_LEAN (radians) with its thighs PLAYER_CROUCH_DEEPEST_SQUAT forward. If that is not low enough
+// for the height asked for, it goes on down on its haunches without leaning any further, as far as sitting on
+// its heels (PLAYER_CROUCH_ON_ITS_HEELS: 1.57 would be thighs level). So these two give the crouch its look,
+// and never stop the body getting down to the height the game has you be.
 const PLAYER_CROUCH_LEAN = 0.5;
 const PLAYER_CROUCH_DEEPEST_SQUAT = 0.75;
+const PLAYER_CROUCH_ON_ITS_HEELS = 1.5;
 const playerCrouchPose = { madeFor: '', squat: 0, lean: 0.04, figure: null };
 
 // Returns { squat, lean } for the pose. Worked out again only when the body or the height asked for has changed
@@ -140,9 +160,11 @@ function getPlayerCrouchPose() {
   if (!crouch.figure) crouch.figure = createFigure(body, 0, 'playerImprintSeconds'); // (never shown: only measured)
   const figure = crouch.figure, pose = figure.pose;
   pose.legSwing = 0; pose.kneeBend = 0.05;
-  // How tall the body is when it is this far down, from 0 (standing) to 1 (as far as it goes).
+  // How tall the body is when it is this far down, from 0 (standing) to 1 (on its heels).
+  const deepest = Math.max(PLAYER_CROUCH_ON_ITS_HEELS, PLAYER_CROUCH_DEEPEST_SQUAT);
   const heightAt = function (share) {
-    pose.squat = share * PLAYER_CROUCH_DEEPEST_SQUAT; pose.lean = 0.04 + share * (PLAYER_CROUCH_LEAN - 0.04);
+    pose.squat = share * deepest;
+    pose.lean = 0.04 + Math.min(1, pose.squat / PLAYER_CROUCH_DEEPEST_SQUAT) * (PLAYER_CROUCH_LEAN - 0.04);
     return buildPersonCapsules(figure);
   };
   let standing = 0, down = 1;
