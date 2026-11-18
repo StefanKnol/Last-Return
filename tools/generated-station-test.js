@@ -199,8 +199,11 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   // How far down the stairs go differs from station to station, so everything is measured against the foot of this one.
   check('walking down the stairs lowers the floor under you smoothly, all the way to the foot',
     stairs.floorAtTop === 0 && stairs.bottom.floor < -0.2 && Math.abs(descent.heights[descent.heights.length - 1] - stairs.bottom.floor) < 0.05 && neverJumps, { stairs: stairs, descent: descent });
+  // Measured against the standing eye height in the tuning, so resizing the player does not break this check.
+  const standingEye = await inGame(() => window.lastReturnDebug.tuning.eyeHeightStanding);
   const eyeAboveFoot = cameraAtFoot - stairs.bottom.floor;
-  check('the view follows the floor down', eyeAboveFoot > 1.4 && eyeAboveFoot < 2, { cameraAtFoot: cameraAtFoot, foot: stairs.bottom.floor });
+  check('the view follows the floor down', eyeAboveFoot > standingEye - 0.05 && eyeAboveFoot < standingEye + 0.6,
+    { cameraAtFoot: cameraAtFoot, foot: stairs.bottom.floor, standingEye: standingEye });
   await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(debug.playerStart.x, debug.playerStart.z, 0); debug.simulate(0.2); });
 
   // --- vents: you only fit crouched, it is loud in there, and the Hollow crawls through ---

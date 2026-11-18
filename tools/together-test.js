@@ -405,7 +405,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
   const startedAt = await about(a, carriedId);
-  await b.evaluate(() => { const d = window.lastReturnDebug; const spot = d.findWalkableSpotNear(d.player.x + 3, d.player.z) || d.findWalkableSpotNear(d.player.x, d.player.z + 3); d.teleport(spot.x, spot.z); });
+  // (They look up from the floor first. Looking down, what they carry hangs low enough to catch on what stands between here and there, and the beam loses it.)
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.player.pitch = 0; const spot = d.findWalkableSpotNear(d.player.x + 3, d.player.z) || d.findWalkableSpotNear(d.player.x, d.player.z + 3); d.teleport(spot.x, spot.z); });
   await both(2.4);
   const carriedB = await about(b, carriedId), carriedA = await about(a, carriedId);
   const ids = { host: await a.evaluate(() => window.lastReturnDebug.together.myId), other: await b.evaluate(() => window.lastReturnDebug.together.myId) };

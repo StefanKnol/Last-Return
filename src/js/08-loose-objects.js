@@ -339,7 +339,8 @@ function prepareLooseObjectKind(kindKey) {
     shell: shell, shellCount: balls.length, parts: parts,
     inverseMass: 1 / kind.mass,
     inverseInertiaX: 1 / inertiaX, inverseInertiaY: 1 / inertiaY, inverseInertiaZ: 1 / inertiaZ,
-    boundsRadius: boundsRadius, smallestRadius: kind.stepRadius || smallestRadius
+    boundsRadius: boundsRadius, smallestRadius: kind.stepRadius || smallestRadius,
+    restTurns: [null, null, null] // how it really lies when it is put down upright, on its side, and on its other side (getLooseRestOrientation)
   };
   return kind.prepared;
 }
@@ -1743,6 +1744,117 @@ function findLooseObjectInFocus(eyeX, eyeY, eyeZ, betterThan) {
 
 const stationLooseObjects = []; // { kindKey, x, y, z, orientation: [x, y, z, w], on: 'floor' | 'surface' }
 
+// TWEAK: how a thing that is put down is judged to stay as it is.
+const LOOSE_REST_BALANCE_METRES = 0.002; // its weight is this near to being over what it stands on: it stays. (A canister on its round end, a pipe on its side.)
+const LOOSE_REST_LEVEL_METRES = 0.0005;  // a ball of its shell this near to the floor is on it
+
+// Where each ball of a shell is, from the centre of mass, with the thing turned by the quaternion (x, y, z, w).
+function placeLooseShell(prepared, x, y, z, w, centres) {
+  const shell = prepared.shell;
+  for (let ballIndex = 0; ballIndex < prepared.shellCount; ballIndex++) {
+    const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2];
+    centres[ballIndex * 3] = (1 - 2 * (y * y + z * z)) * localX + 2 * (x * y - w * z) * localY + 2 * (x * z + w * y) * localZ;
+    centres[ballIndex * 3 + 1] = 2 * (x * y + w * z) * localX + (1 - 2 * (x * x + z * z)) * localY + 2 * (y * z - w * x) * localZ;
+    centres[ballIndex * 3 + 2] = 2 * (x * z - w * y) * localX + 2 * (y * z + w * x) * localY + (1 - 2 * (x * x + y * y)) * localZ;
+  }
+}
+
+// How a thing really lies when it is put down turned like `turn`.
+//
+// `lies` says which way up a station puts a kind out, and for most things that is how they rest: a crate on
+// its bottom, a canister on its side. Something with a part that sticks out to one side does not (a fire
+// extinguisher with its horn). Stood up it falls over, and laid down it rolls until the horn is on the floor.
+// Put out as `lies` says, it would do that the moment anything woke it, with a knock the Hollow hears.
+//
+// So a thing that would not stay as it is turned is tipped over here, slowly, the way its weight takes it:
+// about the ball of its shell it stands on (or the two it lies on) until the next one comes down, and again,
+// until its centre of mass is over what it rests on. That is what the steps further up would do to it on a
+// level floor, without the bouncing. A thing that stays as it is turned comes back exactly as it was given.
+function settleLooseRestTurn(prepared, turn) {
+  const shell = prepared.shell, shellCount = prepared.shellCount;
+  const centres = new Float64Array(shellCount * 3);
+  let turnX = turn.x, turnY = turn.y, turnZ = turn.z, turnW = turn.w;
+  // No thing has more sides to go over than this. One that is still not at rest is left as it was given.
+  for (let pass = 0; pass < 24; pass++) {
+    placeLooseShell(prepared, turnX, turnY, turnZ, turnW, centres);
+    let floor = Infinity;
+    for (let ballIndex = 0; ballIndex < shellCount; ballIndex++) floor = Math.min(floor, centres[ballIndex * 3 + 1] - shell[ballIndex * 4 + 3]);
+    // Where it touches the floor, seen from above, in order from west to east ...
+    const touching = [];
+    for (let ballIndex = 0; ballIndex < shellCount; ballIndex++) {
+      if (centres[ballIndex * 3 + 1] - shell[ballIndex * 4 + 3] < floor + LOOSE_REST_LEVEL_METRES) touching.push({ x: centres[ballIndex * 3], z: centres[ballIndex * 3 + 2], ballIndex: ballIndex });
+    }
+    touching.sort(function (first, second) { return first.x - second.x || first.z - second.z || first.ballIndex - second.ballIndex; });
+    // ... and the outline of that: what it stands on. One place, a line between two, or a patch of floor.
+    const isLeftTurn = function (from, by, to) { return (by.x - from.x) * (to.z - from.z) - (by.z - from.z) * (to.x - from.x) > 1e-12; };
+    const outline = [];
+    for (let side = 0; side < 2; side++) {
+      const start = outline.length;
+      for (let index = 0; index < touching.length; index++) {
+        const place = touching[side === 0 ? index : touching.length - 1 - index];
+        while (outline.length >= start + 2 && !isLeftTurn(outline[outline.length - 2], outline[outline.length - 1], place)) outline.pop();
+        outline.push(place);
+      }
+      outline.pop(); // (it is the first of the other side)
+    }
+    if (outline.length === 0) outline.push(touching[0]); // all of it in one place
+    // The place in that outline nearest to under the centre of mass (which is at 0, 0), and whether that is
+    // inside it. `first` and `second` are the two it lies between; `second` is null when it is a corner.
+    let isOver = outline.length >= 3, distance = Infinity, nearX = 0, nearZ = 0, first = null, second = null;
+    for (let index = 0; index < outline.length; index++) {
+      const from = outline[index], to = outline[(index + 1) % outline.length];
+      const edgeX = to.x - from.x, edgeZ = to.z - from.z, edgeSquared = edgeX * edgeX + edgeZ * edgeZ;
+      if (outline.length >= 3 && from.x * edgeZ - from.z * edgeX < 0) isOver = false; // it is outside this edge (the outline goes round anticlockwise)
+      const along = edgeSquared > 0 ? clampNumber(-(from.x * edgeX + from.z * edgeZ) / edgeSquared, 0, 1) : 0;
+      const placeX = from.x + edgeX * along, placeZ = from.z + edgeZ * along, placeDistance = Math.sqrt(placeX * placeX + placeZ * placeZ);
+      if (placeDistance < distance) {
+        distance = placeDistance; nearX = placeX; nearZ = placeZ;
+        first = along < 1 ? from : to; second = along > 0 && along < 1 ? to : null;
+      }
+    }
+    if (isOver || distance < LOOSE_REST_BALANCE_METRES) return pass === 0 ? turn : { x: turnX, y: turnY, z: turnZ, w: turnW };
+
+    // It goes over. The line it turns about: through the two balls it lies on, or through the one it stands
+    // on, level and square to the way its weight pulls. Round it the way that takes the weight down.
+    let axisX = -nearZ, axisY = 0, axisZ = nearX;
+    if (second) {
+      axisX = centres[second.ballIndex * 3] - centres[first.ballIndex * 3];
+      axisY = centres[second.ballIndex * 3 + 1] - centres[first.ballIndex * 3 + 1];
+      axisZ = centres[second.ballIndex * 3 + 2] - centres[first.ballIndex * 3 + 2];
+    }
+    const axisLength = Math.sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ) * (axisZ * nearX - axisX * nearZ < 0 ? -1 : 1);
+    axisX /= axisLength; axisY /= axisLength; axisZ /= axisLength;
+    // Turned by `angle` about that line. Returns whether some other ball has come down to the floor by then
+    // (a fiftieth of a millimetre past it, so that one which only stays level with it does not count).
+    const tipped = { x: 0, y: 0, z: 0, w: 1 };
+    const hasComeDown = function (angle) {
+      const sine = Math.sin(angle / 2);
+      const product = multiplyLooseTurns(axisX * sine, axisY * sine, axisZ * sine, Math.cos(angle / 2), turnX, turnY, turnZ, turnW);
+      tipped.x = product.x; tipped.y = product.y; tipped.z = product.z; tipped.w = product.w;
+      placeLooseShell(prepared, tipped.x, tipped.y, tipped.z, tipped.w, centres);
+      const level = centres[first.ballIndex * 3 + 1] - shell[first.ballIndex * 4 + 3];
+      for (let ballIndex = 0; ballIndex < shellCount; ballIndex++) {
+        if (ballIndex === first.ballIndex || (second && ballIndex === second.ballIndex)) continue;
+        if (centres[ballIndex * 3 + 1] - shell[ballIndex * 4 + 3] < level - 0.00002) return true;
+      }
+      return false;
+    };
+    // Half a degree at a time until one has, and then to the moment it did.
+    const stride = Math.PI / 360;
+    let before = 0, after = 0;
+    for (let angle = stride; angle <= TWO_PI && after === 0; angle += stride) { if (hasComeDown(angle)) after = angle; else before = angle; }
+    if (after === 0) return turn; // nothing ever comes down: it is not a thing that can lie anywhere
+    for (let halving = 0; halving < 30; halving++) {
+      const middle = (before + after) / 2;
+      if (hasComeDown(middle)) after = middle; else before = middle;
+    }
+    hasComeDown(after);
+    const length = Math.sqrt(tipped.x * tipped.x + tipped.y * tipped.y + tipped.z * tipped.z + tipped.w * tipped.w);
+    turnX = tipped.x / length; turnY = tipped.y / length; turnZ = tipped.z / length; turnW = tipped.w / length;
+  }
+  return turn;
+}
+
 // How a thing of this kind is turned when it lies as `lies` says and faces `yaw`: a quaternion.
 function getLooseRestOrientation(kindKey, yaw, isOnItsSide, alongX) {
   let turned = { x: 0, y: 0, z: 0, w: 1 };
@@ -1750,6 +1862,11 @@ function getLooseRestOrientation(kindKey, yaw, isOnItsSide, alongX) {
     // A quarter turn over: about the line across you, or about the line ahead of you.
     turned = alongX ? { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 } : { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 };
   }
+  // ... and from there, over to how it really lies, if it would not stay like that. Worked out once for each
+  // kind and each of the three ways.
+  const prepared = prepareLooseObjectKind(kindKey), way = isOnItsSide ? (alongX ? 2 : 1) : 0;
+  if (!prepared.restTurns[way]) prepared.restTurns[way] = settleLooseRestTurn(prepared, turned);
+  turned = prepared.restTurns[way];
   const product = multiplyLooseTurns(0, Math.sin(-yaw / 2), 0, Math.cos(-yaw / 2), turned.x, turned.y, turned.z, turned.w);
   return [product.x, product.y, product.z, product.w];
 }

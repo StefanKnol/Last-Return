@@ -99,10 +99,10 @@ const QUALITY_PRESETS = {
 const TUNING = {
   // ---- The player's body ---------------------------------------------------
   playerRadius: 0.3,            // how wide you are for bumping into walls. Smaller squeezes through tighter gaps.
-  eyeHeightStanding: 1.42,      // camera height when standing
-  eyeHeightCrouching: 0.75,     // camera height when crouched
-  walkSpeed: 2.4,
-  sprintSpeed: 4.5,             // must stay above hollowHuntSpeed or sprinting cannot open a gap
+  eyeHeightStanding: 1.1,      // camera height when standing
+  eyeHeightCrouching: 0.7,     // camera height when crouched
+  walkSpeed: 2.2,
+  sprintSpeed: 4.4,             // must stay above hollowHuntSpeed or sprinting cannot open a gap
   crouchSpeed: 1.3,
   waterSpeedFactor: 0.76,       // speed multiplier while wading through flooded floor (1 = no slowdown)
   playerAcceleration: 16,       // how quickly you reach full speed. Low feels like ice, high feels snappy.

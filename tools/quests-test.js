@@ -203,17 +203,20 @@ function check(description, condition, detail) {
   const asBefore = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, result = {};
     const before = {
-      // The maps: read off when the map and the quests were taken apart. The quests: read off when a descent came
+      // The maps: read off when the fire extinguisher got its horn, and a thing that would not stay as `lies` says
+      // came to be put down as it really lies (getLooseRestOrientation). That changed how every fire extinguisher
+      // is turned, once, and nothing else: no other thing, and none of them moved. Before that they were read off
+      // when the map and the quests were taken apart. The quests: read off when a descent came
       // to have one work order instead of a mixed bag (two Survey orders with a complication each, and a Restart
       // order), which changed what every station asks for, once, and nothing of any map.
       // Until the two were taken apart the first four quests drew their
       // numbers from the station's own sequence, so taking them out of it changed the furniture, the quests and
       // what lies about in every generated station, once. The rooms, corridors, doors and vents did not change.
-      'medium 9 mixed one': { map: 1574309035,
+      'medium 9 mixed one': { map: 3245303345,
         quests: '3:63.7:42 4:95:83.5 5:130.55:65.5 14:60.5:88.5' },
-      'large 7 sparse one': { map: 3054155276,
+      'large 7 sparse one': { map: 386066987,
         quests: '3:85.4:41.7 4:40:73.5 5:143.5:81.55 13:121.5:45.5 50:100.5:43.5' },
-      'massive 12 tight two': { map: 204994769,
+      'massive 12 tight two': { map: 3150654492,
         quests: '3:107.2:53.4 4:82.5:14 5:37.45:108.5 13:94.5:48.5 14:106.5:9.5 20:55.5:72.5 21:81.5:51.5 180:61.5:91.5 181:90.5:42.5' }
     };
     for (const name in before) {
