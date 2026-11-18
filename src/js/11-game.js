@@ -1101,7 +1101,7 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     stationLooseObjects: stationLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
-    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth, getLooseObjectValue: getLooseObjectValue, addBrokenGlassAt: addBrokenGlassAt, removeBrokenGlassFromPlay: removeBrokenGlassFromPlay,
+    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth, getLooseObjectTopY: getLooseObjectTopY, getLooseObjectValue: getLooseObjectValue, addBrokenGlassAt: addBrokenGlassAt, removeBrokenGlassFromPlay: removeBrokenGlassFromPlay,
     startOver: function () { resetWorldState(); }, // a new descent into the station that is loaded, as "Begin descent" does it
 
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,

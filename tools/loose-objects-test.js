@@ -180,6 +180,15 @@ function installLab() {
   const { browser, page, problems } = await openGame({ dev: true });
   const inGame = (callback, argument) => page.evaluate(callback, argument);
   await startGame(page, false);
+  // Two kinds that only this suite has, so that every check below that is made of every kind is made of a
+  // cylinder and of a cone as well: no kind of the game's own has one yet.
+  await inGame(() => {
+    const kinds = window.lastReturnDebug.looseObjectKinds;
+    kinds.testDrum = { label: 'test drum', mass: 5, value: 10, fragile: 0.3, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.25, grip: 0.5,
+      parts: [{ shape: 'cylinder', from: [0, -0.15, 0], to: [0, 0.15, 0], radius: 0.12 }] };
+    kinds.testCone = { label: 'test cone', mass: 2.5, value: 10, fragile: 0.3, material: 'case', loud: 1, lies: 'either', bulky: false, bounce: 0.2, grip: 0.6,
+      parts: [{ shape: 'cone', from: [0, -0.15, 0], to: [0, 0.3, 0], radius: 0.15 }] };
+  });
   await inGame(installLab);
   await inGame(() => window.looseLab.setBreakable(false));
 
@@ -240,6 +249,129 @@ function installLab() {
   });
   check('dropped from chest height, every kind lands, stays above the floor, comes to rest within four seconds and is heard one to four times', badDrops.length === 0, drops);
   check('a crate dropped flat lands flat (22 cm from its middle to the floor)', Math.abs(drops.crate.restsAt - 0.22) < 0.012, drops.crate.restsAt);
+
+  // --- cylinders and cones ---
+  const forms = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, result = {};
+    lab.stand(spot.x - 2.5, spot.z, Math.PI / 2);
+    const settle = function (kindKey, turn) {
+      d.clearLooseObjects();
+      const object = d.createLooseObject(kindKey, spot.x, 0.6, spot.z, 0);
+      if (turn) d.setLooseObjectOrientation(object, turn[0], turn[1], turn[2], turn[3]);
+      // Set down a finger above the floor, whichever way up: its lowest ball just clear of it.
+      let lowest = Infinity;
+      for (let ball = 0; ball < object.prepared.shellCount; ball++) {
+        const shell = object.prepared.shell, m = object.matrix;
+        lowest = Math.min(lowest, m[3] * shell[ball * 4] + m[4] * shell[ball * 4 + 1] + m[5] * shell[ball * 4 + 2] - shell[ball * 4 + 3]);
+      }
+      object.y = 0.02 - lowest;
+      d.wakeLooseObject(object);
+      d.simulate(4);
+      return object;
+    };
+    // Which way the object's own "up" points, and how high its own origin is (not its centre of mass).
+    const standing = function (object) {
+      const m = object.matrix, c = object.prepared;
+      return { up: lab.round(m[4]), originY: lab.round(object.y - (m[3] * c.centreX + m[4] * c.centreY + m[5] * c.centreZ)), isAtRest: object.isAsleep,
+        drifted: lab.round(Math.hypot(object.x - spot.x, object.z - spot.z)) };
+    };
+    // Turned about the line that points to your right: 0 is upright, a quarter turn lays it down, a half turn
+    // is upside down. Nothing is set down dead straight: three degrees off, each time.
+    const turned = function (angle) { return [Math.sin(angle / 2), 0, 0, Math.cos(angle / 2)]; };
+    const offStraight = 0.05;
+    result.drumUpright = standing(settle('testDrum', turned(offStraight)));
+    result.drumUpsideDown = standing(settle('testDrum', turned(Math.PI - offStraight)));
+    result.drumOnItsSide = standing(settle('testDrum', turned(Math.PI / 2)));
+    result.coneUpright = standing(settle('testCone', turned(offStraight)));
+    const coneOnItsSide = settle('testCone', turned(Math.PI / 2));
+    result.coneOnItsSide = standing(coneOnItsSide);
+    result.coneOnItsSide.top = lab.round(d.getLooseObjectTopY(coneOnItsSide));
+    // A canister is a capsule of much the same size: set down on its round end it does not stay there.
+    result.canisterUpright = standing(settle('canister', turned(offStraight)));
+
+    // What the scanner makes of them. Each hangs still in the air, upright, its own origin 1.2 m up; a pulse is
+    // fired at it and must land where the form itself is, not where the balls it touches with are.
+    const hang = function (kindKey) {
+      d.clearLooseObjects();
+      const centre = d.createLooseObject(kindKey, 0, 0, 0, 0).prepared;
+      d.clearLooseObjects();
+      const object = d.createLooseObject(kindKey, spot.x + centre.centreX, 1.2 + centre.centreY, spot.z + centre.centreZ, 0);
+      object.isAsleep = true;
+      return object;
+    };
+    const fire = function (fromX, fromY, fromZ, directionX, directionY, directionZ) {
+      const length = Math.hypot(directionX, directionY, directionZ);
+      const isHit = d.castScannerRay(fromX, fromY, fromZ, directionX / length, directionY / length, directionZ / length, 20);
+      return isHit && d.rayHit.looseObject ? { distance: lab.round(d.rayHit.distance), y: lab.round(d.rayHit.y), across: lab.round(Math.hypot(d.rayHit.x - spot.x, d.rayHit.z - spot.z)) } : null;
+    };
+    // The drum is 30 cm high and 24 across: from 1.05 to 1.35 m up.
+    hang('testDrum');
+    result.drumRays = {
+      side: fire(spot.x - 2, 1.2, spot.z, 1, 0, 0),              // square on to its side: 12 cm short of its middle line
+      top: fire(spot.x + 0.05, 2.2, spot.z, 0, -1, 0),           // straight down onto its flat top
+      overTheTop: fire(spot.x - 2, 1.36, spot.z, 1, 0, 0),       // a finger above the top: a capsule's round end would be there
+      pastTheSide: fire(spot.x - 2, 1.2, spot.z + 0.125, 1, 0, 0),
+      ontoTheTop: fire(spot.x - 1, 2.35, spot.z, 0.93, -1, 0),   // slanting down at the top: it lands on it 7 cm from the middle, at the top's own height
+      underneath: fire(spot.x, 0.3, spot.z + 0.1, 0, 1, 0)       // and from below, on its other flat end
+    };
+    // The cone is 45 cm high and 30 across its flat end: from 1.05 m up to its point at 1.5.
+    const cone = hang('testCone');
+    result.coneRays = {
+      low: fire(spot.x - 2, 1.14, spot.z, 1, 0, 0),              // a fifth of the way up it is four fifths as wide
+      high: fire(spot.x - 2, 1.41, spot.z, 1, 0, 0),             // four fifths of the way up, one fifth
+      point: fire(spot.x, 2.5, spot.z, 0, -1, 0),                // straight down onto the point
+      slope: fire(spot.x + 0.05, 2.5, spot.z, 0, -1, 0),         // 5 cm off the middle line it lands on the slope, a third of the way down
+      overThePoint: fire(spot.x - 2, 1.51, spot.z, 1, 0, 0),
+      besideThePoint: fire(spot.x - 2, 1.41, spot.z + 0.04, 1, 0, 0),
+      underneath: fire(spot.x + 0.1, 0.3, spot.z, 0, 1, 0)       // from below, on its flat end
+    };
+    // And lying any way at all: fired at from all round, every pulse that lands on it lands on its surface.
+    d.setLooseObjectOrientation(cone, 0.3, -0.5, 0.2, 0.79);
+    const m = cone.matrix, c = cone.prepared;
+    let landed = 0, offTheSurface = 0, worst = 0;
+    for (let shot = 0; shot < 400; shot++) {
+      const turn = shot * 2.399963, height = 1 - 2 * (shot + 0.5) / 400, ring = Math.sqrt(1 - height * height);
+      const aim = [(Math.sin(shot * 12.9898) * 43758.5453 % 1) * 0.2, (Math.sin(shot * 78.233) * 12543.123 % 1) * 0.2, (Math.sin(shot * 39.425) * 3758.31 % 1) * 0.2];
+      const from = [cone.x + Math.cos(turn) * ring * 1.5, cone.y + height * 1.1, cone.z + Math.sin(turn) * ring * 1.5];
+      const direction = [cone.x + aim[0] - from[0], cone.y + aim[1] - from[1], cone.z + aim[2] - from[2]];
+      const length = Math.hypot(direction[0], direction[1], direction[2]);
+      if (!d.castScannerRay(from[0], from[1], from[2], direction[0] / length, direction[1] / length, direction[2] / length, 20) || d.rayHit.looseObject !== cone) continue;
+      landed++;
+      // Where it landed, in the cone's own coordinates as its parts were given: how far up it, and how far from its middle line.
+      const offset = [d.rayHit.x - cone.x, d.rayHit.y - cone.y, d.rayHit.z - cone.z];
+      const local = [m[0] * offset[0] + m[3] * offset[1] + m[6] * offset[2] + c.centreX, m[1] * offset[0] + m[4] * offset[1] + m[7] * offset[2] + c.centreY, m[2] * offset[0] + m[5] * offset[1] + m[8] * offset[2] + c.centreZ];
+      const up = local[1] + 0.15, across = Math.hypot(local[0], local[2]);
+      const fromTheFlatEnd = Math.abs(up) + Math.max(0, across - 0.15), fromTheSlope = Math.abs(across - 0.15 * (1 - up / 0.45)) + Math.max(0, -up, up - 0.45);
+      const off = Math.min(fromTheFlatEnd, fromTheSlope);
+      worst = Math.max(worst, off);
+      if (off > 0.002) offTheSurface++;
+    }
+    result.coneAllRound = { landed: landed, offTheSurface: offTheSurface, worst: lab.round(worst) };
+    d.clearLooseObjects();
+    return result;
+  }, spot);
+  check('a cylinder stands on either of its flat ends, 15 cm from its middle to the floor, and stays where it was put',
+    [forms.drumUpright, forms.drumUpsideDown].every((drum) => drum.isAtRest && Math.abs(Math.abs(drum.up) - 1) < 0.002 && Math.abs(drum.originY - 0.15) < 0.012 && drum.drifted < 0.02) &&
+    forms.drumUpsideDown.up < 0, [forms.drumUpright, forms.drumUpsideDown]);
+  check('on its side the cylinder lies on its round, 12 cm from its middle line to the floor',
+    forms.drumOnItsSide.isAtRest && Math.abs(forms.drumOnItsSide.up) < 0.02 && Math.abs(forms.drumOnItsSide.originY - 0.12) < 0.012, forms.drumOnItsSide);
+  check('a cone stands on its flat end, and a capsule set down on its round end does not stay on it',
+    forms.coneUpright.isAtRest && forms.coneUpright.up > 0.998 && Math.abs(forms.coneUpright.originY - 0.15) < 0.012 && forms.coneUpright.drifted < 0.02 &&
+    Math.abs(forms.canisterUpright.up) < 0.5, [forms.coneUpright, forms.canisterUpright]);
+  check('laid on its side a cone comes to rest on its slope, point down a little, no higher than it is wide',
+    forms.coneOnItsSide.isAtRest && forms.coneOnItsSide.up < -0.1 && forms.coneOnItsSide.up > -0.6 && forms.coneOnItsSide.top < 0.31 && forms.coneOnItsSide.top > 0.2, forms.coneOnItsSide);
+  check('the scanner finds a cylinder where it is: its round side, its flat ends from above, aslant and below, and nothing above the top or beside it',
+    forms.drumRays.side && Math.abs(forms.drumRays.side.distance - 1.88) < 0.002 && forms.drumRays.top && Math.abs(forms.drumRays.top.y - 1.35) < 0.002 &&
+    forms.drumRays.overTheTop === null && forms.drumRays.pastTheSide === null &&
+    forms.drumRays.ontoTheTop && Math.abs(forms.drumRays.ontoTheTop.y - 1.35) < 0.002 && Math.abs(forms.drumRays.ontoTheTop.across - 0.07) < 0.002 &&
+    forms.drumRays.underneath && Math.abs(forms.drumRays.underneath.y - 1.05) < 0.002, forms.drumRays);
+  check('and a cone: as wide as it is at each height, its point, its slope from above, its flat end from below, and nothing beyond the point',
+    forms.coneRays.low && Math.abs(forms.coneRays.low.distance - 1.88) < 0.002 && forms.coneRays.high && Math.abs(forms.coneRays.high.distance - 1.97) < 0.002 &&
+    forms.coneRays.point && Math.abs(forms.coneRays.point.y - 1.5) < 0.002 && forms.coneRays.slope && Math.abs(forms.coneRays.slope.y - 1.35) < 0.002 &&
+    forms.coneRays.overThePoint === null && forms.coneRays.besideThePoint === null &&
+    forms.coneRays.underneath && Math.abs(forms.coneRays.underneath.y - 1.05) < 0.002 && Math.abs(forms.coneRays.underneath.across - 0.1) < 0.002, forms.coneRays);
+  check('turned any way and scanned from all round, every pulse that lands on the cone lands on its surface',
+    forms.coneAllRound.landed > 100 && forms.coneAllRound.offTheSurface === 0, forms.coneAllRound);
 
   const tumble = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab;

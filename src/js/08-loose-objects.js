@@ -13,8 +13,8 @@
 //
 // This is not a general physics engine, and is not meant to become one. There is one kind of contact (a small
 // ball against something solid), objects are never stacked into towers, and nothing is jointed. An object
-// is described as boxes, balls and capsules (`parts`); from those the game makes a shell of small balls that
-// does the touching, which is what lets a box land on a corner and tip over.
+// is described as boxes, balls, capsules, cylinders and cones (`parts`); from those the game makes a shell of
+// small balls that does the touching, which is what lets a box land on a corner and tip over.
 //
 // To add a kind of object: add an entry to LOOSE_OBJECT_KINDS. Nothing else needs to change.
 // Or make one in the workshop's object tool: that is a file in src/objects/ (see 08-workshop-objects.js).
@@ -40,6 +40,8 @@
 //              { shape: 'box', center: [x, y, z], half: [x, y, z] }
 //              { shape: 'ball', center: [x, y, z], radius: r }
 //              { shape: 'capsule', from: [x, y, z], to: [x, y, z], radius: r }   a rod with round ends
+//              { shape: 'cylinder', from: [x, y, z], to: [x, y, z], radius: r }  a rod with flat ends: it stands on either
+//              { shape: 'cone', from: [x, y, z], to: [x, y, z], radius: r }      flat and `radius` wide at `from`, a point at `to`
 //   use        for an object that does something when you press Q with it in the beam:
 //              { prompt: 'Arm the scan grenade', button: 'ARM', activate: function (object) { ... } }
 //              (`button` is what the phone's button for it says)
@@ -133,6 +135,7 @@ const LOOSE_OBJECT_KINDS = {
 
 const LOOSE_SHELL_BALL_RADIUS = 0.06;   // the largest ball in the shell that does a box's touching
 const LOOSE_SHELL_BALL_SPACING = 0.16;  // at most this far from one ball of the shell to the next
+const LOOSE_SHELL_POINT_RADIUS = 0.015; // the ball at the point of a cone is no bigger than this: the point is that blunt to the touch
 const LOOSE_MAXIMUM_CONTACTS = 24;
 const LOOSE_CONTACT_SLOP = 0.003;       // overlap that is left alone, so that an object at rest is not nudged every step
 
@@ -178,9 +181,71 @@ const looseCapsuleScratch = new Float32Array(7);
 // Preparing a kind: the shell of balls, the centre of mass, how hard it is to spin
 // ---------------------------------------------------------------------------
 
+// A cylinder or a cone. Down its middle goes a row of balls, each as big as fits there: that is what it rolls
+// on, straight for a cylinder and round in a circle for a cone. Round each flat end goes a ring of smaller ones,
+// set into the corner, and that is what it stands on. (A row of balls alone has round ends: a capsule.)
+// What the balls cannot fill is a sharp edge: the rim of a flat end is rounded off by the ball that sits in it,
+// and the point of a cone is as blunt as its last ball.
+function addShellBallsForRod(part, balls) {
+  const isCone = part.shape === 'cone', radius = Math.max(part.radius, 0.001);
+  let axisX = part.to[0] - part.from[0], axisY = part.to[1] - part.from[1], axisZ = part.to[2] - part.from[2];
+  let length = Math.sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ);
+  if (length < 0.001) { axisX = 0; axisY = 1; axisZ = 0; length = 0.001; } else { axisX /= length; axisY /= length; axisZ /= length; }
+  // Two directions across it, square to it and to each other.
+  const isUpright = Math.abs(axisY) > 0.98;
+  let sideX = isUpright ? 0 : axisZ, sideY = isUpright ? -axisZ : 0, sideZ = isUpright ? axisY : -axisX;
+  const sideLength = Math.sqrt(sideX * sideX + sideY * sideY + sideZ * sideZ);
+  sideX /= sideLength; sideY /= sideLength; sideZ /= sideLength;
+  const otherX = axisY * sideZ - axisZ * sideY, otherY = axisZ * sideX - axisX * sideZ, otherZ = axisX * sideY - axisY * sideX;
+  // A ball `along` the rod from its first end, `across` from its middle line, at `angle` round it.
+  const place = function (along, across, angle, ballRadius) {
+    const acrossSide = Math.cos(angle) * across, acrossOther = Math.sin(angle) * across;
+    balls.push([
+      part.from[0] + axisX * along + sideX * acrossSide + otherX * acrossOther,
+      part.from[1] + axisY * along + sideY * acrossSide + otherY * acrossOther,
+      part.from[2] + axisZ * along + sideZ * acrossSide + otherZ * acrossOther,
+      ballRadius]);
+  };
+  // How wide it is at a place along it. A ball against a sloping side sits further in than its own radius: by `slant` times that.
+  const slant = isCone ? Math.sqrt(length * length + radius * radius) / length : 1;
+  const widthAt = function (along) { return isCone ? radius * (1 - along / length) : radius; };
+  let endBallRadius; // the ball in the middle that lies against a flat end
+  if (isCone) {
+    endBallRadius = radius / (slant + radius / length);
+    const pointRadius = Math.max(0.001, Math.min(LOOSE_SHELL_POINT_RADIUS, endBallRadius * 0.5)), pointAlong = length - pointRadius;
+    // Each ball touches the side, and the next one is as much smaller as the cone is narrower there ...
+    let along = endBallRadius;
+    while (along < pointAlong && widthAt(along) / slant > pointRadius) {
+      place(along, 0, 0, widthAt(along) / slant);
+      along += widthAt(along) / slant * 1.2;
+    }
+    // ... down to the smallest, which go on as far as the point.
+    const steps = along < pointAlong ? Math.ceil((pointAlong - along) / (pointRadius * 1.2)) : 0;
+    for (let step = 0; step <= steps; step++) place(steps === 0 ? pointAlong : along + (pointAlong - along) * step / steps, 0, 0, pointRadius);
+  } else {
+    endBallRadius = Math.min(radius, length / 2);
+    const span = length - endBallRadius * 2, steps = span < 0.001 ? 0 : Math.ceil(span / (endBallRadius * 1.2));
+    for (let step = 0; step <= steps; step++) place(steps === 0 ? length / 2 : endBallRadius + span * step / steps, 0, 0, endBallRadius);
+  }
+  // The flat ends: rings of balls half that size, the outermost in the corner between the end and the side.
+  const rimRadius = Math.min(LOOSE_SHELL_BALL_RADIUS, endBallRadius * 0.5);
+  for (let endIndex = 0; endIndex < (isCone ? 1 : 2); endIndex++) {
+    const along = endIndex === 0 ? rimRadius : length - rimRadius;
+    const across = widthAt(along) - rimRadius * slant;
+    const ringCount = Math.max(1, Math.ceil(across / LOOSE_SHELL_BALL_SPACING));
+    for (let ring = 1; ring <= ringCount; ring++) {
+      const ringAcross = across * ring / ringCount;
+      const count = Math.max(6, Math.ceil(ringAcross * TWO_PI / LOOSE_SHELL_BALL_SPACING));
+      for (let index = 0; index < count; index++) place(along, ringAcross, index / count * TWO_PI, rimRadius);
+    }
+  }
+}
+
 function addShellBallsForPart(part, balls) {
   if (part.shape === 'ball') {
     balls.push([part.center[0], part.center[1], part.center[2], part.radius]);
+  } else if (part.shape === 'cylinder' || part.shape === 'cone') {
+    addShellBallsForRod(part, balls);
   } else if (part.shape === 'capsule') {
     const deltaX = part.to[0] - part.from[0], deltaY = part.to[1] - part.from[1], deltaZ = part.to[2] - part.from[2];
     const length = Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
@@ -244,7 +309,7 @@ function prepareLooseObjectKind(kindKey) {
   const parts = kind.parts.map(function (part) {
     if (part.shape === 'box') return { shape: 'box', centerX: part.center[0] - centreX, centerY: part.center[1] - centreY, centerZ: part.center[2] - centreZ, halfX: part.half[0], halfY: part.half[1], halfZ: part.half[2] };
     if (part.shape === 'ball') return { shape: 'ball', centerX: part.center[0] - centreX, centerY: part.center[1] - centreY, centerZ: part.center[2] - centreZ, radius: part.radius };
-    return { shape: 'capsule', radius: part.radius,
+    return { shape: part.shape, radius: part.radius, // a capsule, a cylinder or a cone
       fromX: part.from[0] - centreX, fromY: part.from[1] - centreY, fromZ: part.from[2] - centreZ,
       toX: part.to[0] - centreX, toY: part.to[1] - centreY, toZ: part.to[2] - centreZ };
   });
@@ -258,7 +323,7 @@ function prepareLooseObjectKind(kindKey) {
       partsRadius = Math.max(partsRadius, Math.sqrt(part.centerX * part.centerX + part.centerY * part.centerY + part.centerZ * part.centerZ) + part.radius);
     } else {
       partsRadius = Math.max(partsRadius, Math.sqrt(part.fromX * part.fromX + part.fromY * part.fromY + part.fromZ * part.fromZ) + part.radius,
-        Math.sqrt(part.toX * part.toX + part.toY * part.toY + part.toZ * part.toZ) + part.radius);
+        Math.sqrt(part.toX * part.toX + part.toY * part.toY + part.toZ * part.toZ) + (part.shape === 'cone' ? 0 : part.radius));
     }
   }
   kind.prepared = {
@@ -459,8 +524,16 @@ function isPointOnLooseObject(object, x, y, z) {
       // How far from the rod's middle line.
       const alongX = part.toX - part.fromX, alongY = part.toY - part.fromY, alongZ = part.toZ - part.fromZ;
       const lengthSquared = alongX * alongX + alongY * alongY + alongZ * alongZ;
-      const share = lengthSquared > 0 ? clampNumber(((localX - part.fromX) * alongX + (localY - part.fromY) * alongY + (localZ - part.fromZ) * alongZ) / lengthSquared, 0, 1) : 0;
-      const reach = part.radius + slack;
+      let share = lengthSquared > 0 ? ((localX - part.fromX) * alongX + (localY - part.fromY) * alongY + (localZ - part.fromZ) * alongZ) / lengthSquared : 0;
+      let reach = part.radius + slack;
+      if (part.shape === 'capsule') {
+        share = clampNumber(share, 0, 1); // round ends: as far from the nearer end as from the line
+      } else {
+        // Flat ends: nothing of it lies beyond them. And a cone is as wide as it is at that place.
+        const beyond = Math.max(-share, share - 1, 0) * Math.sqrt(lengthSquared);
+        if (beyond > slack) continue;
+        if (part.shape === 'cone') reach = part.radius * (1 - clampNumber(share, 0, 1)) + slack;
+      }
       if (Math.pow(localX - part.fromX - alongX * share, 2) + Math.pow(localY - part.fromY - alongY * share, 2) + Math.pow(localZ - part.fromZ - alongZ * share, 2) <= reach * reach) return true;
     }
   }
@@ -510,8 +583,17 @@ function getLooseObjectTopY(object) {
     } else if (part.shape === 'ball') {
       reachUp = Math.max(reachUp, matrix[3] * part.centerX + matrix[4] * part.centerY + matrix[5] * part.centerZ + part.radius);
     } else {
-      reachUp = Math.max(reachUp, matrix[3] * part.fromX + matrix[4] * part.fromY + matrix[5] * part.fromZ + part.radius,
-        matrix[3] * part.toX + matrix[4] * part.toY + matrix[5] * part.toZ + part.radius);
+      const fromUp = matrix[3] * part.fromX + matrix[4] * part.fromY + matrix[5] * part.fromZ;
+      const toUp = matrix[3] * part.toX + matrix[4] * part.toY + matrix[5] * part.toZ;
+      let fromReach = part.radius, toReach = part.radius;
+      if (part.shape !== 'capsule') {
+        // A flat end reaches up by how far it is tipped: not at all on a rod that stands, by its radius on one that lies.
+        const length = Math.sqrt(Math.pow(part.toX - part.fromX, 2) + Math.pow(part.toY - part.fromY, 2) + Math.pow(part.toZ - part.fromZ, 2)) || 1;
+        const upShare = (toUp - fromUp) / length;
+        fromReach = part.radius * Math.sqrt(Math.max(0, 1 - upShare * upShare));
+        toReach = part.shape === 'cone' ? 0 : fromReach;
+      }
+      reachUp = Math.max(reachUp, fromUp + fromReach, toUp + toReach);
     }
   }
   return object.y + reachUp;
@@ -641,6 +723,9 @@ function intersectRayWithLooseObject(object, originX, originY, originZ, directio
       distance = intersectRayWithLooseBox(part, ray);
     } else if (part.shape === 'ball') {
       distance = intersectRayWithSphere(part.centerX, part.centerY, part.centerZ, part.radius,
+        ray.originX, ray.originY, ray.originZ, ray.directionX, ray.directionY, ray.directionZ);
+    } else if (part.shape === 'cylinder' || part.shape === 'cone') {
+      distance = intersectRayWithTaperedRod(part.fromX, part.fromY, part.fromZ, part.toX, part.toY, part.toZ, part.radius, part.shape === 'cone' ? 0 : part.radius,
         ray.originX, ray.originY, ray.originZ, ray.directionX, ray.directionY, ray.directionZ);
     } else {
       const capsule = looseCapsuleScratch;

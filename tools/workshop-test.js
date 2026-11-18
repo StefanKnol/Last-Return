@@ -372,6 +372,41 @@ function checkSourcePatching() {
     await setNumber('workshop-part-size1', 0.3);
     check('a size typed in is the size of the box', (await objectState()).parts[0].half[1] === 0.15);
 
+    // --- the other basic forms: a cylinder (a rod with flat ends) and a cone ---
+    const shapeChoices = await page.$$eval('#workshop-add-shape option', (options) => options.map((option) => option.value));
+    check('a box, a ball, a capsule, a cylinder or a cone can be added', shapeChoices.join() === 'box,ball,capsule,cylinder,cone', shapeChoices);
+    await page.selectOption('#workshop-add-shape', 'cylinder');
+    await page.click('#workshop-add-part');
+    await frames();
+    const withCylinder = await objectState();
+    await page.selectOption('#workshop-add-shape', 'cone');
+    await page.click('#workshop-add-part');
+    await frames();
+    const withCone = await objectState();
+    const cylinderPart = withCylinder.parts[2], conePart = withCone.parts[3];
+    check('a cylinder is added standing on top of what is there, and a cone on the flat end of the cylinder: nothing is left for a round end that is not there',
+      withCylinder.parts.length === 3 && cylinderPart.shape === 'cylinder' && withCylinder.selected === 2 && Math.abs(cylinderPart.to[1] - cylinderPart.from[1] - 0.2) < 1e-6 &&
+      Math.abs(cylinderPart.from[1] - (withRod.parts[1].to[1] + withRod.parts[1].radius)) < 1e-6 &&
+      withCone.parts.length === 4 && conePart.shape === 'cone' && withCone.selected === 3 && conePart.from[1] === cylinderPart.to[1] && conePart.to[1] > conePart.from[1] && conePart.radius > 0, withCone.parts);
+    const selectedHeading = await page.$eval('#workshop-selected', (heading) => heading.textContent);
+    check('the selected cone says which end is flat and which is the point', /Cone/.test(selectedHeading) &&
+      (await page.locator('#workshop-part-from1').count()) === 1 && (await page.locator('#workshop-part-to1').count()) === 1 && (await page.locator('#workshop-part-radius').count()) === 1 &&
+      /The flat end/.test(await page.locator('#workshop-part-from1').textContent()) && /The point/.test(await page.locator('#workshop-part-to1').textContent()), selectedHeading);
+    await setNumber('workshop-part-radius', 0.06);
+    await page.locator('#workshop-part-radius input[type="number"]').blur(); // keys typed into a field are the field's
+    await page.keyboard.press('Shift+KeyR');
+    const tippedCone = (await objectState()).parts[3];
+    check('its flat end can be made wider or narrower, and Shift+R tips it over about its middle: it lies along x, as long as it was',
+      tippedCone.radius === 0.06 && Math.abs(Math.abs(tippedCone.to[0] - tippedCone.from[0]) - (conePart.to[1] - conePart.from[1])) < 1e-6 && Math.abs(tippedCone.to[1] - tippedCone.from[1]) < 1e-6, tippedCone);
+    await page.keyboard.press('Control+z');
+    const shell = await inPage(() => {
+      const body = window.lastReturnDebug.objectWorkshop.body, prepared = body.prepared, shell = prepared.shell;
+      let allFinite = true;
+      for (let index = 0; index < prepared.shellCount * 4; index++) if (!Number.isFinite(shell[index])) allFinite = false;
+      return { balls: prepared.shellCount, allFinite: allFinite, reach: Math.round(prepared.boundsRadius * 1000) / 1000 };
+    });
+    check('with a cylinder and a cone on it the object still touches with a modest number of balls', shell.allFinite && shell.balls > 20 && shell.balls < 120 && shell.reach < 1, shell);
+
     // --- trying it: let go of, it falls by the game's own steps ---
     await page.click('#workshop-drop-object');
     await frames(6);
@@ -446,15 +481,16 @@ function checkSourcePatching() {
     await waitForReload(() => page.click('#workshop-save-object'));
     await frames();
     const savedObject = fs.existsSync(objectPath) ? JSON.parse(fs.readFileSync(objectPath, 'utf8')) : null;
-    check('saving writes src/objects/testThing.json with both parts in it',
+    check('saving writes src/objects/testThing.json with all four parts in it, the cylinder and the cone among them',
       savedObject !== null && savedObject.label === 'test thing' && savedObject.mass === 3 && savedObject.onTheFloor === 10 &&
       savedObject.value === 100 && savedObject.fragile === 0.6 && savedObject.shattersAt === 0 && savedObject.material === 'case' &&
-      savedObject.parts.length === 2 && savedObject.parts[0].half[1] === 0.15 && savedObject.key === undefined, savedObject);
+      savedObject.parts.length === 4 && savedObject.parts[0].half[1] === 0.15 && savedObject.parts[2].shape === 'cylinder' && savedObject.parts[3].shape === 'cone' &&
+      savedObject.parts[3].radius === 0.06 && savedObject.key === undefined, savedObject);
     const afterObjectSave = await objectState();
     afterObjectSave.kind = await inPage(() => { const kind = window.lastReturnDebug.looseObjectKinds.testThing; return kind ? { label: kind.label, mass: kind.mass, parts: kind.parts.length, fragile: kind.fragile, shatters: kind.shattersAt !== undefined } : null; });
     check('after the reload the workshop is open on the saved object, with nothing unsaved, and the game knows the kind',
       afterObjectSave.key === 'testThing' && afterObjectSave.savedKey === 'testThing' && !afterObjectSave.isDirty &&
-      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 2 &&
+      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 4 &&
       afterObjectSave.kind.fragile === 0.6 && afterObjectSave.kind.shatters === false, afterObjectSave);
 
     // --- the saved object lies about in generated stations, where it should, and those can still be finished ---
