@@ -20,10 +20,11 @@
   - random objectives and rooms tied to location types? pumping annex has shaft 9, others might not. 
 - captions as setting, not for normal play (and then for more things, for accessibility)
 - scan colors customizable (3 levels, close, medium, far)
-- 
+
 
 - more random objectives
   - item collection, multi-stage generators, activate and escape
+    - in drop off bays damage on items off, so they're safe inside
   - only relevant objectives on map
   - fuel not always required (already a thing it seems)
   - multiple generators, could be only objective (3 or more if only objective, random fuel required per generator)
@@ -34,7 +35,7 @@
     - multiple stages, lower levels unlock with stages
       - stages generated as they unlock? not all at once? bigger levels but performant
       - only load level around player, not whole level for performance
-    - shop at collection points
+    - shop at collection points or between levels (vending machines with limited stock and items randomly as well?)
 
 - more monsters to vary threat or increase it
   - lidar monster produces dots around it on everything, but can see the player
