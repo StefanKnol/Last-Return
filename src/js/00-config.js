@@ -382,6 +382,7 @@ const TUNING = {
   stillObservedHoldSeconds: 2.3,    // a dummy stays frozen this long after the last pulse that touched it.
                                     // Higher lets you look away for longer.
   stillKillDistance: 0.6,
+  playerImprintSeconds: 2.5,        // how long the points a scan leaves on another player stay visible: they do not stand still
   stillImprintSeconds: 22,          // how long the points a scan leaves on a dummy stay visible (maximum 63).
                                     // Long imprints mean old outlines linger and the room looks more crowded than it is.
 

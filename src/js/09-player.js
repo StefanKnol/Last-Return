@@ -161,6 +161,10 @@ function resetPlayerToStart() {
 
 function requestPointerLockOnCanvas() {
   if (input.isTouchDevice || input.isPointerLocked) return;
+  // A browser only hands over the mouse when the player has just clicked or pressed a key. Asked at any other
+  // moment (the host has begun, and you go down with them) it refuses, and that refusal says nothing about
+  // whether capture works here. So it is not asked: the next click on the game takes the mouse.
+  if (navigator.userActivation && !navigator.userActivation.isActive) return;
   const canvas = renderer.canvas;
   if (!canvas.requestPointerLock) { input.useDragLook = true; return; }
   try {

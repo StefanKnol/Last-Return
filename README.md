@@ -21,19 +21,40 @@ npm run build
 
 then open `index.html` in a current desktop or mobile browser.
 
-With Docker, which builds the page and serves it:
+To play it with others, the page has to come from the game's own server, which also keeps the lobbies (see [Descending together](#descending-together)):
+
+```bash
+npm install
+npm run build
+npm start
+```
+
+then open http://localhost:8080. Or with Docker, which builds the page and serves it the same way:
 
 ```bash
 docker build -t last-return .
 ```
 
 ```bash
-docker run --rm -p 8080:80 last-return
+docker run --rm -p 8080:8080 last-return
 ```
 
-then open http://localhost:8080.
-
 Use headphones. Sound is how you find out where it is.
+
+## Descending together
+
+**This is new and experimental.** On a page that comes from the game's own server (`npm start`, `npm run dev`, the Docker image, or [last-return.sknol.com](https://last-return.sknol.com)), the title screen has "Descend together" under the Begin button. One player opens a lobby and gets a four-letter code. Up to three others type the code and join. The host chooses the station and the threat level, and when the host begins, everyone in the lobby goes down at once. (A browser only hands the mouse to a page when its player has just clicked, so the others click once on the game to take control of their scanner; the game says so.)
+
+What you share, so far:
+
+- **The station.** Everyone goes down into the host's: the same seed, size, layout and levels, built the same to the tile, at the host's threat level. Everyone has to be on the same build of the game, and a lobby refuses anyone who is not.
+- **Each other.** The others are bodies in the dark like everything else down there: you see one only where a beam lands on it, in a colour nothing else has. What their scanners light up is lit for you too, more thinly than your own, and goes onto your map.
+
+What you do not share yet: each of you still has your own Hollow, your own doors and your own work order, and nothing of yours hunts the others or opens for them. A door that is shut for you can be open for them, so they will sometimes walk through one. You cannot hear each other. All of that is the next step, in which the host's game becomes everybody's.
+
+When the host leaves, the lobby is over and everyone still down there plays on alone. Going back to the title screen leaves the lobby.
+
+The server takes no part in the game. It hands on what one browser in a lobby says to the others, which is where each player is and where their scanner points, fifteen times a second. A page opened from a file or served by anything else (GitHub Pages, any static host) has no lobbies and does not mention them. `npm run dev` keeps lobbies too, for two windows on the same machine: it listens on this machine only, both windows have to be the same page (the workshop build and the plain game at `/game` are different builds), and a rebuild reloads the pages and so ends their lobby. A server can also be told to keep none: `LAST_RETURN_LOBBIES=off`, or `lobbies.enabled=false` in the Helm chart. One pod is all the chart allows while lobbies are on, because a lobby lives in the memory of the pod that opened it, and a new deploy ends the lobbies that were open.
 
 ## Stations
 
@@ -321,7 +342,7 @@ A server can say what it is called, and the game then puts that in front of "How
 helm upgrade last-return ./chart --namespace last-return --reset-then-reuse-values --set serverName="Official server"
 ```
 
-The name is written into the page when the container starts. Left out, a report gives the address alone.
+The server writes the name into the page it serves. Left out, a report gives the address alone.
 
 ## Debug mode
 
@@ -475,12 +496,14 @@ The game is plain JavaScript and WebGL 2 with no libraries and no asset files.
 | `src/js/09-player.js` | Keyboard, mouse and touch input, movement, the scanner |
 | `src/js/10-interface.js` | HUD, map, messages, captions and overlay screens |
 | `src/js/11-game.js` | Objectives, checkpoints, death, ending and the main loop |
+| `src/js/11-together.js` | Descending together: the lobby on the title screen, the others as bodies a beam lands on, and what their scanners light up |
 | `src/js/12-debug.js` | The little the game itself knows about debug mode: switches that are all off, and hooks that stay empty |
 | `src/js/13-start.js` | One line that starts the game once everything above is loaded |
 | `src/rooms/*.json` | Rooms made in the workshop, one file each (the folder appears with the first one you save) |
 | `src/objects/*.json` | Loose objects made in the workshop, one file each (likewise) |
 | `src/dev/` | Debug mode (`10-debug.js`: the panel, its switches and what they draw) and the workshop with its room, object, creature and sound tools. Only in the `npm run dev` build, never in `index.html` |
-| `tools/dev-server.js` | `npm run dev`: builds, serves, reloads the page when the source changes, and writes what the workshop saves |
+| `server/server.js` | `npm start`: serves the page and keeps the lobbies, handing on what one browser in a lobby says to the others. The only part that needs a package (`ws`) |
+| `tools/dev-server.js` | `npm run dev`: builds, serves, reloads the page when the source changes, writes what the workshop saves, and keeps lobbies for two windows on this machine |
 
 A few details worth knowing if you change things:
 
@@ -543,6 +566,8 @@ Then the workshop: on a copy of `src/` in a temporary folder it builds a room by
 
 It ends with more than one player. Nobody else can join yet, so the second player is a record put into the list by hand: a door far from you opens for them and shuts when they have gone, the Hollow hears them and hunts them while you stand silent at the lift, walking distance is measured from whoever is nearer, the Stills stay put while nobody is in their rooms and walk at the other player once somebody is, and neither of them catching somebody else is your death.
 
+And then two players for real. The server first, by itself: it serves the page with its name and the place of its lobbies written in, and none when lobbies are off; a page from somewhere else cannot open a lobby; a code that is no lobby, another build of the game, a fifth player and a lobby that has already gone down are each refused; what one says the others hear; only the host can begin; when the host leaves the lobby is over; and a member that says far too much is shown the door. Then two browsers: one opens a lobby, the other joins with the code, the host begins and the other goes down with them without a click of their own, both are in the same station built the same to the tile at the host's threat level, each is shown where the other says they are, a pulse lands on the other's body, what the host's scanner lights up arrives on the other's screen and stops when the host stops, and when the host leaves the other stays down there alone.
+
 Every pull request gets both: `.github/workflows/ci.yml` builds the page as it ships and runs `npm test`, on a machine that draws a good deal slower than a desktop. A check that only passes on a fast machine is a check that depends on the clock, and fails there.
 
 ```bash
@@ -604,6 +629,8 @@ The quest system is checked for doing what each entry says, and for leaving ever
 The small generators are checked for their rules and for where they and their cans stand. Whether two or three of them make a descent tenser or only longer has not been played, and neither has how loud "loud" should be: `noiseRadiusGeneratorStart` in `src/js/00-config.js` is a first guess. Their two sounds were tuned by measuring, not by ear. Dispatch's line for them (`generatorsWanted`) has no recording yet.
 
 The complications and the stations with two or three keycards are checked the same way: they can always be finished, and the rules do what this page says. Whether a second walk for a fuel can is dread or a chore has not been played. Dispatch's five new lines for them (`lowerKeycardTaken`, `generatorNoFuel`, `coresWanted`, `winchBreakerOpen`, `breakerClosed`) have no recordings yet and show as text.
+
+Descending together is at its first stage and has been played by nobody. Two browsers reach the same station and see each other, and that is checked. Everything that makes it one game and not several is still to come: the host's Hollow, doors and quests for everyone, dying and being brought back, things carried between you. How the others look (a calibration dummy in another colour, both arms up while scanning), how much of their scanning you should see (`TOGETHER_ECHO_RAY_SHARE` in `src/js/11-together.js`), and whether fifteen positions a second look smooth over a real connection, all need two people and a network between them.
 
 ## License
 

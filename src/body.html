@@ -140,6 +140,21 @@
           <button type="button" id="button-begin" class="button-primary">Begin descent</button>
           <span class="headphones-note">Headphones strongly recommended. Sound tells you where it is.</span>
         </div>
+        <fieldset id="together-options" class="difficulty-group together-group" hidden>
+          <legend>Descend together · experimental</legend>
+          <div id="together-apart" class="station-options">
+            <button type="button" id="button-host-lobby" class="button-quiet">Open a lobby</button>
+            <label>or join one
+              <input type="text" id="together-code" maxlength="4" size="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="code">
+            </label>
+            <button type="button" id="button-join-lobby" class="button-quiet">Join</button>
+          </div>
+          <div id="together-lobby" class="station-options" hidden>
+            <span class="together-code">Lobby <b id="together-lobby-code"></b></span>
+            <button type="button" id="button-leave-lobby" class="button-quiet">Leave</button>
+          </div>
+          <p id="together-status" class="difficulty-description together-status" aria-live="polite"></p>
+        </fieldset>
       </header>
 
       <aside class="field-card">

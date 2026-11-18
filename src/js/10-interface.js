@@ -43,7 +43,9 @@ function initializeInterface() {
     'button-pause-restart', 'reader-source', 'reader-heading', 'reader-body', 'button-close-reader', 'death-title',
     'death-lines', 'button-retry', 'button-death-restart', 'ending-stats', 'ending-manifest', 'button-ending-restart',
     'button-ending-uncharted', 'station-options', 'work-order-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem',
-    'title-build', 'link-report-problem-title'
+    'title-build', 'link-report-problem-title',
+    'together-options', 'together-apart', 'together-lobby', 'together-lobby-code', 'together-code', 'together-status',
+    'button-host-lobby', 'button-join-lobby', 'button-leave-lobby'
   ];
   for (const elementId of elementIds) interfaceState.elements[elementId] = getElement(elementId);
 
@@ -55,7 +57,7 @@ function initializeInterface() {
   clearMap();
 
   const elements = interfaceState.elements;
-  elements['button-begin'].addEventListener('click', function () { beginNewGame(); });
+  elements['button-begin'].addEventListener('click', function () { beginFromTitle(); });
   // Which build this is, and "Report a problem", on the title screen and the pause screen. The address is worked
   // out at the moment the link is reached for, so it carries the settings as they are then.
   elements['title-build'].textContent = 'Version: ' + describeBuild();
@@ -299,7 +301,7 @@ function clearMap() {
 }
 
 function plotPointOnMap(x, z, surfaceClass) {
-  if (surfaceClass === SURFACE_HOLLOW || surfaceClass === SURFACE_STILL || surfaceClass === SURFACE_CEILING) return;
+  if (surfaceClass === SURFACE_HOLLOW || surfaceClass === SURFACE_STILL || surfaceClass === SURFACE_PLAYER || surfaceClass === SURFACE_CEILING) return;
   const pixelX = Math.floor(x * MAP_PIXELS_PER_METRE), pixelZ = Math.floor(z * MAP_PIXELS_PER_METRE);
   if (pixelX < 0 || pixelZ < 0 || pixelX >= MAP_WIDTH || pixelZ >= MAP_HEIGHT) return;
   const data = interfaceState.mapImageData.data;

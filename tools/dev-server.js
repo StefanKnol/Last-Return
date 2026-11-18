@@ -5,9 +5,12 @@
 //     so a number changed in the source shows up in the workshop a moment later
 //   - lets the workshop save: a room becomes src/rooms/<key>.json, a loose object src/objects/<key>.json,
 //     and creature proportions are written into the FIGURE_PROPORTIONS_... blocks of src/js/04-figures.js
+//   - keeps lobbies, as the real server does (server/server.js), so that "Descend together" can be tried
+//     between two windows on this machine. Both have to be the same page: the workshop build and the plain
+//     game are different builds, and a lobby holds one. A rebuild reloads the pages, which ends their lobby.
 //
-// Node built-ins only. It listens on this machine only (127.0.0.1), and only the workshop page it
-// serves itself can ask it to write anything.
+// It listens on this machine only (127.0.0.1), and only the workshop page it serves itself can ask it to
+// write anything. The lobbies need the `ws` package (npm install); everything else is Node built-ins.
 //
 // Options: --port 4471 (or PORT=...), --root <project folder> (used by the tests).
 const fs = require('fs');
@@ -15,6 +18,7 @@ const http = require('http');
 const path = require('path');
 const vm = require('vm');
 const { build } = require('../build.js');
+const { keepLobbies, fillInPage } = require('../server/server.js');
 
 const DEFAULT_PORT = 4471;
 const ROOM_KEY_PATTERN = /^[a-z][A-Za-z0-9]{1,30}$/;
@@ -217,7 +221,7 @@ function startDevServer(options) {
       return;
     }
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    response.end(fs.readFileSync(filePath));
+    response.end(fillInPage(fs.readFileSync(filePath, 'utf8'), '', true)); // with where the lobbies are
   };
 
   const actions = {
@@ -267,6 +271,8 @@ function startDevServer(options) {
     }
   });
 
+  const lobbies = keepLobbies(server);
+
   rebuild('start');
   return new Promise(function (resolve, reject) {
     server.on('error', reject);
@@ -278,6 +284,7 @@ function startDevServer(options) {
           clearTimeout(rebuildTimer);
           for (const watcher of watchers) watcher.close();
           for (const response of listeners) response.end();
+          lobbies.close();
           return new Promise(function (done) { server.close(done); server.closeAllConnections(); });
         }
       });
@@ -295,6 +302,7 @@ if (require.main === module) {
     console.log('');
     console.log('Workshop:   ' + server.address + '   (the game, with a "Workshop" button on the title screen)');
     console.log('Plain game: ' + server.address + 'game');
+    console.log('Lobbies:    open either page in two windows to descend together on this machine.');
     console.log('Watching src/ and assets/. Ctrl+C stops.');
   }).catch(function (error) {
     console.error(error.code === 'EADDRINUSE' ? 'Port ' + port + ' is in use. Try: npm run dev -- --port ' + (port + 1) : error.message);

@@ -56,7 +56,7 @@ const gamePagePath = path.join(__dirname, '..', 'index.html');
 const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 
 async function openGame(options) {
-  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false }, options || {});
+  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '' }, options || {});
   const browser = await chromium.launch({
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
   });
@@ -73,7 +73,8 @@ async function openGame(options) {
   });
   page.on('pageerror', (error) => problems.push('page error: ' + error.message));
   await page.addInitScript(installLetTheBrowserCatchUp);
-  await page.goto('file://' + (settings.dev ? devPagePath : gamePagePath));
+  // `address` opens the game where a server has it (together-test.js); otherwise it is opened from its file.
+  await page.goto(settings.address || 'file://' + (settings.dev ? devPagePath : gamePagePath));
   await page.waitForFunction((needsDebugMode) => Boolean(window.lastReturnDebug && (!needsDebugMode || window.lastReturnDebug.setDebugOption)), settings.dev);
   return { browser, page, problems };
 }

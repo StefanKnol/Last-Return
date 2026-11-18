@@ -1,8 +1,8 @@
 apiVersion: v2
 name: last-return
-description: Last Return, served as one static page by nginx.
+description: Last Return, one page and the lobbies of players who descend together, served by a small Node server.
 type: application
 # The chart's own version. Bump it when the templates change.
-version: 0.2.0
+version: 0.3.0
 # The game version this chart was written against. The image tag is what decides what runs.
-appVersion: "1.14.0"
+appVersion: "1.23.0"

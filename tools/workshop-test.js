@@ -492,6 +492,18 @@ function checkSourcePatching() {
     const left = await inPage(() => ({ mode: window.lastReturnDebug.game.mode, isOpen: window.lastReturnDebug.workshop.isOpen, titleShown: !document.getElementById('screen-title').hidden }));
     check('"Leave" goes back to the title screen', left.mode === 'title' && !left.isOpen && left.titleShown, left);
 
+    // --- lobbies: the dev server keeps them too, so two windows on this machine can descend together ---
+    const secondPage = await context.newPage();
+    await secondPage.goto(server.address);
+    await secondPage.waitForFunction(() => Boolean(window.lastReturnDebug));
+    await page.click('#button-host-lobby');
+    await page.waitForFunction(() => window.lastReturnDebug.together.code !== '');
+    await secondPage.fill('#together-code', await page.textContent('#together-lobby-code'));
+    await secondPage.click('#button-join-lobby');
+    const bothIn = await page.waitForFunction(() => window.lastReturnDebug.together.memberIds.length === 2, null, { timeout: 10000 }).then(() => true, () => false);
+    check('two windows of the dev page can open a lobby and join it', bothIn, await secondPage.textContent('#together-status'));
+    await secondPage.close();
+
     check('no script errors along the way', problems.length === 0, problems);
   } catch (error) {
     console.log('Test run crashed:', error);

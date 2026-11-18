@@ -11,12 +11,20 @@ image:
 # Only needed if the registry stops serving pulls anonymously.
 imagePullSecrets: []
 
+# One, and no more while lobbies are on: a lobby lives in the memory of the pod that opened it, and a player sent
+# to another pod would find no lobby there. (The chart refuses more.) Every deploy starts a new pod, and with
+# the old one go the lobbies that were open in it: whoever was down there together plays on alone.
 replicaCount: 1
+
+# "Descend together" on the title screen: players open a lobby, hand each other its four-letter code, and go down
+# into the same station. The server only passes on what their browsers say to each other. Off, the game is
+# served to be played alone and the title screen does not mention it.
+lobbies:
+  enabled: true
 
 # What this server calls itself in the bug reports filed from the game: with "Official server", a report's
 # "How you played" reads "Official server · Online at <host>/". Empty, it gives the address alone.
-# Letters, digits, spaces, dots, underscores and hyphens, 40 at most. Needs an image from build.js with the
-# `last-return-server` line in its page; an older image ignores it.
+# Letters, digits, spaces, dots, underscores and hyphens, 40 at most.
 serverName: ""
 
 service:
@@ -38,10 +46,10 @@ ingress:
   tlsSecretName: ""
   annotations: {}
 
-# One 2 MB file and nginx: this is generous.
+# One 3 MB page held in memory, and a Node process that passes short messages along.
 resources:
   requests:
     cpu: 10m
-    memory: 16Mi
-  limits:
     memory: 64Mi
+  limits:
+    memory: 192Mi

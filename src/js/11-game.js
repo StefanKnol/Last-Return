@@ -203,14 +203,27 @@ function chooseSeedFromText(text) {
   return 1 + hash % 999999999;
 }
 
-function beginNewGame() {
+// What a descent is of: which station, and at what threat level. This is what is chosen on the title screen,
+// with the seed settled. Players who descend together all go down with the host's (11-together.js).
+function describeChosenDescent() {
+  return {
+    kind: settings.station === 'generated' ? 'generated' : 'classic',
+    seed: chooseSeedFromText(settings.seedText), sizeKey: settings.stationSize, layoutKey: settings.stationLayout, levelsKey: settings.stationLevels,
+    workOrders: getAllowedWorkOrders(),
+    difficultyKey: settings.difficulty, customDifficulty: settings.customDifficulty
+  };
+}
+
+// `descent` is what to go down into (see describeChosenDescent): left out, what the title screen says.
+function beginNewGame(descent) {
+  descent = descent || describeChosenDescent();
   initializeAudioEngine();
   setMasterVolume(settings.volume);
   suspendAudio(false);
-  game.difficulty = getChosenDifficulty();
+  game.difficulty = descent.difficultyKey === 'custom' ? buildCustomDifficulty(descent.customDifficulty) : (DIFFICULTY_PRESETS[descent.difficultyKey] || DIFFICULTY_PRESETS.standard);
   const quality = QUALITY_PRESETS[settings.quality];
   if (pointCloud.capacity !== quality.maximumPoints) allocatePointCloud(quality.maximumPoints);
-  if (settings.station === 'generated') loadStation('generated', chooseSeedFromText(settings.seedText), settings.stationSize, settings.stationLayout, settings.stationLevels, undefined, getAllowedWorkOrders());
+  if (descent.kind === 'generated') loadStation('generated', descent.seed, descent.sizeKey, descent.layoutKey, descent.levelsKey, undefined, descent.workOrders);
   else if (level.kind !== 'classic') loadStation('classic', 0);
   resetWorldState();
   requestPointerLockOnCanvas();
@@ -348,6 +361,7 @@ function returnToTitle() {
   silenceGameplaySounds();
   if (debugHooks.hidePanel) debugHooks.hidePanel();
   if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
+  leaveDescentTogether(); // back at the surface you are on your own again
   resetWorldState();
   game.mode = 'title';
   game.fade = 1;
@@ -852,6 +866,7 @@ function runFrame(timestamp) {
   frameState.scannerHeat = player.heat;
   if (game.mode === 'workshop') frameState.debug = workshopHooks.buildFrameData();
   else frameState.debug = game.mode === 'title' || !debugHooks.buildFrameData ? null : debugHooks.buildFrameData();
+  updateTogether(realDt); // the others down here with you: where they are now, and what their scanners show
   renderFrame(renderCamera, frameState);
   updateHud(realDt);
   if (debugHooks.update) debugHooks.update(realDt);
@@ -877,6 +892,7 @@ function startApplication() {
   createPhantoms();
   initializeInput();
   initializeInterface();
+  initializeTogether();
   liftDoor.forcedState = true;
   liftDoor.openFraction = 1;
   liftDoor.slab.isRemoved = true;
@@ -884,7 +900,7 @@ function startApplication() {
   showOnlyScreen('screen-title');
 
   window.lastReturnDebug = {
-    game: game, player: player, players: players, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
+    game: game, player: player, players: players, together: together, updateTogether: updateTogether, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
     playHollowRoar: playHollowRoar, playHollowSnarl: playHollowSnarl, playHollowLostHiss: playHollowLostHiss, playHollowSniff: playHollowSniff, playHollowCuriousTrill: playHollowCuriousTrill,
     playStinger: playStinger, playSweepSound: playSweepSound, playInterfaceBlip: playInterfaceBlip, playRadioBlip: playRadioBlip, playDeniedSound: playDeniedSound, stills: stills, doors: doors, pointCloud: pointCloud, settings: settings,
     beamLines: beamLines,

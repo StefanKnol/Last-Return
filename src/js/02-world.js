@@ -67,6 +67,7 @@ const SURFACE_HAZARD = 12;
 const SURFACE_METAL = 13;
 const SURFACE_DOOR_KEYCARD_2 = 14; // a door that needs keycard 2
 const SURFACE_DOOR_KEYCARD_3 = 15; // a door that needs keycard 3
+const SURFACE_PLAYER = 16;          // somebody who is down here with you (11-together.js)
 
 const WALL_NORTH = 0;
 const WALL_EAST = 1;
