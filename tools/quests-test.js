@@ -78,7 +78,10 @@ function check(description, condition, detail) {
     // The lines for a car that never left: every line that can send the lift down has its CarWaiting form.
     for (const key of ['uploadStarted'].concat(d.quests.filter((quest) => quest.releasedLine).map((quest) => quest.releasedLine))) {
       if (lines.indexOf(key + 'CarWaiting') < 0) orderWrong.push('Dispatch has no line called ' + key + 'CarWaiting, for a station with no wait for the lift');
+      // ... and its two forms for a descent where the car stays at your level (down there with others).
+      for (const form of ['CarStays', 'CarStaysReady']) if (lines.indexOf(key + form) < 0) orderWrong.push('Dispatch has no line called ' + key + form + ', for a descent where the car stays');
     }
+    for (const key of ['leftLift', 'liftArrived']) if (lines.indexOf(key + 'CarStays') < 0) orderWrong.push('Dispatch has no line called ' + key + 'CarStays, for a descent where the car stays');
     return { quests: questKeys, wrong: wrong, orders: d.workOrders.map((order) => order.key), complications: d.questComplications.slice(), orderWrong: orderWrong,
       lastDigits: d.workOrders.map((order) => order.intro().slice(16, 17)).join('') };
   });

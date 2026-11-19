@@ -29,6 +29,12 @@ const dispatchDirections = {
   allSpools: 'Relief he is trying not to show. (The recording made before this text changed says "all three".)',
   uploadStarted: 'Businesslike. The last sentence is a dry understatement.',
   liftArrived: 'Urgent now, but still quiet. He does not raise his voice.',
+  leftLiftCarStays: 'As leftLift, but the first sentence is new information and he knows it is good news: plain, a little surprised. Only down there with others, where the car stays.',
+  uploadStartedCarStays: 'Businesslike. The last sentence is a dry understatement. Only down there with others, in a station with the wait.',
+  breakerClosedCarStays: 'Fast and low. The last sentence is an order. Only down there with others, with the breaker job, in a station with the wait.',
+  liftArrivedCarStays: 'Urgent now, but still quiet. He does not raise his voice. Only down there with others.',
+  uploadStartedCarStaysReady: 'Businesslike, then urgent on the last sentence. Only down there with others, in a station with no wait.',
+  breakerClosedCarStaysReady: 'Fast and low, then urgent on the last sentence. Only down there with others, with the breaker job, in a station with no wait.',
   uploadStartedCarWaiting: 'Businesslike, and a little surprised at his own board: this is good news and he does not trust it. Only in stations with no wait for the lift.',
   breakerClosedCarWaiting: 'Fast and low. The last sentence is an order. Only with the breaker job, in stations with no wait for the lift.'
 };

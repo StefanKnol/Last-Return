@@ -990,7 +990,7 @@ function showDeathScreen(kind) {
     const paragraph = document.createElement('p');
     paragraph.textContent = game.isLeftBehind ? 'The car has gone up without you. Nobody carried your scanner back, and this descent is over for you.'
       : game.isDescentLost ? 'Nobody is left to carry anybody back. This descent is over.'
-      : 'Your scanner lies where you fell, still lit. If one of the others carries it to the lift, or into an open salvage bay, it restarts.';
+      : 'Your scanner lies where you fell, still lit. If one of the others carries it into the lift car, it restarts.';
     lines.appendChild(paragraph);
   } else if (!game.difficulty.checkpointsEnabled) {
     // One life (a custom threat level can ask for it): there is no checkpoint to go back to.
