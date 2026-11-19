@@ -71,6 +71,15 @@ function checkSourcePatching() {
   const inPage = (callback, argument) => page.evaluate(callback, argument);
   // Headless Chromium only draws (and so only runs the game loop) when asked.
   const frames = async (count) => { for (let index = 0; index < (count || 3); index++) await page.screenshot({ type: 'jpeg', quality: 5, timeout: 120000 }); }; // a slow machine takes a while to draw a frame (as in browser-harness.js)
+  // The lights on, if they are not. The creature tool's scanner view turns them off, and with them off its
+  // scanner fires every frame and the points stay, close to the camera, more with every frame: without a
+  // graphics card that comes to many seconds a frame, and more as it goes on. A check that is not about what a
+  // scan shows has no need of that. (Asked for with nothing in the page holding the keyboard: L is a key.)
+  const turnLightsOn = async () => {
+    if (await inPage(() => window.lastReturnDebug.workshop.isLit)) return;
+    await page.keyboard.press('KeyL');
+    await frames();
+  };
   const workshopIsReady = () => page.waitForFunction(() => Boolean(window.lastReturnDebug && window.lastReturnDebug.roomWorkshop));
   const waitForReload = async (action) => {
     await inPage(() => { window.pageMarker = true; });
@@ -324,6 +333,15 @@ function checkSourcePatching() {
         armRaise: Math.round(figure.pose.armRaise * 100) / 100, squat: Math.round(figure.pose.squat * 100) / 100, readout: readout ? readout.textContent : '',
         heightStanding: window.lastReturnDebug.tuning.playerHeight, heightCrouching: window.lastReturnDebug.tuning.playerHeightCrouching };
     });
+    // (As a solid body with the lights on: these checks are about how the body stands and how tall it is, and
+    // there are a hundred frames of them. In the scanner view left on above, the tool fires 2,600 pulses at the
+    // body every frame, lights or no lights, and the ones that miss it stay on the walls for good: drawn without
+    // a graphics card, that made these the longest silence of the whole run, by many minutes.)
+    await turnLightsOn();
+    await page.selectOption('#workshop-creature-view', 'solid');
+    await frames();
+    const viewForBodies = await inPage(() => ({ view: window.lastReturnDebug.creatureWorkshop.view, isLit: window.lastReturnDebug.workshop.isLit, points: window.lastReturnDebug.pointCloud.count }));
+    check('back to a solid body with the lights on, no pulses are fired at it', viewForBodies.view === 'solid' && viewForBodies.isLit, viewForBodies);
     await page.selectOption('#workshop-creature', 'player');
     await frames(8);
     const playerStanding = await playerLook();
@@ -378,11 +396,9 @@ function checkSourcePatching() {
     // --- the object tool: a kind written as code to look at, then a new object put together from basic forms ---
     await page.click('#workshop-tab-objects');
     await frames();
-    // The creature tool's scanner view left the lights off. With them off the scanner fires every frame and its
-    // points stay, close to the camera, more of them with every frame: without a graphics card that takes many
-    // seconds a frame, and more as it goes on. The object checks need no scanner, so the lights go back on.
-    await page.keyboard.press('KeyL');
-    await frames();
+    // The page was loaded again when the player was written to its file, and came back in the scanner view with
+    // the lights off. The object checks need no scanner, so the lights go back on (see turnLightsOn).
+    await turnLightsOn();
     check('L puts the lights back on', await inPage(() => window.lastReturnDebug.workshop.isLit));
     const objectState = () => inPage(() => {
       const state = window.lastReturnDebug.objectWorkshop, body = state.body;
