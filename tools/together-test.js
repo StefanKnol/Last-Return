@@ -311,6 +311,10 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     const d = window.lastReturnDebug;
     for (let time = 0; time < seconds; time += 0.1) { d.simulate(0.1); d.updateTogether(0.1); }
   }, seconds);
+  // Being caught takes 1.55 seconds of the game, at a twentieth of a second a frame at the most: thirty-one frames
+  // or more. With two or three browsers drawing in software one frame can take seconds, so a death is waited for
+  // in frames drawn and not in seconds. (Fifteen seconds was not always enough for it on GitHub's machine.)
+  const drawUntilDead = async (page) => { for (let count = 0; count < 60 && await page.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await page.screenshot({ type: 'jpeg', quality: 5 }); };
   const both = async (seconds) => { for (let time = 0; time < seconds; time += 0.3) { await play(a, 0.3); await play(b, 0.3); await pause(170); } }; // (not faster than the clock: the server shows a browser the door for saying too much)
   await a.evaluate(() => { window.lastReturnDebug.settings.captions = 'all'; });
   await b.evaluate(() => { window.lastReturnDebug.settings.captions = 'all'; });
@@ -379,7 +383,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
   await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
   // The station does not stop for the dead, and there is no checkpoint to come back from.
-  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 });
+  await drawUntilDead(b);
   const timeBefore = await b.evaluate(() => window.lastReturnDebug.game.time);
   for (let count = 0; count < 4; count++) await b.screenshot({ type: 'jpeg', quality: 5 });
   check('the station goes on while you lie dead', await b.evaluate((before) => window.lastReturnDebug.game.time > before, timeBefore));
@@ -845,7 +849,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // One of you is dead and nobody carried their scanner back: the car goes up with those on their feet, and
   // the dead one is left behind. (They used to be taken up too: the ending, and a best time for it.)
-  for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  await drawUntilDead(b);
   // They fell in the lift car, so their scanner lies where one restarts. It has not been moved from where they
   // fell: it does not restart for lying there, however long. Moved by anything at all (nobody's beam: as if
   // the Hollow had kicked it) and lying there again, its seconds start; out of reach again before they are up,
@@ -907,8 +911,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   await a.evaluate(() => { const d = window.lastReturnDebug; d.hollow.isActive = true; d.hollow.figure.x = d.player.x + 0.3; d.hollow.figure.z = d.player.z; d.hollow.graceTimer = 0; d.hollow.crawlspace = null; });
   await play(a, 0.2);
-  for (let count = 0; count < 40 && await a.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await a.screenshot({ type: 'jpeg', quality: 5 });
-  for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  await drawUntilDead(a);
+  await drawUntilDead(b);
   await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
   await pause(200);
   await a.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
@@ -988,7 +992,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 8000 }).catch(() => {});
   await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.spawnHollow(other.x + 0.3, other.z); d.hollow.graceTimer = 0; });
-  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
+  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
+  await drawUntilDead(c);
   const waitingDead = await c.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }));
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
