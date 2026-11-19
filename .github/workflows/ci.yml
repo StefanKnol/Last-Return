@@ -1,6 +1,11 @@
 name: CI
 
-# Build the game and run every test on each pull request, before it reaches main.
+# Build the game and run the tests on each pull request, before it reaches main.
+#
+# Every suite gets a machine of its own, all at once, so a run takes as long as the slowest suite and not as
+# long as all of them together. Which suites are run depends on what the pull request changes: none for one
+# that only touches the README or docs/, a suite alone when only its own file changed, and every suite for
+# anything else (planSuites in tools/run-tests.js).
 
 on:
   pull_request:
@@ -11,15 +16,51 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    name: Build and test
+  plan:
+    name: Pick the suites
     runs-on: ubuntu-latest
-    # The tests take about half an hour here and a slow runner adds a few; a suite that fails is run a second
-    # time (tools/run-tests.js), which can add as much as that suite takes. This is the limit for a run that hangs.
-    timeout-minutes: 75
-    permissions:
-      contents: read
+    timeout-minutes: 5
+    outputs:
+      suites: ${{ steps.pick.outputs.suites }}
+    steps:
+      # A pull request is checked out as its merge into main: a commit whose first parent is main. Two commits
+      # deep, the difference with that parent is what the pull request changes.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # A run started by hand is for every suite: it is planned as if the runner itself had changed.
+      - name: Pick the suites
+        id: pick
+        run: |
+          if [ "$EVENT" = pull_request ]; then git diff --name-only HEAD^1 HEAD > changed.txt; else echo tools/run-tests.js > changed.txt; fi
+          cat changed.txt
+          echo "suites=$(node tools/run-tests.js --plan < changed.txt)" | tee -a "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+
+  test:
+    name: ${{ matrix.suite }}
+    needs: plan
+    # An empty list is not something a matrix can be made of.
+    if: needs.plan.outputs.suites != '[]'
+    runs-on: ubuntu-latest
+    # The slowest suite takes about twelve minutes here; one that fails is run a second time
+    # (tools/run-tests.js), which doubles that. This is the limit for a run that hangs.
+    timeout-minutes: 45
+    strategy:
+      # One suite failing says nothing about the others, and all of what failed is worth knowing at once.
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
     steps:
       # The default single commit is enough here: the tests only want the build stamp to have a
       # number and a commit in it, not the right number. Docker.yml is the one that needs the history.
@@ -40,10 +81,27 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # `npm test` builds the dev page (debug mode and the workshop included). This is the page
+      # The step after this builds the dev page (debug mode and the workshop included). This is the page
       # as it ships, which nothing else on a pull request would build.
       - name: Build the page as it ships
         run: npm run build
 
       - name: Test
-        run: npm test
+        run: npm run build:dev && node tools/run-tests.js ${{ matrix.suite }}
+
+  # The one check main asks for (the "Default protection" ruleset names it), so its name has to stay as it is.
+  # It passes when every suite that was picked passed, and also when there was nothing to run.
+  done:
+    name: Build and test
+    needs: [plan, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every suite that was picked passed
+        run: |
+          echo "plan: $PLAN, tests: $TESTS"
+          [ "$PLAN" = success ] && { [ "$TESTS" = success ] || [ "$TESTS" = skipped ]; }
+        env:
+          PLAN: ${{ needs.plan.result }}
+          TESTS: ${{ needs.test.result }}
