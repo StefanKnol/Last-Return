@@ -53,6 +53,7 @@ function connect(host, origin, forwardedFor) {
   });
 }
 
+const WINDOW_WIDTH = 640, WINDOW_HEIGHT = 360; // the browsers of this suite: see where the first two are opened
 const pause = function (milliseconds) { return new Promise(function (resolve) { setTimeout(resolve, milliseconds); }); };
 
 (async () => {
@@ -187,8 +188,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // ---- Two browsers ----
   const address = 'http://' + named.host + '/';
-  const first = await openGame({ address: address });
-  const second = await openGame({ address: address });
+  // (In small windows. Nothing in this suite looks at what is drawn: a page is only asked for a picture to make
+  // it draw a frame, which is what runs its game. The browsers here draw in software, two and three of them at
+  // once, and how long a frame takes goes by how many dots of screen it has. At the usual 1280 by 720, with three
+  // browsers open, a frame of a page that is playing was measured at four to nineteen seconds; on the slower of
+  // GitHub's machines a single picture then took longer than the thirty seconds it is given.)
+  const first = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
+  const second = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
   const a = first.page, b = second.page;
 
   check('the title screen offers a lobby when the page comes from the server', await a.isVisible('#button-host-lobby'));
@@ -936,7 +942,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // ---- A lobby lasts longer than one descent ----
   // A third joins while the two are down. They wait at the title screen.
-  const third = await openGame({ address: address });
+  const third = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
   const c = third.page;
   await c.fill('#together-code', code);
   await c.click('#button-join-lobby');
@@ -994,21 +1000,28 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // The one who is still down there is caught, and waits for somebody to carry their scanner back.
   // (Well away from the host first: it catches everyone within its reach, and both stood in the car. The host's
-  // page draws nothing by now, so it is asked on a timer whether it has heard where they went.)
+  // page draws nothing by now, so it is asked on a timer whether it has heard where they went.
+  // And they say where they are themselves, at once. Where you are is said from a frame of your game, and with
+  // three browsers drawing in software a page that is playing draws one every few seconds: on a slow machine
+  // not one in the time the host waited. The Hollow was then put where they had been, not where they were, and
+  // had not caught them when this went on.)
   await c.evaluate(() => {
     const d = window.lastReturnDebug;
-    for (let step = 6; step < 20; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+    findSpot: for (let step = 6; step < 20; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
       const spot = d.findWalkableSpotNear(d.playerStart.x + way[0], d.playerStart.z + way[1]);
-      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 5) { d.teleport(spot.x, spot.z, 0); return; }
+      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 5) { d.teleport(spot.x, spot.z, 0); break findSpot; }
     }
+    for (let count = 0; count < 3; count++) d.updateTogether(0.1);
   });
-  await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 8000 }).catch(() => {});
+  const hasHostHeard = await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 20000 }).then(() => true, () => false);
   await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.spawnHollow(other.x + 0.3, other.z); d.hollow.graceTimer = 0; });
-  // (Their page is drawn until they are dead: a page that is not asked to draw does not run its game, and on a
-  // slow machine the second and a half of dying had not passed when this was looked at.)
-  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 20000 }).catch(() => {});
-  for (let count = 0; count < 80 && await c.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) { await c.screenshot({ type: 'jpeg', quality: 5 }); await pause(50); }
-  const waitingDead = await c.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }));
+  // Being caught is the host's to say, and is heard when it is said, drawn or not. Dying is their own game's to
+  // carry out, a second and a half of it, and that takes frames: so their page is drawn until they are dead.
+  // (Only once they are dying. A picture of a page that is still playing is the slowest there is, and has been
+  // seen to take longer than the thirty seconds a picture is given, which ended the suite then and there.)
+  const isCaught = await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 30000 }).then(() => true, () => false);
+  if (isCaught) for (let count = 0; count < 80 && await c.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) { await c.screenshot({ type: 'jpeg', quality: 5 }); await pause(50); }
+  const waitingDead = await c.evaluate((heard) => ({ hasHostHeardWhereTheyWent: heard[0], isCaught: heard[1], mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }), [hasHostHeard, isCaught]);
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
   await first.browser.close();
