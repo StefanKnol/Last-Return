@@ -619,6 +619,7 @@ function updateTogether(dt) {
     together.sendTimer = Math.max(together.sendTimer + 1 / TOGETHER_SENDS_PER_SECOND, 0);
     sayWhereYouAre();
   }
+  keepPromisedRidersInPlace();
   together.looseSayTimer -= dt;
   if (together.looseSayTimer <= 0 && game.mode !== 'intro') {
     together.looseSayTimer = Math.max(together.looseSayTimer + 1 / LOOSE_SAYS_PER_SECOND, 0);
@@ -1057,7 +1058,7 @@ function performLooseAction(action) {
     if (object.heldById) noteWhatRestsOnLooseObject(object); // what is in a crate goes where the crate goes, from now
     // Yours, and with things in it that another browser moves: they are asked for now, while they count as
     // riding, and not at the next turn of the clock that asks (claimWhatRidesInYourBeam).
-    if (!game.actor && object.heldById && isWorldShared()) claimWhatRidesInYourBeam();
+    if (!game.actor && object.heldById && isWorldShared()) { noteRidersForHandOver(object); claimWhatRidesInYourBeam(); }
   } else if (action.what === 'release') {
     if (object.heldById === actingId) object.heldById = 0;
   } else if (action.what === 'carry') {
@@ -1073,6 +1074,13 @@ function performLooseAction(action) {
     if (!isAtTheirs) return;
     object.ownerId = actingId;
     wakeLooseObject(object);
+    // Yours now, and it was in the crate you took: it is put where it lay in that crate, as the crate stands
+    // now, and goes on from there as one of your own (see "What is in a crate when you take it").
+    if (!game.actor && object.rideCrateId) {
+      const crate = findLooseObjectById(object.rideCrateId);
+      if (crate && crate.isHeld) placeRiderInCrate(object, crate);
+      object.rideCrateId = 0;
+    }
   } else if (action.what === 'shatter') {
     object.x = action.x; object.y = action.y; object.z = action.z;
     shatterLooseObjectNow(object);
@@ -1109,6 +1117,7 @@ function hearKnock(data) {
 // and is not yours yet is asked for ('carry'). It is the host's again when it lies still, like anything else
 // (sayWhereLooseThingsAre).
 function claimWhatRidesInYourBeam() {
+  // (See also "What is in a crate when you take it", below: until the answer comes, they are kept in the crate by hand.)
   const held = getHeldLooseObject();
   if (!held) return;
   for (const object of looseObjects) {
@@ -1116,6 +1125,67 @@ function claimWhatRidesInYourBeam() {
     if (game.time - (object.carryAskedTime || -10) < 0.5) continue; // (asked a moment ago: the host's answer is on its way)
     object.carryAskedTime = game.time;
     askToAct({ what: 'carry', id: object.id });
+  }
+}
+
+// ---- What is in a crate when you take it ----
+//
+// You take a crate with things in it. The crate is yours to move from that moment; the things are still
+// somebody else's (the host's, mostly) until the host has said they are yours ('carry'). That takes as long as
+// a message to the host and back, and by then your beam has lifted the crate. A thing that is not yours is not
+// moved here, so it stood where the crate had been; and when it did become yours, a moment later, it was no
+// longer in the crate and fell to the floor. Between two windows on one machine the answer came soon enough
+// for that not to show, mostly. With a real distance between the browsers, or on a slow machine, it did not.
+//
+// So from the moment you take the crate until its things are yours, they are kept in it by hand. Each
+// remembers where it lay in the crate (noteRidersForHandOver); every frame it is put back there, as the crate
+// stands now (keepPromisedRidersInPlace), which also keeps it counted as riding, so that it goes on being asked
+// for; and when it becomes yours it is put there one last time, going as the crate goes (performLooseAction).
+// If the answer never comes (the host said no: somebody else has it), it is let be after a few seconds.
+
+const RIDER_HAND_OVER_SECONDS = 4; // TWEAK: how long a thing is kept in your crate while it is being asked for
+
+function noteRidersForHandOver(crate) {
+  const matrix = crate.matrix;
+  for (const rider of looseObjects) {
+    if (rider === crate || rider.heldLinkId !== crate.id || !isLooseObjectAnothers(rider)) continue;
+    // Where it lies, in the crate's own coordinates, and how it is turned compared with the crate.
+    const x = rider.x - crate.x, y = rider.y - crate.y, z = rider.z - crate.z;
+    rider.rideOffsetX = matrix[0] * x + matrix[3] * y + matrix[6] * z;
+    rider.rideOffsetY = matrix[1] * x + matrix[4] * y + matrix[7] * z;
+    rider.rideOffsetZ = matrix[2] * x + matrix[5] * y + matrix[8] * z;
+    const turn = multiplyLooseTurns(-crate.orientationX, -crate.orientationY, -crate.orientationZ, crate.orientationW,
+      rider.orientationX, rider.orientationY, rider.orientationZ, rider.orientationW);
+    rider.rideTurnX = turn.x; rider.rideTurnY = turn.y; rider.rideTurnZ = turn.z; rider.rideTurnW = turn.w;
+    rider.rideCrateId = crate.id;
+    rider.rideUntil = game.time + RIDER_HAND_OVER_SECONDS;
+  }
+}
+
+// Puts a thing where it lay in the crate, as the crate stands now, going as the crate goes.
+function placeRiderInCrate(rider, crate) {
+  const matrix = crate.matrix, x = rider.rideOffsetX, y = rider.rideOffsetY, z = rider.rideOffsetZ;
+  rider.x = crate.x + matrix[0] * x + matrix[1] * y + matrix[2] * z;
+  rider.y = crate.y + matrix[3] * x + matrix[4] * y + matrix[5] * z;
+  rider.z = crate.z + matrix[6] * x + matrix[7] * y + matrix[8] * z;
+  const turn = multiplyLooseTurns(crate.orientationX, crate.orientationY, crate.orientationZ, crate.orientationW,
+    rider.rideTurnX, rider.rideTurnY, rider.rideTurnZ, rider.rideTurnW);
+  setLooseObjectOrientation(rider, turn.x, turn.y, turn.z, turn.w);
+  rider.velocityX = crate.velocityX; rider.velocityY = crate.velocityY; rider.velocityZ = crate.velocityZ;
+  rider.spinX = 0; rider.spinY = 0; rider.spinZ = 0;
+  rider.heldLinkTime = game.time; rider.heldLinkId = crate.id; // it rides (isLooseObjectRiding, 08-loose-objects.js)
+  refreshLooseObjectTiles(rider);
+}
+
+// Every frame: what was in the crate you took, and is not yours yet, is where it lay in it.
+function keepPromisedRidersInPlace() {
+  if (!isWorldShared()) return;
+  const held = getHeldLooseObject();
+  for (const rider of looseObjects) {
+    if (!rider.rideCrateId) continue;
+    if (!held || held.id !== rider.rideCrateId || game.time > rider.rideUntil || rider.heldById) { rider.rideCrateId = 0; continue; } // let go of, taken by somebody, or never answered
+    if (!isLooseObjectAnothers(rider)) { rider.rideCrateId = 0; continue; } // yours already: it rides by itself
+    placeRiderInCrate(rider, held);
   }
 }
 
