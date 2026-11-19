@@ -5,6 +5,12 @@
 const { openGame, startGame, drawFrames } = require('./browser-harness.js');
 
 const failures = [];
+// How many fuel cans in ten, at least, must lie where the game puts them first (see "a fuel can is near"). This is
+// a rate of the content, not a promise of the game: when this was written 118 of 134 cans for small generators
+// (88 %) and 82 of 82 for Generator 2 lay where step (a) puts them. At 12 % the other way, fewer than six in ten
+// of about 40 cans comes by chance about once in a million runs (of 20, once in four thousand). If it fails after
+// rooms were changed, the rooms near the machines have less free floor than they had: look at whether that is wanted.
+const MOST_BY_STEP_A = 0.6;
 function check(description, condition, detail) {
   const line = (condition ? 'ok    ' : 'FAIL  ') + description + (detail !== undefined ? '  ' + JSON.stringify(detail) : '');
   console.log(line);
@@ -21,7 +27,38 @@ function check(description, condition, detail) {
   // 64 stations built one after another. Before each one the browser gets a moment to clear the last one away
   // (browser-harness.js says why).
   const survey = await inGame(async () => {
-    const d = window.lastReturnDebug, result = { sizes: {}, bad: [], canSteps: [], mainCanSteps: [] };
+    const d = window.lastReturnDebug, result = { sizes: {}, bad: [], notAsPlanned: [], cans: [], mainCans: [] };
+    // Where the game puts a fuel can (placeItemNear in src/js/09-quests.js), in three steps: (a) in the nearest
+    // other room whose nearest floor is no more than d.questItemNearSteps from the machine and that has a free
+    // spot; (b) if there is none, in the machine's own room (Generator 2 has none of its own here); (c) if that
+    // has no spot either, in a room further off, however far.
+    // How many steps it is from where you stand to the nearest floor of the room (x, z) lies in, measured as the
+    // game measures it: the way into a room from outside is over one of its tiles that has walkable floor of
+    // another room beside it, so the nearest of those is the nearest floor.
+    const isWalkableTile = (tileX, tileZ) => { const spot = d.findWalkableSpotNear(tileX + 0.5, tileZ + 0.5); return spot !== null && spot.x === tileX + 0.5 && spot.z === tileZ + 0.5; };
+    const stepsToRoom = function (x, z) {
+      const zone = d.getZoneAt(x, z);
+      let fewest = Infinity;
+      for (let tileZ = Math.floor(z) - 40; tileZ <= Math.floor(z) + 40; tileZ++) {
+        for (let tileX = Math.floor(x) - 40; tileX <= Math.floor(x) + 40; tileX++) {
+          if (d.getZoneAt(tileX + 0.5, tileZ + 0.5) !== zone || !isWalkableTile(tileX, tileZ)) continue;
+          const isWayIn = [[1, 0], [-1, 0], [0, 1], [0, -1]].some((step) => d.getZoneAt(tileX + step[0] + 0.5, tileZ + step[1] + 0.5) !== zone && isWalkableTile(tileX + step[0], tileZ + step[1]));
+          if (isWayIn) fewest = Math.min(fewest, d.stepsFromPlayerTo(tileX + 0.5, tileZ + 0.5));
+        }
+      }
+      return fewest;
+    };
+    // Stands at the machine, and says by which step its can was put where it is. (The game counts from the
+    // machine's own tile, before the machine stood on it; you stand on the walkable tile nearest to it, which is
+    // this many steps further on.)
+    const howPlaced = function (machineX, machineZ, can, station) {
+      const stand = d.findWalkableSpotNear(machineX, machineZ);
+      d.teleport(stand.x, stand.z, 0);
+      const offset = Math.abs(Math.floor(stand.x) - Math.floor(machineX)) + Math.abs(Math.floor(stand.z) - Math.floor(machineZ));
+      const inOwnRoom = d.getZoneAt(can.x, can.z) === d.getZoneAt(machineX, machineZ);
+      const steps = inOwnRoom ? 0 : stepsToRoom(can.x, can.z);
+      return { station: station, steps: steps, step: inOwnRoom ? 'b' : (steps <= d.questItemNearSteps + offset ? 'a' : 'c') };
+    };
     const layouts = ['tight', 'mixed', 'sprawling', 'sparse'];
     const describe = function () {
       return d.level.mission.extraGenerators.map((generator) => [generator.objectId, generator.x, generator.z, generator.needsFuel, generator.fuelCanId].join(':')).join(' ') + ' | ' +
@@ -29,50 +66,65 @@ function check(description, condition, detail) {
     };
     for (const size of ['small', 'medium', 'large', 'massive']) {
       const counts = [];
-      for (let seed = 1; seed <= 16; seed++) {
+      let built = 0;
+      // Sixteen of each size. (A seed that cannot be built is stepped over: the game builds Kessel-9 for it.)
+      for (let seed = 1; built < 16 && seed <= 76; seed++) {
         await window.letTheBrowserCatchUp();
-        const built = d.loadStation('generated', seed, size, layouts[seed % 4], seed % 2 ? 'one' : 'two', undefined, ['restart']);
-        if (!built) { result.bad.push(size + ' ' + seed + ': not built'); continue; }
+        if (!d.loadStation('generated', seed, size, layouts[seed % 4], seed % 2 ? 'one' : 'two', undefined, ['restart'])) continue;
+        built++;
         if (d.level.workOrder !== 'restart') result.bad.push(size + ' ' + seed + ': the work order is ' + d.level.workOrder + ', not Restart');
         const found = d.auditLayout().concat(d.auditProgression());
         if (found.length > 0) result.bad.push(size + ' ' + seed + ': ' + found.slice(0, 3).join('; '));
         const generators = d.level.mission.extraGenerators;
         counts.push(generators.length);
+        // What was built is what was planned for it: as many generators, and an empty tank (with its can) on each the planner said.
+        const plan = d.planQuests(d.level.questSeed, d.sizePresets[size], d.workOrders.filter((order) => order.key === 'restart')[0]).generators;
+        const plannedTanks = plan.needsItem.map((empty) => (empty ? 'empty' : 'full')).join(), builtTanks = generators.map((generator) => (generator.needsFuel ? 'empty' : 'full')).join();
+        if (generators.length !== plan.count || builtTanks !== plannedTanks) result.notAsPlanned.push(size + ' ' + seed + ': planned ' + plannedTanks + ', built ' + builtTanks);
         for (const generator of generators) {
-          if (!generator.needsFuel) continue;
-          const can = d.findInteractable(generator.fuelCanId), stand = d.findWalkableSpotNear(generator.x, generator.z);
-          d.teleport(stand.x, stand.z, 0);
-          result.canSteps.push(d.stepsFromPlayerTo(can.x, can.z));
+          if (generator.needsFuel) result.cans.push(howPlaced(generator.x, generator.z, d.findInteractable(generator.fuelCanId), size + ' ' + seed));
         }
-        if (d.level.mission.needsFuel) {
-          const can = d.findInteractable(d.missionObjectIds.fuelCan), stand = d.findWalkableSpotNear(d.generator.x, d.generator.z);
-          d.teleport(stand.x, stand.z, 0);
-          result.mainCanSteps.push(d.stepsFromPlayerTo(can.x, can.z));
-        }
+        if (d.level.mission.needsFuel) result.mainCans.push(howPlaced(d.generator.x, d.generator.z, d.findInteractable(d.missionObjectIds.fuelCan), size + ' ' + seed));
       }
-      result.sizes[size] = { fewest: Math.min.apply(null, counts), most: Math.max.apply(null, counts), allowed: d.sizePresets[size].extraGenerators, counts: counts.join('') };
+      if (built < 16) result.bad.push('only ' + built + ' ' + size + ' stations could be built from seeds 1 to 76');
+      // That a size uses its whole range is seen in what the planner picks for 500 seeds (over sixteen stations a
+      // range of three numbers leaves one out about one run in two hundred); every station built keeps within it.
+      const planned = [], restart = d.workOrders.filter((order) => order.key === 'restart')[0];
+      for (let seed = 1; seed <= 500; seed++) planned.push(d.planQuests(seed, d.sizePresets[size], restart).generators.count);
+      result.sizes[size] = { fewest: Math.min.apply(null, counts), most: Math.max.apply(null, counts), allowed: d.sizePresets[size].extraGenerators, counts: counts.join(''),
+        plannedFewest: Math.min.apply(null, planned), plannedMost: Math.max.apply(null, planned) };
     }
-    result.canSteps.sort((a, b) => a - b); result.mainCanSteps.sort((a, b) => a - b);
-    // The same seed gives the same generators and cans; another seed gives others.
-    d.loadStation('generated', 7, 'massive', 'mixed', 'two', undefined, ['restart']);
+    // The same seed gives the same generators and cans; another seed gives others. (A seed that cannot be built is stepped over.)
+    let sameSeed = 7;
+    while (!d.loadStation('generated', sameSeed, 'massive', 'mixed', 'two', undefined, ['restart']) && sameSeed < 67) sameSeed++;
     const first = describe();
-    d.loadStation('generated', 8, 'massive', 'mixed', 'two', undefined, ['restart']);
+    for (let otherSeed = sameSeed + 1; otherSeed < sameSeed + 61; otherSeed++) if (d.loadStation('generated', otherSeed, 'massive', 'mixed', 'two', undefined, ['restart'])) break;
     result.anotherSeedDiffers = describe() !== first;
-    d.loadStation('generated', 7, 'massive', 'mixed', 'two', undefined, ['restart']);
+    d.loadStation('generated', sameSeed, 'massive', 'mixed', 'two', undefined, ['restart']);
     result.sameSeedSame = describe() === first;
     d.loadStation('classic', 0);
     result.classic = { generators: d.level.mission.extraGenerators.length, cans: d.interactables.filter((thing) => thing.mapLabel === 'FUEL').length,
       problems: d.auditLayout().concat(d.auditProgression()) };
     return result;
   });
-  const median = (list) => list[Math.floor(list.length / 2)];
   check('64 stations of every size on a Restart order: each has it, and can still be finished, with its generators and cans where the rules allow', survey.bad.length === 0, survey.bad.slice(0, 4));
-  check('every size has as many extra generators as its range says (and at least one, the order being about them), and uses the whole range',
-    Object.keys(survey.sizes).every((size) => survey.sizes[size].fewest === Math.max(1, survey.sizes[size].allowed[0]) && survey.sizes[size].most === survey.sizes[size].allowed[1]), survey.sizes);
-  check('a fuel can is near the generator it is for: half within 25 steps of walking, none over 60',
-    survey.canSteps.length >= 20 && median(survey.canSteps) <= 25 && survey.canSteps[survey.canSteps.length - 1] <= 60, survey.canSteps);
-  check('the can for Generator 2 too: half within 30 steps, none over 45',
-    survey.mainCanSteps.length >= 10 && median(survey.mainCanSteps) <= 30 && survey.mainCanSteps[survey.mainCanSteps.length - 1] <= 45, survey.mainCanSteps);
+  check('every size has as many extra generators as its range says (and at least one, the order being about them), and uses the whole range; every station has just the ones planned for it, with the empty tanks planned',
+    survey.notAsPlanned.length === 0 && Object.keys(survey.sizes).every((size) => survey.sizes[size].fewest >= Math.max(1, survey.sizes[size].allowed[0]) && survey.sizes[size].most <= survey.sizes[size].allowed[1] &&
+      survey.sizes[size].plannedFewest === Math.max(1, survey.sizes[size].allowed[0]) && survey.sizes[size].plannedMost === survey.sizes[size].allowed[1]), [survey.notAsPlanned, survey.sizes]);
+  // (Half of the small generators have an empty tank, and about half of the stations need fuel for Generator 2:
+  // about 50 and 30 cans are measured, and fewer than 20 or 10 does not come by chance.)
+  // (Which step put a can there cannot be asked of the game: whether a nearer room had a free spot is its own
+  // business, and the test hook does not tell; nor does it tell which rooms are behind a deeper keycard door than
+  // the generator, which step (a) leaves out. Steps (b) and (c) are allowed, but as exceptions: a station whose
+  // rooms near the machines are full. So most cans must be placed by step (a) (MOST_BY_STEP_A at the top says
+  // how many and why), and the detail lists the ones that were not.)
+  const byStep = (list) => ({ a: list.filter((can) => can.step === 'a').length, b: list.filter((can) => can.step === 'b').length, c: list.filter((can) => can.step === 'c').length,
+    exceptions: list.filter((can) => can.step !== 'a') });
+  const cans = byStep(survey.cans), mainCans = byStep(survey.mainCans);
+  check('a fuel can is near the generator it is for: most lie in another room whose nearest floor is within the game\'s limit of steps\' walk from the generator, the rest in its own room or (rooms that near being full) further off',
+    survey.cans.length >= 20 && cans.a >= Math.ceil(survey.cans.length * MOST_BY_STEP_A), [survey.cans.length + ' cans', cans]);
+  check('the can for Generator 2 too: most within the limit, none in its own room, the rest further off',
+    survey.mainCans.length >= 10 && mainCans.b === 0 && mainCans.a >= Math.ceil(survey.mainCans.length * MOST_BY_STEP_A), [survey.mainCans.length + ' cans', mainCans]);
   check('the same seed always gives the same generators and cans, and another seed gives others', survey.sameSeedSame && survey.anotherSeedDiffers, [survey.sameSeedSame, survey.anotherSeedDiffers]);
   check('Kessel-9 has none of this and can still be finished', survey.classic.generators === 0 && survey.classic.cans === 0 && survey.classic.problems.length === 0, survey.classic);
 
@@ -123,7 +175,7 @@ function check(description, condition, detail) {
       // Dispatch says, some seconds later, that the lift needs the others, and marks them.
       result.beforeTold = { knows: flags.knowsAboutGenerators, marked: d.findInteractable(ready.objectId).isDiscovered, objective: d.game.objectiveText };
       d.setDebugOption('freezeCreatures', true);
-      d.simulate(21);
+      d.simulate(d.quests.filter((quest) => quest.key === 'generators')[0].tell.seconds + 2); // (as many seconds as the quest's entry says, and a little)
       result.told = { knows: flags.knowsAboutGenerators, marked: found.generators.every((generator) => d.findInteractable(generator.objectId).isDiscovered),
         objective: d.game.objectiveText, radio: /more generators/.test(messages()) };
       d.setDebugOption('freezeCreatures', false);

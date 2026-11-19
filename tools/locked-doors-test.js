@@ -466,12 +466,18 @@ const labSource = String(function () {
     d.loadStation('classic', 0);
     result.classic = { hatches: d.hollowHatches.length, parts: d.getHollowPartCount(), problems: d.auditHollowRoutes(), layout: d.auditLayout() };
     const classicFirst = describe();
-    d.loadStation('generated', 3, 'large', 'mixed', 'two');
+    // A generated station with two keycards: the first seed that builds one. (What a seed builds changes with
+    // every new room, so the seed is looked for here rather than written down.)
+    let seedWithTwoCards = null;
+    for (let seed = 1; seed <= 60 && seedWithTwoCards === null; seed++) {
+      if (d.loadStation('generated', seed, 'large', 'mixed', 'two') && d.level.keycardCount === 2) seedWithTwoCards = seed;
+    }
+    if (seedWithTwoCards === null) { result.generated = 'no station with two keycards among sixty seeds'; d.loadStation('classic', 0); return result; }
     const generatedFirst = describe();
-    result.generated = { hatches: d.hollowHatches.length, parts: d.getHollowPartCount(), problems: d.auditHollowRoutes(), keycards: d.level.keycardCount };
+    result.generated = { seed: seedWithTwoCards, hatches: d.hollowHatches.length, parts: d.getHollowPartCount(), problems: d.auditHollowRoutes(), keycards: d.level.keycardCount };
     d.loadStation('classic', 0);
     result.classicSame = describe() === classicFirst;
-    d.loadStation('generated', 3, 'large', 'mixed', 'two');
+    d.loadStation('generated', seedWithTwoCards, 'large', 'mixed', 'two');
     result.generatedSame = describe() === generatedFirst;
     d.loadStation('classic', 0);
     return result;
@@ -480,7 +486,8 @@ const labSource = String(function () {
     hatches.classic.parts >= 2 && hatches.classic.hatches >= hatches.classic.parts && hatches.classic.problems.length === 0 && hatches.classic.layout.length === 0, hatches.classic);
   check('a generated station with two keycards: the same',
     hatches.generated.keycards === 2 && hatches.generated.parts >= 3 && hatches.generated.hatches >= hatches.generated.parts && hatches.generated.problems.length === 0, hatches.generated);
-  check('the same station always gets the same hatches', hatches.classicSame && hatches.generatedSame, [hatches.classicSame, hatches.generatedSame]);
+  check('the same station always gets the same hatches', hatches.classicSame && hatches.generatedSame,
+    typeof hatches.generated === 'string' ? hatches.generated : [hatches.classicSame, hatches.generatedSame]);
 
   // --- doorways: it has no collision of its own, so the straight lines it walks must never cut the corner of a wall ---
   // (They once could. It then stood inside the wall beside the doorway for good, and you could walk past it.)

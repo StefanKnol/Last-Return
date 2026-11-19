@@ -16,35 +16,76 @@ function check(description, condition, detail) {
   await startGame(page, false);
 
   // --- where they are ---
+  // What the game promises about how many (placeNoisyFloor, 03-noisy-floor.js): it wants a share for every room
+  // and corridor, never fewer than noisyFloorFewest, and puts them out one by one, each at least
+  // noisyFloorLeastMetresApart from the others, until it has that many or there is no place left that will do.
+  // So never more than it wants and never fewer than the fewest (auditNoisyFloor checks that too); fewer than it
+  // wants only when the station has run out of places. Whether it has is decided by a rating of every tile that the
+  // test hook does not show, so a station that comes out short is shown in the detail, not judged.
   const placing = await inGame(() => {
     const d = window.lastReturnDebug, tuning = d.tuning, result = {};
-    // Glass and plates are patches of floor. Where the same draw says "cans", six real cans are put out instead
+    // Glass and plates are patches of floor. Where the same draw says "cans", a handful of real cans are put out instead
     // (loose objects: tools/loose-objects-test.js checks those); the place still counts as one of the station's share.
     const describe = function () { return d.noisyFloorPatches.concat(d.noisyFloorCanHeaps).map((patch) => [patch.x, patch.z, patch.kind].join(':')).join(' '); };
     const count = function () { return d.noisyFloorPatches.length + d.noisyFloorCanHeaps.length; };
+    const kinds = function () { return Array.from(new Set(d.noisyFloorPatches.concat(d.noisyFloorCanHeaps).map((patch) => patch.kind))); };
     d.loadStation('classic', 0);
     const classic = describe();
-    result.classic = { count: count(), heapsOfCans: d.noisyFloorCanHeaps.length, cans: d.looseObjects.filter((object) => object.kindKey === 'can').length, wanted: Math.max(tuning.noisyFloorFewest, Math.round(19 * tuning.noisyFloorPerRoom)),
-      kinds: Array.from(new Set(d.noisyFloorPatches.concat(d.noisyFloorCanHeaps).map((patch) => patch.kind))), problems: d.auditNoisyFloor().concat(d.auditLayout()).concat(d.auditProgression()) };
+    // (19: Kessel-9's rooms and corridors, as the game itself counts them for its noisy floor.)
+    result.classic = { count: count(), wanted: Math.max(tuning.noisyFloorFewest, Math.round(19 * tuning.noisyFloorPerRoom)), fewest: tuning.noisyFloorFewest,
+      kinds: kinds(), problems: d.auditNoisyFloor().concat(d.auditLayout()).concat(d.auditProgression()) };
     d.loadStation('generated', 3, 'large', 'mixed', 'two');
     const generated = describe();
-    result.generated = { count: count(), heapsOfCans: d.noisyFloorCanHeaps.length, cans: d.looseObjects.filter((object) => object.kindKey === 'can').length, wanted: Math.max(tuning.noisyFloorFewest, Math.round(d.level.roomCount * tuning.noisyFloorPerRoom)),
-      problems: d.auditNoisyFloor().concat(d.auditLayout()) };
+    result.generated = { count: count(), wanted: Math.max(tuning.noisyFloorFewest, Math.round(d.level.roomCount * tuning.noisyFloorPerRoom)), fewest: tuning.noisyFloorFewest,
+      kinds: kinds(), problems: d.auditNoisyFloor().concat(d.auditLayout()) };
     d.loadStation('generated', 4, 'large', 'mixed', 'two');
     result.anotherSeedDiffers = describe() !== generated;
     d.loadStation('classic', 0);
     result.classicSame = describe() === classic;
     d.loadStation('generated', 3, 'large', 'mixed', 'two');
     result.generatedSame = describe() === generated;
+
+    // The cans: the first station whose draw gave a heap of them, Kessel-9 if it did, otherwise a generated one.
+    // Every spot the heap planned a can for has a can lying at it (within half a metre: cans drawn on top of each
+    // other are pushed apart a little) as soon as the station is built, each can counted for one spot only.
+    const stations = [['classic', 0]];
+    for (let seed = 1; seed <= 40; seed++) stations.push(['generated', seed, 'large', 'mixed', 'one']);
+    result.cans = null;
+    for (const station of stations) {
+      if (!d.loadStation.apply(null, station) && station[0] === 'generated') continue;
+      if (d.noisyFloorCanHeaps.length === 0) continue;
+      const looseCans = d.looseObjects.filter((object) => object.kindKey === 'can' && !object.isRemoved);
+      const taken = new Set(), missing = [];
+      let planned = 0;
+      for (const heap of d.noisyFloorCanHeaps) {
+        for (const spot of heap.cans) {
+          planned++;
+          let nearest = null, nearestDistance = 0.5;
+          for (const can of looseCans) {
+            const distance = Math.hypot(can.x - spot.x, can.z - spot.z);
+            if (!taken.has(can) && distance <= nearestDistance) { nearest = can; nearestDistance = distance; }
+          }
+          if (nearest) taken.add(nearest); else missing.push({ heapX: heap.x, heapZ: heap.z, spotX: Math.round(spot.x * 100) / 100, spotZ: Math.round(spot.z * 100) / 100 });
+        }
+      }
+      result.cans = { station: station.slice(0, 2).join(' '), heaps: d.noisyFloorCanHeaps.length, emptyHeaps: d.noisyFloorCanHeaps.filter((heap) => heap.cans.length === 0).length,
+        planned: planned, missing: missing.slice(0, 6), missingCount: missing.length };
+      break;
+    }
+    if (result.cans === null) result.cans = { searched: 'no station with a heap of cans: not Kessel-9, nor any of forty large stations' };
     d.loadStation('classic', 0);
     return result;
   });
-  check('Kessel-9 has its share of them, of more than one kind, none in a bad place, and it can still be finished',
-    placing.classic.count === placing.classic.wanted && placing.classic.kinds.length >= 2 && placing.classic.problems.length === 0, placing.classic);
-  check('a generated station has more, in step with its size, none in a bad place',
-    placing.generated.count > placing.classic.count && placing.generated.count >= placing.generated.wanted - 3 && placing.generated.problems.length === 0, placing.generated);
-  check('where the draw says cans, six real cans lie loose instead of a patch of floor',
-    placing.classic.heapsOfCans >= 1 && placing.classic.cans >= placing.classic.heapsOfCans * 6 && placing.generated.cans >= placing.generated.heapsOfCans * 6, [placing.classic, placing.generated]);
+  check('Kessel-9 has its share of them, none in a bad place, and it can still be finished',
+    placing.classic.count <= placing.classic.wanted && placing.classic.count >= placing.classic.fewest && placing.classic.problems.length === 0, placing.classic);
+  check('a generated station has its share, in step with its size, none in a bad place',
+    placing.generated.wanted > placing.classic.wanted && placing.generated.count <= placing.generated.wanted && placing.generated.count >= placing.generated.fewest && placing.generated.problems.length === 0, placing.generated);
+  // The kind of each is a draw by its share (NOISY_FLOOR_KINDS). Over the two stations together, a few dozen draws,
+  // the chance that all come out one kind is below one in a billion.
+  const kindsTogether = Array.from(new Set(placing.classic.kinds.concat(placing.generated.kinds)));
+  check('between them the two stations have more than one kind', kindsTogether.length >= 2, kindsTogether);
+  check('where the draw says cans, real cans lie loose instead of a patch of floor: one at every spot each heap planned',
+    placing.cans.heaps >= 1 && placing.cans.emptyHeaps === 0 && placing.cans.planned > 0 && placing.cans.missingCount === 0, placing.cans);
   check('the same station always gets the same ones, and another seed gets others', placing.classicSame && placing.generatedSame && placing.anotherSeedDiffers,
     [placing.classicSame, placing.generatedSame, placing.anotherSeedDiffers]);
 

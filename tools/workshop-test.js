@@ -6,6 +6,10 @@ const path = require('path');
 const { chromium } = require('playwright');
 const { startDevServer, patchObjectNumbers, formatRoomFile } = require('./dev-server.js');
 
+// The pages here are not opened by browser-harness.js, so its "other stations" is done here: the number from
+// `--other-stations` of run-tests.js (or TEST_OTHER_STATIONS) is added to every seed a check builds.
+const OTHER_STATIONS = Math.max(0, Math.floor(Number(process.env.TEST_OTHER_STATIONS || 0)) || 0);
+
 const failures = [];
 function check(description, condition, detail) {
   const line = (condition ? 'ok    ' : 'FAIL  ') + description + (detail !== undefined ? '  ' + JSON.stringify(detail) : '');
@@ -124,8 +128,12 @@ function checkSourcePatching() {
       const debug = window.lastReturnDebug;
       return { mode: debug.game.mode, key: debug.roomWorkshop.key, doors: debug.doors.length, hasRoom: debug.roomWorkshop.room !== null, canvasWidth: debug.renderer.canvas.clientWidth };
     });
+    // With no rooms made in the workshop it opens on the boiler room. How many doors that has is read from where the
+    // room is written (its "sockets" in 03-levelgen.js), so that a door added there does not break this check.
+    const boilerRoomSockets = /\n  boilerRoom: \{[\s\S]*?sockets: (\[\[[^\n]*?\]\])/.exec(fs.readFileSync(path.join(root, 'src', 'js', '03-levelgen.js'), 'utf8'));
+    opened.doorsWritten = boilerRoomSockets ? (boilerRoomSockets[1].match(/WALL_/g) || []).length : -1;
     check('the workshop opens on a room written as code, with its doors, beside the panel',
-      opened.mode === 'workshop' && opened.key === 'boilerRoom' && opened.doors === 2 && !opened.hasRoom && opened.canvasWidth === 1400 - 380, opened);
+      opened.mode === 'workshop' && opened.key === 'boilerRoom' && opened.doors === opened.doorsWritten && opened.doors > 0 && !opened.hasRoom && opened.canvasWidth === 1400 - 380, opened);
 
     // --- a new room: add, select by clicking, drag, turn, undo ---
     await page.click('#workshop-new-room');
@@ -214,15 +222,15 @@ function checkSourcePatching() {
     gamePage.on('pageerror', (error) => problems.push('page error (game): ' + error.message));
     await gamePage.goto(server.address + 'game');
     await gamePage.waitForFunction(() => Boolean(window.lastReturnDebug));
-    const inStations = await gamePage.evaluate(() => {
+    const inStations = await gamePage.evaluate((otherStations) => {
       const debug = window.lastReturnDebug;
       const found = [], audits = [];
-      for (let seed = 1; seed <= 12; seed++) {
+      for (let seed = 1 + otherStations; seed <= 12 + otherStations; seed++) {
         if (!debug.loadStation('generated', seed, 'large', 'mixed', 'two')) continue;
         if (debug.zoneNames.some((name) => name.indexOf('TEST ROOM') === 0)) { found.push(seed); audits.push(debug.auditProgression().length); }
       }
-      return { found: found, audits: audits };
-    });
+      return { found: found, audits: audits, searched: found.length > 0 ? '' : 'the room is in none of twelve large stations' };
+    }, OTHER_STATIONS);
     await gamePage.close();
     check('the room is built into generated stations, which can still be finished',
       inStations.found.length > 0 && inStations.audits.every((count) => count === 0), inStations);
@@ -357,9 +365,12 @@ function checkSourcePatching() {
     await frames(6);
     const playerLongLegged = await playerLook();
     const creaturesListed = await inPage(() => Array.from(document.querySelectorAll('#workshop-creature option')).map((option) => option.value));
+    // Every kind of creature there is: the kinds in FIGURE_KINDS (04-figures.js), read from the file, in its order.
+    const figureKindsWritten = /const FIGURE_KINDS = \{([\s\S]*?)\n\};/.exec(fs.readFileSync(figuresPath, 'utf8'));
+    const creatureKinds = figureKindsWritten ? Array.from(figureKindsWritten[1].matchAll(/^  (\w+): \{/gm)).map((found) => found[1]) : [];
     check('a player is as tall as the game says you are, standing and crouched, whatever its proportions: with longer thighs it is another shape and the same height; and the tool lists every kind of creature there is',
       playerLongLegged.thigh === playerThigh && Math.abs(playerLongLegged.height - playerLongLegged.heightCrouching) < 0.015 && Math.abs(playerStanding.height - playerStanding.heightStanding) < 0.011 &&
-      creaturesListed.join() === 'hollow,dummy,player', [playerLongLegged, creaturesListed]);
+      creaturesListed.length > 0 && creaturesListed.join() === creatureKinds.join(), [playerLongLegged, creaturesListed, creatureKinds]);
     // How tall a creature is can be set here too. A player's height is a number in 00-config.js, and the slider
     // is on that number; a Still is as tall as its proportions come to, so all of them are changed together.
     const configPath = path.join(root, 'src', 'js', '00-config.js');
@@ -411,8 +422,10 @@ function checkSourcePatching() {
       };
     });
     const objectOpened = await objectState();
+    // With no objects made in the workshop it opens on the first kind written as code, whichever that is.
+    objectOpened.firstKindWrittenAsCode = await inPage(() => Object.keys(window.lastReturnDebug.looseObjectKinds)[0]);
     check('the object tool opens on a kind written as code, hanging at rest over the bench',
-      objectOpened.key === 'jar' && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
+      objectOpened.key === objectOpened.firstKindWrittenAsCode && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
 
     await page.click('#workshop-new-object');
     await page.selectOption('#workshop-add-shape', 'capsule');
@@ -572,17 +585,20 @@ function checkSourcePatching() {
     objectGamePage.on('pageerror', (error) => problems.push('page error (game): ' + error.message));
     await objectGamePage.goto(server.address + 'game');
     await objectGamePage.waitForFunction(() => Boolean(window.lastReturnDebug));
-    const objectInStations = await objectGamePage.evaluate(() => {
+    // Four stations at least, and more until one has it lying about: where it lies is a draw, which seeds win it is not known.
+    const objectInStations = await objectGamePage.evaluate((otherStations) => {
       const debug = window.lastReturnDebug;
-      const result = { lying: 0, badPlaces: [], audits: 0 };
-      for (let seed = 1; seed <= 4; seed++) {
+      const result = { lying: 0, stations: 0, badPlaces: [], audits: 0 };
+      for (let seed = 1 + otherStations; seed <= 20 + otherStations && (result.stations < 4 || result.lying === 0); seed++) {
         if (!debug.loadStation('generated', seed, 'large', 'mixed', 'two')) continue;
+        result.stations++;
         result.lying += debug.stationLooseObjects.filter((entry) => entry.kindKey === 'testThing').length;
         result.badPlaces = result.badPlaces.concat(debug.auditStationLooseObjects());
         result.audits += debug.auditProgression().length;
       }
+      if (result.lying === 0) result.searched = 'the object lies in none of ' + result.stations + ' large stations';
       return result;
-    });
+    }, OTHER_STATIONS);
     await objectGamePage.close();
     check('generated stations have the object lying about, in good places, and can still be finished',
       objectInStations.lying > 0 && objectInStations.badPlaces.length === 0 && objectInStations.audits === 0, objectInStations);
