@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Workshop, object tool: design a loose object by putting basic forms together.
 //
-// A loose object's shape is boxes, balls and capsules (`parts`, see the top of 08-loose-objects.js). Here they
+// A loose object's shape is boxes, balls, capsules, cylinders and cones (`parts`, see the top of 08-loose-objects.js). Here they
 // are added, taken hold of and moved about, the way things are placed in a room in the room tool. The object
 // on screen is the real thing: a loose object of the game's own, hanging where its parts say, so the scanner
 // lands on it and it falls, rolls and sounds exactly as it will in play ("Try it").
@@ -25,7 +25,9 @@ const OBJECT_WORKSHOP_MANY_BALLS = 120;            // TWEAK: an object that touc
 // let go of while you stand lands at about 4.5 (see looseKnockLoudSpeed in 00-config.js). A hard throw leaves
 // at what a full throw gives a thing of its weight.
 const OBJECT_WORKSHOP_DROP_SPEED = 4.5;
-const OBJECT_WORKSHOP_SHAPES = [['box', 'Box'], ['ball', 'Ball'], ['capsule', 'Capsule (a rod with round ends)']];
+const OBJECT_WORKSHOP_SHAPES = [['box', 'Box'], ['ball', 'Ball'], ['capsule', 'Capsule (a rod with round ends)'],
+  ['cylinder', 'Cylinder (a rod with flat ends)'], ['cone', 'Cone (flat at one end, a point at the other)']];
+const OBJECT_WORKSHOP_SHAPE_NAMES = { box: 'Box', ball: 'Ball', capsule: 'Capsule', cylinder: 'Cylinder', cone: 'Cone' };
 const OBJECT_WORKSHOP_AXIS_NAMES = ['x: to your right', 'y: up', 'z: towards you'];
 
 const objectWorkshop = {
@@ -72,7 +74,8 @@ function getObjectWorkshopChoices() {
 
 function getDefaultObjectWorkshopKey() {
   for (const key in designedObjects) return key;
-  return 'canister';
+  for (const key in LOOSE_OBJECT_KINDS) return key; // none made yet: the first kind written as code, to look at
+  return '';
 }
 
 // Opens an object. `draft` (optional) is a working copy to carry on with instead of the object's file.
@@ -169,21 +172,36 @@ function rebuildObjectWorkshopBody() {
 // The smallest upright box round some parts, in the object's own coordinates: { low: [x, y, z], high: [x, y, z] }.
 function getObjectWorkshopExtents(parts) {
   const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+  const include = function (axis, place, reach) {
+    low[axis] = Math.min(low[axis], place - reach);
+    high[axis] = Math.max(high[axis], place + reach);
+  };
   for (const part of parts) {
+    const length = isObjectWorkshopRod(part) ? Math.hypot(part.to[0] - part.from[0], part.to[1] - part.from[1], part.to[2] - part.from[2]) || 1 : 0;
     for (let axis = 0; axis < 3; axis++) {
-      const reach = part.shape === 'box' ? part.half[axis] : part.radius;
-      for (const place of part.shape === 'capsule' ? [part.from, part.to] : [part.center]) {
-        low[axis] = Math.min(low[axis], place[axis] - reach);
-        high[axis] = Math.max(high[axis], place[axis] + reach);
+      if (!isObjectWorkshopRod(part)) { include(axis, part.center[axis], part.shape === 'box' ? part.half[axis] : part.radius); continue; }
+      // A round end reaches its radius every way. A flat end reaches less the more it faces that way, and the
+      // point of a cone not at all.
+      let reach = part.radius;
+      if (part.shape !== 'capsule') {
+        const facing = (part.to[axis] - part.from[axis]) / length;
+        reach = part.radius * Math.sqrt(Math.max(0, 1 - facing * facing));
       }
+      include(axis, part.from[axis], reach);
+      include(axis, part.to[axis], part.shape === 'cone' ? 0 : reach);
     }
   }
   return { low: low, high: high };
 }
 
+// Is this part a rod from one place to another (a capsule, a cylinder, a cone), and not something with a middle?
+function isObjectWorkshopRod(part) {
+  return DESIGNED_ROD_SHAPES.indexOf(part.shape) >= 0;
+}
+
 function describeObjectWorkshopPart(part, partIndex) {
-  const place = part.shape === 'capsule' ? [0, 1, 2].map(function (axis) { return (part.from[axis] + part.to[axis]) / 2; }) : part.center;
-  return (partIndex + 1) + '. ' + (part.shape === 'box' ? 'Box' : (part.shape === 'ball' ? 'Ball' : 'Capsule')) + ' · ' + place.map(formatWorkshopNumber).join(', ');
+  const place = isObjectWorkshopRod(part) ? [0, 1, 2].map(function (axis) { return (part.from[axis] + part.to[axis]) / 2; }) : part.center;
+  return (partIndex + 1) + '. ' + OBJECT_WORKSHOP_SHAPE_NAMES[part.shape] + ' · ' + place.map(formatWorkshopNumber).join(', ');
 }
 
 // Things that would go wrong: a name that will not do, a shape that costs too much to move.
@@ -201,7 +219,7 @@ function findObjectWorkshopProblems() {
   }
   const ballCount = state.body.prepared.shellCount;
   if (ballCount > OBJECT_WORKSHOP_MANY_BALLS) {
-    problems.push('It touches the station with ' + ballCount + ' balls (B shows them). Over ' + OBJECT_WORKSHOP_MANY_BALLS + ', every one of them in a station costs time whenever it moves: fewer or smaller boxes.');
+    problems.push('It touches the station with ' + ballCount + ' balls (B shows them). Over ' + OBJECT_WORKSHOP_MANY_BALLS + ', every one of them in a station costs time whenever it moves: fewer or smaller boxes, shorter or thicker rods and cones.');
   }
   return problems;
 }
@@ -358,7 +376,7 @@ function deleteSelectedObjectWorkshopPart() {
 // A copy of a part, moved by [x, y, z].
 function shiftObjectWorkshopPart(part, shift) {
   const moved = JSON.parse(JSON.stringify(part));
-  for (const name of moved.shape === 'capsule' ? ['from', 'to'] : ['center']) {
+  for (const name of isObjectWorkshopRod(moved) ? ['from', 'to'] : ['center']) {
     for (let axis = 0; axis < 3; axis++) moved[name][axis] += shift[axis];
   }
   return normalizeDesignedPart(moved);
@@ -506,7 +524,8 @@ function renderObjectWorkshopSelection(body) {
       state.selectedSetters[name + axis] = field;
     }
   };
-  if (part.shape === 'capsule') { addPlace('from', 'One end'); addPlace('to', 'The other end'); }
+  if (part.shape === 'cone') { addPlace('from', 'The flat end'); addPlace('to', 'The point'); }
+  else if (isObjectWorkshopRod(part)) { addPlace('from', 'One end'); addPlace('to', 'The other end'); }
   else addPlace('center', 'Its middle');
   if (part.shape === 'box') {
     ['Width (x)', 'Height (y)', 'Depth (z)'].forEach(function (label, axis) {
@@ -515,7 +534,7 @@ function renderObjectWorkshopSelection(body) {
       }).element.id = 'workshop-part-size' + axis;
     });
   } else {
-    addWorkshopNumber(body, part.shape === 'ball' ? 'Radius' : 'Thickness (radius)', part.radius, limits.minimumRadius, limits.maximumRadius, 0.005, function (value) {
+    addWorkshopNumber(body, part.shape === 'ball' ? 'Radius' : (part.shape === 'cone' ? 'Radius of the flat end' : 'Thickness (radius)'), part.radius, limits.minimumRadius, limits.maximumRadius, 0.005, function (value) {
       beginObjectWorkshopEdit('part radius'); selected().radius = value; finishObjectWorkshopEdit();
     }).element.id = 'workshop-part-radius';
   }
@@ -571,7 +590,7 @@ function renderObjectWorkshopPanel(body) {
   addWorkshopHeading(body, 'Look');
   addWorkshopCheckbox(body, 'Lights on (L). Off: what the scanner shows, which is all a player sees of it', workshop.isLit, function (isLit) { setWorkshopLights(isLit); });
   addWorkshopCheckbox(body, 'Mark the balls it touches the station with (B)', state.showsShell, function (isOn) { state.showsShell = isOn; markWorkshopStateChanged(); },
-    'An object does not touch with its boxes but with a shell of small balls made from them. This is why a box lands on a corner and tips over, and why a rod with round ends cannot stand.');
+    'An object does not touch with its boxes but with a shell of small balls made from them. This is why a box lands on a corner and tips over, and why a rod with round ends cannot stand. A cylinder stands on either flat end and a cone on its one; their rims, and the point of a cone, are a little rounder to the touch than they look.');
   const scaleChoices = [['', 'Nothing']];
   for (const key in LOOSE_OBJECT_KINDS) {
     if (key !== OBJECT_WORKSHOP_DRAFT_KEY) scaleChoices.push([key, 'A ' + LOOSE_OBJECT_KINDS[key].label]);
@@ -658,7 +677,7 @@ function onObjectWorkshopPointerMove(event) {
   const distance = ((grab.point[0] - ray.originX) * grab.facing[0] + (grab.point[1] - ray.originY) * grab.facing[1] + (grab.point[2] - ray.originZ) * grab.facing[2]) / towards;
   const moved = [ray.originX + ray.directionX * distance - grab.point[0], ray.originY + ray.directionY * distance - grab.point[1], ray.originZ + ray.directionZ * distance - grab.point[2]];
   // Its middle (or a rod's first end) lands on whole centimetres.
-  const start = JSON.parse(grab.part), anchor = start.shape === 'capsule' ? start.from : start.center;
+  const start = JSON.parse(grab.part), anchor = isObjectWorkshopRod(start) ? start.from : start.center;
   const snap = event.ctrlKey ? 0.05 : 0.01;
   replaceSelectedObjectWorkshopPart(shiftObjectWorkshopPart(start, moved.map(function (amount, axis) {
     return Math.round((anchor[axis] + amount) / snap) * snap - anchor[axis];

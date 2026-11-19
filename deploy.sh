@@ -5,6 +5,9 @@
 #   ./deploy.sh build-90     any tag in the registry, which is also how to go back to an older one
 #   ./deploy.sh build-93 --dry-run=server     anything after the tag is handed to helm
 #
+# An image from before the game had lobbies is nginx on port 80, and this chart is for the Node server on
+# port 8080. To go back to one of those, run the deploy.sh of that commit: it brings its own chart.
+#
 # Only the image tag changes. The registry, the hostname and the issuer are the ones the release
 # was installed with, so none of them has to be written down here.
 set -euo pipefail

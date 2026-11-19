@@ -3,7 +3,7 @@
 //
 // Such an object is not written as code. It is one file in src/objects/, packed into the page by build.js,
 // and holds what an entry of LOOSE_OBJECT_KINDS (08-loose-objects.js) holds: what it is called, what it
-// weighs, what it is worth and how badly a knock costs it, what it sounds like, and its shape as boxes, balls and capsules. This file turns
+// weighs, what it is worth and how badly a knock costs it, what it sounds like, and its shape as boxes, balls, capsules, cylinders and cones. This file turns
 // each of them into an ordinary kind of loose object, and puts it among a station's litter or its valuables
 // if the file asks for that.
 //
@@ -16,6 +16,9 @@
 // TWEAK: how many parts a workshop object may have, how far from its own origin a part may be (metres), and
 // how thin and how thick a part may be (a radius, or half the size of a box).
 const DESIGNED_OBJECT_LIMITS = { maximumParts: 16, reach: 1, minimumRadius: 0.01, maximumRadius: 0.5, minimumHalf: 0.01, maximumHalf: 0.75 };
+// The parts that are a rod from one place to another, `radius` thick: with round ends, with flat ends, and
+// flat at `from` with a point at `to`.
+const DESIGNED_ROD_SHAPES = ['capsule', 'cylinder', 'cone'];
 
 // What an object has besides its name and its shape. `defaultValue` is used when a file leaves one out.
 // (numberField and the others are in 03-workshop-rooms.js.)
@@ -29,7 +32,7 @@ const DESIGNED_OBJECT_FIELDS = [
   numberField('loud', 'How far its knocks carry for its weight (1 is ordinary; over 1 it shows in the warning colour)', 1, 0.3, 2.5, 0.1),
   choiceField('lies', 'How a station puts it out', 'upright', [['upright', 'Upright, as its parts are given'], ['onItsSide', 'On its side (a quarter turn over)'], ['either', 'Either']]),
   booleanField('bulky', 'Bulky: you cannot run with it', false),
-  numberField('bounce', 'Bounce: how much of its speed it keeps (a glass jar 0.2, a steel pipe 0.35)', 0.25, 0, 0.8, 0.05),
+  numberField('bounce', 'Bounce: how much of its speed it keeps (a glass jar 0.2, a steel pipe 0.35)', 0.25, 0, 1, 0.05),
   numberField('grip', 'Grip: low slides like a puck, high stops and tips over', 0.5, 0, 1, 0.05)
 ];
 // Where a generated station has it lying about, and how often among its sort: 0 is never. These are the weights
@@ -48,7 +51,7 @@ function normalizeDesignedPlace(source, fallback) {
   });
 }
 
-// Returns a clean copy of one part, or null if it is not a box, a ball or a capsule.
+// Returns a clean copy of one part, or null if it is not a box, a ball, a capsule, a cylinder or a cone.
 function normalizeDesignedPart(source) {
   const limits = DESIGNED_OBJECT_LIMITS;
   if (!source || typeof source !== 'object') return null;
@@ -59,8 +62,8 @@ function normalizeDesignedPart(source) {
     }) };
   }
   if (source.shape === 'ball') return { shape: 'ball', center: normalizeDesignedPlace(source.center, [0, 0, 0]), radius: radius(0.08) };
-  if (source.shape !== 'capsule') return null;
-  const part = { shape: 'capsule', from: normalizeDesignedPlace(source.from, [0, -0.1, 0]), to: normalizeDesignedPlace(source.to, [0, 0.1, 0]), radius: radius(0.05) };
+  if (DESIGNED_ROD_SHAPES.indexOf(source.shape) < 0) return null;
+  const part = { shape: source.shape, from: normalizeDesignedPlace(source.from, [0, -0.1, 0]), to: normalizeDesignedPlace(source.to, [0, 0.1, 0]), radius: radius(source.shape === 'cone' ? 0.08 : 0.05) };
   // A rod with no length has no direction to be drawn in: it gets a little.
   if (Math.abs(part.to[0] - part.from[0]) + Math.abs(part.to[1] - part.from[1]) + Math.abs(part.to[2] - part.from[2]) < 0.001) {
     part.to[1] = part.from[1] + (part.from[1] > 0 ? -0.02 : 0.02);
@@ -92,8 +95,12 @@ function createDesignedObjectKind(object) {
   if (!(kind.shattersAt > 0)) delete kind.shattersAt;
   // Something thin (a plate, a wire) is stepped as if it were a shelf board thick, as the steel plate is:
   // nothing in a station is thinner than that for it to pass through, and finer steps slow everything that moves with it.
+  // How thin it is, is how small the smallest ball is that it touches with: for a box half its thinnest side, for
+  // a cylinder or a cone the balls in the corners of its flat ends and at its point.
   let thinnest = Infinity;
-  for (const part of kind.parts) thinnest = Math.min(thinnest, part.shape === 'box' ? Math.min(part.half[0], part.half[1], part.half[2]) : part.radius);
+  const balls = [];
+  for (const part of kind.parts) addShellBallsForPart(part, balls);
+  for (const ball of balls) thinnest = Math.min(thinnest, ball[3]);
   if (thinnest < 0.025) kind.stepRadius = 0.025;
   return kind;
 }

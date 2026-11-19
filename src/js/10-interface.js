@@ -43,7 +43,9 @@ function initializeInterface() {
     'button-pause-restart', 'reader-source', 'reader-heading', 'reader-body', 'button-close-reader', 'death-title',
     'death-lines', 'button-retry', 'button-death-restart', 'ending-stats', 'ending-manifest', 'button-ending-restart',
     'button-ending-uncharted', 'station-options', 'work-order-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem',
-    'title-build', 'link-report-problem-title'
+    'title-build', 'link-report-problem-title',
+    'together-options', 'together-apart', 'together-lobby', 'together-lobby-code', 'together-code', 'together-status',
+    'button-host-lobby', 'button-join-lobby', 'button-leave-lobby', 'button-lock-lobby'
   ];
   for (const elementId of elementIds) interfaceState.elements[elementId] = getElement(elementId);
 
@@ -55,7 +57,7 @@ function initializeInterface() {
   clearMap();
 
   const elements = interfaceState.elements;
-  elements['button-begin'].addEventListener('click', function () { beginNewGame(); });
+  elements['button-begin'].addEventListener('click', function () { beginFromTitle(); });
   // Which build this is, and "Report a problem", on the title screen and the pause screen. The address is worked
   // out at the moment the link is reached for, so it carries the settings as they are then.
   elements['title-build'].textContent = 'Version: ' + describeBuild();
@@ -129,6 +131,7 @@ function initializeInterface() {
   }
   buildCustomDifficultyPanel(refreshDifficulty);
   refreshDifficulty();
+  interfaceState.refreshDifficulty = refreshDifficulty;
 
   // Which work orders an uncharted annex may give you: a tick for each (WORK_ORDERS in 09-quests.js). A descent
   // has one of those that are ticked; the seed says which. At least one stays ticked.
@@ -299,7 +302,7 @@ function clearMap() {
 }
 
 function plotPointOnMap(x, z, surfaceClass) {
-  if (surfaceClass === SURFACE_HOLLOW || surfaceClass === SURFACE_STILL || surfaceClass === SURFACE_CEILING) return;
+  if (surfaceClass === SURFACE_HOLLOW || surfaceClass === SURFACE_STILL || surfaceClass === SURFACE_PLAYER || surfaceClass === SURFACE_CEILING) return;
   const pixelX = Math.floor(x * MAP_PIXELS_PER_METRE), pixelZ = Math.floor(z * MAP_PIXELS_PER_METRE);
   if (pixelX < 0 || pixelZ < 0 || pixelX >= MAP_WIDTH || pixelZ >= MAP_HEIGHT) return;
   const data = interfaceState.mapImageData.data;
@@ -841,7 +844,7 @@ function updateHud(realDt) {
     elements['chip-extra'].textContent = extraText;
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
-    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase() + (getLooseObjectWorth(carried) > 0 ? ' · ' + getLooseObjectWorth(carried) : '');
+    if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase();
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];
@@ -981,13 +984,21 @@ function showDeathScreen(kind) {
     paragraph.textContent = lineText;
     lines.appendChild(paragraph);
   }
-  // One life (a custom threat level can ask for it): there is no checkpoint to go back to.
-  if (!game.difficulty.checkpointsEnabled) {
+  // Down there with others there is no checkpoint: your scanner lies where you fell, and one of them can carry it back.
+  const isForOthersToUndo = isWorldShared();
+  if (isForOthersToUndo) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = game.isLeftBehind ? 'The car has gone up without you. Nobody carried your scanner back, and this descent is over for you.'
+      : game.isDescentLost ? 'Nobody is left to carry anybody back. This descent is over.'
+      : 'Your scanner lies where you fell, still lit. If one of the others carries it to the lift, or into an open salvage bay, it restarts.';
+    lines.appendChild(paragraph);
+  } else if (!game.difficulty.checkpointsEnabled) {
+    // One life (a custom threat level can ask for it): there is no checkpoint to go back to.
     const paragraph = document.createElement('p');
     paragraph.textContent = 'One life. This descent is over.';
     lines.appendChild(paragraph);
   }
-  elements['button-retry'].hidden = !game.difficulty.checkpointsEnabled;
+  elements['button-retry'].hidden = isForOthersToUndo || !game.difficulty.checkpointsEnabled;
   setHudVisible(false);
   closeMapOverlay();
   showOnlyScreen('screen-death');

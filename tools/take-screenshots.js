@@ -163,7 +163,7 @@ async function takeDebugModeShot(page) {
   const wants = (name) => requested.length === 0 || requested.includes(name);
 
   // ---- desktop, 1920 x 1080 ----
-  const { browser, page, problems } = await openGame({ deviceScaleFactor: 1.5 });
+  const { browser, page, problems } = await openGame({ deviceScaleFactor: 1.5, workshopContent: true });
   await page.evaluate(() => { window.lastReturnDebug.settings.hud = 'full'; }); // the pictures show the full instrument screen
   if (wants('title')) {
     for (let pump = 0; pump < 45; pump++) await drawFrames(page, 1); // let the title screen scan the lobby for a while
@@ -185,7 +185,7 @@ async function takeDebugModeShot(page) {
 
   // ---- debug mode, in the dev build ----
   if (wants('debug-mode')) {
-    const dev = await openGame({ deviceScaleFactor: 1.5, dev: true });
+    const dev = await openGame({ deviceScaleFactor: 1.5, dev: true, workshopContent: true });
     await startGame(dev.page, false);
     await dev.page.evaluate(() => {
       const debug = window.lastReturnDebug;
@@ -200,7 +200,7 @@ async function takeDebugModeShot(page) {
 
   // ---- a generated station, drawn in full with debug mode's "Reveal the whole map" ----
   if (wants('uncharted-map')) {
-    const uncharted = await openGame({ deviceScaleFactor: 1.5, dev: true });
+    const uncharted = await openGame({ deviceScaleFactor: 1.5, dev: true, workshopContent: true });
     await uncharted.page.evaluate(() => { window.lastReturnDebug.settings.hud = 'full'; }); // the dev build: debug mode is not in the game itself
     await uncharted.page.evaluate(() => document.getElementById('station-generated').click());
     await uncharted.page.selectOption('#title-station-size', 'medium');
@@ -216,7 +216,7 @@ async function takeDebugModeShot(page) {
 
   // ---- phone ----
   if (wants('phone')) {
-    const phone = await openGame({ width: 844, height: 390, deviceScaleFactor: 2, isPhone: true });
+    const phone = await openGame({ width: 844, height: 390, deviceScaleFactor: 2, isPhone: true, workshopContent: true });
     await phone.page.evaluate(() => { window.lastReturnDebug.settings.hud = 'full'; }); // held sideways
     await startGame(phone.page, true);
     await scanFrom(phone.page, [

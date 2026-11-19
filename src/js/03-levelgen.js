@@ -877,6 +877,13 @@ function planSecondStair(plan) {
   return undo();
 }
 
+// Whether generated stations use what was made in the workshop: the rooms in src/rooms/ and the loose things in
+// src/objects/. They do, always, in play. The checks in tools/ that need one particular station (one with a
+// vent cover lying where it can be walked over, say) switch it off for that station, through the test hook: a
+// seed then builds what the code alone builds, and a new room or a new object from the workshop does not make
+// it another station. (What the workshop makes has checks of its own, on stations built with all of it.)
+let isWorkshopContentUsed = true;
+
 function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
   const size = GENERATED_SIZE_PRESETS[sizeKey] || GENERATED_SIZE_PRESETS.medium;
   const plan = createLevelPlan();
@@ -918,7 +925,7 @@ function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
   if (!plan.spine) return null;
 
   // Which rooms, in which tier. Every station has the same thirteen; the extra rooms vary.
-  const fillerKeys = Object.keys(ROOM_CATALOGUE).filter(function (key) { return ROOM_CATALOGUE[key].isFiller; });
+  const fillerKeys = Object.keys(ROOM_CATALOGUE).filter(function (key) { return ROOM_CATALOGUE[key].isFiller && (isWorkshopContentUsed || !ROOM_CATALOGUE[key].isDesigned); });
   const timesFillerUsed = {};
   const pickFillers = function (tier, count, mustHaveItemSpot) {
     // No extra room appears more than twice in one station.

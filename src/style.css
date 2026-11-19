@@ -269,6 +269,13 @@ kbd { display: inline-block; margin-right: 3px; padding: 0 6px; border: 1px soli
 .station-row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-end; }
 .work-order-group { margin-top: 10px; }
 .work-order-group[hidden] { display: none; }
+.together-group { margin-top: 14px; }
+.together-code { font-family: var(--font-data); font-size: 12px; letter-spacing: 0.16em; color: var(--text-dim); align-self: center; }
+.together-code b { color: var(--return); font-size: 18px; letter-spacing: 0.3em; margin-left: 6px; }
+.together-status { flex-basis: 100%; min-height: 1.4em; }
+#button-begin:disabled { opacity: 0.45; cursor: default; }
+.title-block fieldset:disabled, .station-options :disabled { opacity: 0.6; }
+.title-block fieldset:disabled .pill, .title-block fieldset:disabled .pill input { cursor: default; }
 .station-options { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-end; }
 .station-options[hidden] { display: none; }
 .station-options label { display: flex; flex-direction: column; gap: 6px; font-family: var(--font-data); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--instrument-dim); }

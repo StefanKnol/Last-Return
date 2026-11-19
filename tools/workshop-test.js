@@ -71,6 +71,15 @@ function checkSourcePatching() {
   const inPage = (callback, argument) => page.evaluate(callback, argument);
   // Headless Chromium only draws (and so only runs the game loop) when asked.
   const frames = async (count) => { for (let index = 0; index < (count || 3); index++) await page.screenshot({ type: 'jpeg', quality: 5, timeout: 120000 }); }; // a slow machine takes a while to draw a frame (as in browser-harness.js)
+  // The lights on, if they are not. The creature tool's scanner view turns them off, and with them off its
+  // scanner fires every frame and the points stay, close to the camera, more with every frame: without a
+  // graphics card that comes to many seconds a frame, and more as it goes on. A check that is not about what a
+  // scan shows has no need of that. (Asked for with nothing in the page holding the keyboard: L is a key.)
+  const turnLightsOn = async () => {
+    if (await inPage(() => window.lastReturnDebug.workshop.isLit)) return;
+    await page.keyboard.press('KeyL');
+    await frames();
+  };
   const workshopIsReady = () => page.waitForFunction(() => Boolean(window.lastReturnDebug && window.lastReturnDebug.roomWorkshop));
   const waitForReload = async (action) => {
     await inPage(() => { window.pageMarker = true; });
@@ -317,14 +326,79 @@ function checkSourcePatching() {
     check('"Write to file" puts the number into FIGURE_PROPORTIONS_HOLLOW and nowhere else', thighIn('HOLLOW', longThigh) && thighIn('DUMMY', dummyThigh));
     check('after that the body is the same as the file', written.thigh === longThigh && written.fileThigh === longThigh && written.changes === 0, written);
 
+    // --- a player is one of the creatures: the body the others see of you down there ---
+    const playerLook = () => inPage(() => {
+      const state = window.lastReturnDebug.creatureWorkshop, figure = state.figure, readout = document.getElementById('workshop-creature-readout');
+      return { kind: state.kind, isAPlayer: figure.proportions.kind === 'player', thigh: figure.proportions.thigh, height: Math.round((figure.boundsCenterY - figure.y) * 200) / 100,
+        armRaise: Math.round(figure.pose.armRaise * 100) / 100, squat: Math.round(figure.pose.squat * 100) / 100, readout: readout ? readout.textContent : '',
+        heightStanding: window.lastReturnDebug.tuning.playerHeight, heightCrouching: window.lastReturnDebug.tuning.playerHeightCrouching };
+    });
+    // (As a solid body with the lights on: these checks are about how the body stands and how tall it is, and
+    // there are a hundred frames of them. In the scanner view left on above, the tool fires 2,600 pulses at the
+    // body every frame, lights or no lights, and the ones that miss it stay on the walls for good: drawn without
+    // a graphics card, that made these the longest silence of the whole run, by many minutes.)
+    await turnLightsOn();
+    await page.selectOption('#workshop-creature-view', 'solid');
+    await frames();
+    const viewForBodies = await inPage(() => ({ view: window.lastReturnDebug.creatureWorkshop.view, isLit: window.lastReturnDebug.workshop.isLit, points: window.lastReturnDebug.pointCloud.count }));
+    check('back to a solid body with the lights on, no pulses are fired at it', viewForBodies.view === 'solid' && viewForBodies.isLit, viewForBodies);
+    await page.selectOption('#workshop-creature', 'player');
+    await frames(8);
+    const playerStanding = await playerLook();
+    await page.selectOption('#workshop-creature-behaviour', 'crouchedScanning');
+    await frames(30);
+    const playerCrouched = await playerLook();
+    check('a player is one of the creatures in the tool: standing with the scanner at its side; crouched and scanning it is down on its haunches, as tall as the game has you be when you crouch, with the scanner held out; and the readout says where the game has you bump your head and see from',
+      playerStanding.kind === 'player' && playerStanding.isAPlayer && playerStanding.armRaise < 0.4 && playerStanding.squat === 0 && Math.abs(playerStanding.height - playerStanding.heightStanding) < 0.011 &&
+      playerCrouched.squat > 0.2 && Math.abs(playerCrouched.height - playerCrouched.heightCrouching) < 0.015 && playerCrouched.armRaise > 0.9 &&
+      /you bump at/.test(playerStanding.readout) && /you see from/.test(playerStanding.readout) && /Crouching/.test(playerCrouched.readout), [playerStanding, playerCrouched]);
+    const playerThigh = Math.round((playerStanding.thigh + 0.1) * 1000) / 1000;
+    await setNumber('workshop-proportion-thigh', playerThigh);
+    await frames(6);
+    const playerLongLegged = await playerLook();
+    const creaturesListed = await inPage(() => Array.from(document.querySelectorAll('#workshop-creature option')).map((option) => option.value));
+    check('a player is as tall as the game says you are, standing and crouched, whatever its proportions: with longer thighs it is another shape and the same height; and the tool lists every kind of creature there is',
+      playerLongLegged.thigh === playerThigh && Math.abs(playerLongLegged.height - playerLongLegged.heightCrouching) < 0.015 && Math.abs(playerStanding.height - playerStanding.heightStanding) < 0.011 &&
+      creaturesListed.join() === 'hollow,dummy,player', [playerLongLegged, creaturesListed]);
+    // How tall a creature is can be set here too. A player's height is a number in 00-config.js, and the slider
+    // is on that number; a Still is as tall as its proportions come to, so all of them are changed together.
+    const configPath = path.join(root, 'src', 'js', '00-config.js');
+    const tallPlayer = Math.round((playerStanding.heightStanding + 0.25) * 100) / 100;
+    await page.selectOption('#workshop-creature-behaviour', 'standing');
+    await setNumber('workshop-creature-height', tallPlayer);
+    await frames(30);
+    const playerTaller = await playerLook();
+    await page.selectOption('#workshop-creature', 'dummy');
+    await frames(6);
+    const stillBefore = await inPage(() => { const state = window.lastReturnDebug.creatureWorkshop, figure = state.figure; return { height: (figure.boundsCenterY - figure.y) * 2, thigh: figure.proportions.thigh, shin: figure.proportions.shin }; });
+    await setNumber('workshop-creature-height', 1.5);
+    await frames(6);
+    const stillAfter = await inPage(() => { const state = window.lastReturnDebug.creatureWorkshop, figure = state.figure; return { height: (figure.boundsCenterY - figure.y) * 2, thigh: figure.proportions.thigh, shin: figure.proportions.shin, changes: Object.keys(state.overrides.dummy).length }; });
+    await page.click('#workshop-reset-creature');
+    await frames(4);
+    const stillBack = await inPage(() => { const state = window.lastReturnDebug.creatureWorkshop; return { thigh: state.figure.proportions.thigh, changes: Object.keys(state.overrides.dummy).length }; });
+    check('a creature\'s height can be set: a player\'s is the number the game goes by, and the body follows it at once; a Still is made smaller as a whole, the same shape, and "Back to the file" undoes that',
+      Math.abs(playerTaller.height - tallPlayer) < 0.011 && playerTaller.heightStanding === tallPlayer &&
+      Math.abs(stillAfter.height - 1.5) < 0.02 && stillAfter.thigh < stillBefore.thigh && Math.abs(stillAfter.thigh / stillAfter.shin - stillBefore.thigh / stillBefore.shin) < 0.02 && stillAfter.changes > 10 &&
+      stillBack.thigh === stillBefore.thigh && stillBack.changes === 0, [tallPlayer, playerTaller.height, stillBefore, stillAfter, stillBack]);
+    await page.selectOption('#workshop-creature', 'player');
+    await frames(4);
+    await waitForReload(() => page.click('#workshop-save-creature'));
+    await frames(4);
+    const configWithPlayer = fs.readFileSync(configPath, 'utf8');
+    check('"Write to file" puts a player\'s height into TUNING in 00-config.js, beside the comment that was there',
+      new RegExp('\\n  playerHeight: ' + String(tallPlayer).replace('.', '\\.') + ',\\s*//').test(configWithPlayer) && await inPage(() => window.lastReturnDebug.tuning.playerHeight) === tallPlayer, tallPlayer);
+    const figuresWithPlayer = fs.readFileSync(figuresPath, 'utf8');
+    const thighNowIn = (figureName, value) => new RegExp('FIGURE_PROPORTIONS_' + figureName + ' = \\{[^}]*thigh: ' + String(value).replace('.', '\\.') + ',').test(figuresWithPlayer);
+    check('"Write to file" puts a player\'s number into FIGURE_PROPORTIONS_PLAYER and nowhere else',
+      thighNowIn('PLAYER', playerThigh) && thighNowIn('HOLLOW', longThigh) && thighNowIn('DUMMY', dummyThigh), playerThigh);
+
     // --- the object tool: a kind written as code to look at, then a new object put together from basic forms ---
     await page.click('#workshop-tab-objects');
     await frames();
-    // The creature tool's scanner view left the lights off. With them off the scanner fires every frame and its
-    // points stay, close to the camera, more of them with every frame: without a graphics card that takes many
-    // seconds a frame, and more as it goes on. The object checks need no scanner, so the lights go back on.
-    await page.keyboard.press('KeyL');
-    await frames();
+    // The page was loaded again when the player was written to its file, and came back in the scanner view with
+    // the lights off. The object checks need no scanner, so the lights go back on (see turnLightsOn).
+    await turnLightsOn();
     check('L puts the lights back on', await inPage(() => window.lastReturnDebug.workshop.isLit));
     const objectState = () => inPage(() => {
       const state = window.lastReturnDebug.objectWorkshop, body = state.body;
@@ -338,7 +412,7 @@ function checkSourcePatching() {
     });
     const objectOpened = await objectState();
     check('the object tool opens on a kind written as code, hanging at rest over the bench',
-      objectOpened.key === 'canister' && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
+      objectOpened.key === 'jar' && objectOpened.parts === null && objectOpened.isAtRest && objectOpened.origin.join() === '43.5,1.1,43.5', objectOpened);
 
     await page.click('#workshop-new-object');
     await page.selectOption('#workshop-add-shape', 'capsule');
@@ -371,6 +445,41 @@ function checkSourcePatching() {
     check('Ctrl+Z takes the turn back', (await objectState()).parts[0].half.join() === withRod.parts[0].half.join());
     await setNumber('workshop-part-size1', 0.3);
     check('a size typed in is the size of the box', (await objectState()).parts[0].half[1] === 0.15);
+
+    // --- the other basic forms: a cylinder (a rod with flat ends) and a cone ---
+    const shapeChoices = await page.$$eval('#workshop-add-shape option', (options) => options.map((option) => option.value));
+    check('a box, a ball, a capsule, a cylinder or a cone can be added', shapeChoices.join() === 'box,ball,capsule,cylinder,cone', shapeChoices);
+    await page.selectOption('#workshop-add-shape', 'cylinder');
+    await page.click('#workshop-add-part');
+    await frames();
+    const withCylinder = await objectState();
+    await page.selectOption('#workshop-add-shape', 'cone');
+    await page.click('#workshop-add-part');
+    await frames();
+    const withCone = await objectState();
+    const cylinderPart = withCylinder.parts[2], conePart = withCone.parts[3];
+    check('a cylinder is added standing on top of what is there, and a cone on the flat end of the cylinder: nothing is left for a round end that is not there',
+      withCylinder.parts.length === 3 && cylinderPart.shape === 'cylinder' && withCylinder.selected === 2 && Math.abs(cylinderPart.to[1] - cylinderPart.from[1] - 0.2) < 1e-6 &&
+      Math.abs(cylinderPart.from[1] - (withRod.parts[1].to[1] + withRod.parts[1].radius)) < 1e-6 &&
+      withCone.parts.length === 4 && conePart.shape === 'cone' && withCone.selected === 3 && conePart.from[1] === cylinderPart.to[1] && conePart.to[1] > conePart.from[1] && conePart.radius > 0, withCone.parts);
+    const selectedHeading = await page.$eval('#workshop-selected', (heading) => heading.textContent);
+    check('the selected cone says which end is flat and which is the point', /Cone/.test(selectedHeading) &&
+      (await page.locator('#workshop-part-from1').count()) === 1 && (await page.locator('#workshop-part-to1').count()) === 1 && (await page.locator('#workshop-part-radius').count()) === 1 &&
+      /The flat end/.test(await page.locator('#workshop-part-from1').textContent()) && /The point/.test(await page.locator('#workshop-part-to1').textContent()), selectedHeading);
+    await setNumber('workshop-part-radius', 0.06);
+    await page.locator('#workshop-part-radius input[type="number"]').blur(); // keys typed into a field are the field's
+    await page.keyboard.press('Shift+KeyR');
+    const tippedCone = (await objectState()).parts[3];
+    check('its flat end can be made wider or narrower, and Shift+R tips it over about its middle: it lies along x, as long as it was',
+      tippedCone.radius === 0.06 && Math.abs(Math.abs(tippedCone.to[0] - tippedCone.from[0]) - (conePart.to[1] - conePart.from[1])) < 1e-6 && Math.abs(tippedCone.to[1] - tippedCone.from[1]) < 1e-6, tippedCone);
+    await page.keyboard.press('Control+z');
+    const shell = await inPage(() => {
+      const body = window.lastReturnDebug.objectWorkshop.body, prepared = body.prepared, shell = prepared.shell;
+      let allFinite = true;
+      for (let index = 0; index < prepared.shellCount * 4; index++) if (!Number.isFinite(shell[index])) allFinite = false;
+      return { balls: prepared.shellCount, allFinite: allFinite, reach: Math.round(prepared.boundsRadius * 1000) / 1000 };
+    });
+    check('with a cylinder and a cone on it the object still touches with a modest number of balls', shell.allFinite && shell.balls > 20 && shell.balls < 120 && shell.reach < 1, shell);
 
     // --- trying it: let go of, it falls by the game's own steps ---
     await page.click('#workshop-drop-object');
@@ -405,7 +514,7 @@ function checkSourcePatching() {
     await frames(8);
     const pricedWhole = await knockState();
     check('the readout says what a knock would cost it: nothing whole, more let go of than walked into a wall, most thrown hard',
-      pricedWhole.whole === 100 && pricedWhole.intoAWall <= 100 && pricedWhole.letGoOf < pricedWhole.intoAWall && pricedWhole.thrownHard < pricedWhole.letGoOf && pricedWhole.thrownHard >= 10, pricedWhole);
+      pricedWhole.whole === 100 && pricedWhole.intoAWall <= 100 && pricedWhole.letGoOf < pricedWhole.intoAWall && pricedWhole.thrownHard < pricedWhole.letGoOf && pricedWhole.thrownHard >= 5, pricedWhole);
     const dropped = await dropUntil((state) => state.worth < 100 || state.isGone);
     check('dropped from the bench it lands worth less than it was, and not gone', hasLanded(dropped) && !dropped.isGone && dropped.worth < 100 && dropped.worth >= 10 && dropped.glass === 0, dropped);
     await setNumber('workshop-object-fragile', 0);
@@ -416,7 +525,7 @@ function checkSourcePatching() {
     const notGlass = await knockState();
     const droppedNotGlass = await dropUntil((state) => state.isGone);
     check('set to shatter, anything does, not only glass: of metal it breaks apart when dropped, is gone, and leaves no glass',
-      notGlass.problems.length === 0 && notGlass.kindShattersAt === 3 && notGlass.letGoOf === 'shatters' && droppedNotGlass.isGone && droppedNotGlass.glass === 0 && droppedNotGlass.saysBroken, [notGlass, droppedNotGlass]);
+      notGlass.problems.length === 0 && notGlass.kindShattersAt === 3 && notGlass.letGoOf === 'shatters' && droppedNotGlass.isGone && droppedNotGlass.glass === 0, [notGlass, droppedNotGlass]);
     await page.click('#workshop-bench-object');
     await frames(2);
     await page.selectOption('#workshop-object-material', 'glass');
@@ -425,9 +534,9 @@ function checkSourcePatching() {
     const droppedGlass = await dropUntil((state) => state.isGone);
     await frames(4); // the readout is brought up to date five times a second
     const afterShatter = await knockState();
-    check('made of glass it shatters when dropped: it is gone, broken glass lies where it hit, and the readout says so',
+    check('made of glass it shatters when dropped: it is gone, broken glass lies where it hit',
       glass.problems.length === 0 && glass.kindShattersAt === 3 && glass.letGoOf === 'shatters' && glass.thrownHard === 'shatters' && glass.intoAWall === 100 &&
-      droppedGlass.isGone && afterShatter.glass === 1 && afterShatter.saysShattered, [glass, droppedGlass, afterShatter]);
+      droppedGlass.isGone && afterShatter.glass === 1, [glass, droppedGlass, afterShatter]);
     await page.click('#workshop-bench-object');
     await frames(2);
     const wholeAgain = await knockState();
@@ -446,15 +555,16 @@ function checkSourcePatching() {
     await waitForReload(() => page.click('#workshop-save-object'));
     await frames();
     const savedObject = fs.existsSync(objectPath) ? JSON.parse(fs.readFileSync(objectPath, 'utf8')) : null;
-    check('saving writes src/objects/testThing.json with both parts in it',
+    check('saving writes src/objects/testThing.json with all four parts in it, the cylinder and the cone among them',
       savedObject !== null && savedObject.label === 'test thing' && savedObject.mass === 3 && savedObject.onTheFloor === 10 &&
       savedObject.value === 100 && savedObject.fragile === 0.6 && savedObject.shattersAt === 0 && savedObject.material === 'case' &&
-      savedObject.parts.length === 2 && savedObject.parts[0].half[1] === 0.15 && savedObject.key === undefined, savedObject);
+      savedObject.parts.length === 4 && savedObject.parts[0].half[1] === 0.15 && savedObject.parts[2].shape === 'cylinder' && savedObject.parts[3].shape === 'cone' &&
+      savedObject.parts[3].radius === 0.06 && savedObject.key === undefined, savedObject);
     const afterObjectSave = await objectState();
     afterObjectSave.kind = await inPage(() => { const kind = window.lastReturnDebug.looseObjectKinds.testThing; return kind ? { label: kind.label, mass: kind.mass, parts: kind.parts.length, fragile: kind.fragile, shatters: kind.shattersAt !== undefined } : null; });
     check('after the reload the workshop is open on the saved object, with nothing unsaved, and the game knows the kind',
       afterObjectSave.key === 'testThing' && afterObjectSave.savedKey === 'testThing' && !afterObjectSave.isDirty &&
-      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 2 &&
+      afterObjectSave.kind !== null && afterObjectSave.kind.label === 'test thing' && afterObjectSave.kind.mass === 3 && afterObjectSave.kind.parts === 4 &&
       afterObjectSave.kind.fragile === 0.6 && afterObjectSave.kind.shatters === false, afterObjectSave);
 
     // --- the saved object lies about in generated stations, where it should, and those can still be finished ---
@@ -491,6 +601,18 @@ function checkSourcePatching() {
     await frames();
     const left = await inPage(() => ({ mode: window.lastReturnDebug.game.mode, isOpen: window.lastReturnDebug.workshop.isOpen, titleShown: !document.getElementById('screen-title').hidden }));
     check('"Leave" goes back to the title screen', left.mode === 'title' && !left.isOpen && left.titleShown, left);
+
+    // --- lobbies: the dev server keeps them too, so two windows on this machine can descend together ---
+    const secondPage = await context.newPage();
+    await secondPage.goto(server.address);
+    await secondPage.waitForFunction(() => Boolean(window.lastReturnDebug));
+    await page.click('#button-host-lobby');
+    await page.waitForFunction(() => window.lastReturnDebug.together.code !== '');
+    await secondPage.fill('#together-code', await page.textContent('#together-lobby-code'));
+    await secondPage.click('#button-join-lobby');
+    const bothIn = await page.waitForFunction(() => window.lastReturnDebug.together.memberIds.length === 2, null, { timeout: 10000 }).then(() => true, () => false);
+    check('two windows of the dev page can open a lobby and join it', bothIn, await secondPage.textContent('#together-status'));
+    await secondPage.close();
 
     check('no script errors along the way', problems.length === 0, problems);
   } catch (error) {

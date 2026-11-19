@@ -26,6 +26,7 @@ const renderer = {
   pointProgram: null, solidProgram: null, beamProgram: null, postProgram: null, debugWorldProgram: null,
   pointUniforms: null, solidUniforms: null, beamUniforms: null, postUniforms: null, debugWorldUniforms: null,
   debugCylinderVertexArray: null, debugCylinderVertexCount: 0, debugSphereVertexArray: null, debugSphereVertexCount: 0,
+  debugRodVertexArray: null, debugRodVertexCount: 0, debugConeVertexArray: null, debugConeVertexCount: 0,
   debugLineVertexArray: null, debugLineBuffer: null, identityMatrix: writeIdentityMatrix(new Float32Array(16)),
   pointVertexArray: null, pointBuffer: null,
   worldVertexArray: null, worldVertexBuffer: null, worldVertexCount: 0,
@@ -157,11 +158,13 @@ void main() {
   else if (surfaceClass == 9) color = vec3(0.08, 0.3, 0.95);
   else if (surfaceClass == 10) color = vec3(1.0, 0.03, 0.02);
   else if (surfaceClass == 12) color = vec3(0.85, 0.66, 0.1);
+  else if (surfaceClass == 16) color = vec3(0.5, 1.0, 0.92);
+  else if (surfaceClass == 17) color = vec3(1.9, 1.0, 0.2);
   // TWEAK: 0.03 is how quickly points dim with distance. 0 = no dimming, 0.1 = far rooms nearly black.
   float brightness = (0.22 + 0.78 * intensity) / (1.0 + distanceToCamera * 0.03) * (0.72 + 0.28 * smoothstep(0.4, 4.0, distanceToCamera));
   // TWEAK: fresh points flash white. 2.6 is how fast the flash dies (higher = shorter flash).
   float flash = exp(-age * 2.6);
-  vec3 flashColor = surfaceClass == 10 ? vec3(0.9, 0.05, 0.03) : vec3(0.85, 1.0, 1.0);
+  vec3 flashColor = surfaceClass == 10 ? vec3(0.9, 0.05, 0.03) : (surfaceClass == 17 ? vec3(1.0, 0.5, 0.1) : vec3(0.85, 1.0, 1.0));
   if (surfaceClass == 10) brightness = max(brightness, 0.55);
   vColor = color * brightness + flashColor * flash * 0.45;
   vFade = fade;
@@ -364,6 +367,27 @@ function buildShadedUnitCylinderVertices() {
   return new Float32Array(vertices);
 }
 
+// The same cylinder with its two ends closed (`farRadius` 1), or a cone on the same base (`farRadius` 0):
+// what a loose object's cylinders and cones are drawn with.
+function buildShadedUnitRodVertices(farRadius) {
+  const vertices = [];
+  const segmentCount = 14;
+  const push = function (corner, shade) { vertices.push(corner[0], corner[1], corner[2], shade, shade, shade); };
+  for (let segment = 0; segment < segmentCount; segment++) {
+    const angleA = segment / segmentCount * TWO_PI, angleB = (segment + 1) / segmentCount * TWO_PI;
+    const shade = 0.62 + 0.38 * Math.cos((angleA + angleB) / 2 - 0.8);
+    const nearA = [Math.cos(angleA), 0, Math.sin(angleA)], nearB = [Math.cos(angleB), 0, Math.sin(angleB)];
+    const farA = [Math.cos(angleA) * farRadius, 1, Math.sin(angleA) * farRadius], farB = [Math.cos(angleB) * farRadius, 1, Math.sin(angleB) * farRadius];
+    for (const corner of [nearA, nearB, farB]) push(corner, shade);
+    for (const corner of [nearA, [0, 0, 0], nearB]) push(corner, 0.5);
+    if (farRadius > 0) {
+      for (const corner of [nearA, farB, farA]) push(corner, shade);
+      for (const corner of [farA, farB, [0, 1, 0]]) push(corner, 0.95);
+    }
+  }
+  return new Float32Array(vertices);
+}
+
 function buildShadedUnitSphereVertices() {
   const positions = [];
   pushSphereTriangles(positions, { centerX: 0, centerY: 0, centerZ: 0, radius: 1 / 0.97 });
@@ -465,6 +489,11 @@ function initializeRenderer(canvas) {
   const shadedSphere = buildShadedUnitSphereVertices();
   renderer.debugSphereVertexArray = createPositionAndColorVertexArray(gl, shadedSphere, gl.STATIC_DRAW).vertexArray;
   renderer.debugSphereVertexCount = shadedSphere.length / 6;
+  const shadedRod = buildShadedUnitRodVertices(1), shadedCone = buildShadedUnitRodVertices(0);
+  renderer.debugRodVertexArray = createPositionAndColorVertexArray(gl, shadedRod, gl.STATIC_DRAW).vertexArray;
+  renderer.debugRodVertexCount = shadedRod.length / 6;
+  renderer.debugConeVertexArray = createPositionAndColorVertexArray(gl, shadedCone, gl.STATIC_DRAW).vertexArray;
+  renderer.debugConeVertexCount = shadedCone.length / 6;
   const debugLines = createPositionAndColorVertexArray(gl, new Float32Array(DEBUG_MAXIMUM_LINE_VERTICES * 6), gl.DYNAMIC_DRAW);
   renderer.debugLineVertexArray = debugLines.vertexArray;
   renderer.debugLineBuffer = debugLines.buffer;
@@ -779,6 +808,8 @@ function drawLooseObjectOccluders(camera, isStationLit) {
         const toY = object.y + matrix[3] * part.toX + matrix[4] * part.toY + matrix[5] * part.toZ;
         const toZ = object.z + matrix[6] * part.toX + matrix[7] * part.toY + matrix[8] * part.toZ;
         writeSegmentMatrix(renderer.modelMatrix, fromX, fromY, fromZ, toX, toY, toZ, part.radius);
+        if (part.shape === 'cylinder') { drawLooseObjectShape(isStationLit, renderer.debugRodVertexArray, renderer.debugRodVertexCount); continue; }
+        if (part.shape === 'cone') { drawLooseObjectShape(isStationLit, renderer.debugConeVertexArray, renderer.debugConeVertexCount); continue; }
         drawLooseObjectShape(isStationLit, renderer.debugCylinderVertexArray, renderer.debugCylinderVertexCount);
         writeTranslationScaleMatrix(renderer.modelMatrix, fromX, fromY, fromZ, part.radius, part.radius, part.radius);
         drawLooseObjectShape(isStationLit, renderer.debugSphereVertexArray, renderer.debugSphereVertexCount);

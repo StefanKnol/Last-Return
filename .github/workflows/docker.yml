@@ -174,4 +174,4 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "Game runs on port 80" >> "$GITHUB_STEP_SUMMARY"
+          echo "Game runs on port 8080" >> "$GITHUB_STEP_SUMMARY"

@@ -10,10 +10,16 @@ ARG LAST_RETURN_BUILD_NUMBER=
 ARG LAST_RETURN_BUILD_COMMIT=
 RUN node build.js
 
-# Serve the single self-contained page.
-FROM nginx:1.27-alpine
-COPY --from=build /app/index.html /usr/share/nginx/html/index.html
-# Writes LAST_RETURN_SERVER_NAME into the page when the container starts, if it is set.
-COPY --chmod=755 docker/40-server-name.sh /docker-entrypoint.d/40-last-return-server-name.sh
-EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+# Serve the single self-contained page, and keep the lobbies of players who descend together
+# (server/server.js). The server needs one package, ws; nothing of the tooling comes along.
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production PORT=8080
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY server ./server
+COPY --from=build /app/index.html ./index.html
+USER node
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+CMD ["node", "server/server.js"]

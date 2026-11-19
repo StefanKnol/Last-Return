@@ -1,22 +1,23 @@
 {
   "label": "fire extinguisher",
-  "mass": 5,
+  "mass": 6.25,
   "value": 25,
-  "fragile": 0.4,
-  "shattersAt": 0,
+  "fragile": 0.3,
+  "shattersAt": 12,
   "material": "metal",
-  "loud": 1,
+  "loud": 0.9,
   "lies": "either",
   "bulky": false,
   "bounce": 0.2,
   "grip": 0.4,
-  "asLitter": 3,
+  "asLitter": 0,
   "onTheFloor": 2,
   "onASurface": 1,
   "parts": [
-    { "shape": "capsule", "from": [0,-0.235,0], "to": [0,0.135,0], "radius": 0.105 },
-    { "shape": "box", "center": [0.05,0.23,0], "half": [0.08,0.02,0.02] },
-    { "shape": "capsule", "from": [0.13,0.235,0], "to": [0.16,0.1,0], "radius": 0.015 },
-    { "shape": "ball", "center": [-0.075,0.25,0], "radius": 0.05 }
+    { "shape": "box", "center": [0.055,0.345,0], "half": [0.05,0.0125,0.02] },
+    { "shape": "capsule", "from": [0.105,0.3375,0], "to": [0.16,0.28,0], "radius": 0.02 },
+    { "shape": "cone", "from": [-0.125,0.37,0], "to": [0.075,0.345,0], "radius": 0.07 },
+    { "shape": "cylinder", "from": [0,0.25,0], "to": [0,-0.25,0], "radius": 0.1 },
+    { "shape": "ball", "center": [0,0.25,0], "radius": 0.1 }
   ]
 }

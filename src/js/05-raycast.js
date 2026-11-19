@@ -133,6 +133,58 @@ function intersectRayWithCapsule(capsules, offset, originX, originY, originZ, di
   return -1;
 }
 
+// A rod with flat ends, lying any way: `radiusFrom` thick at one end and `radiusTo` at the other. The same at
+// both is a cylinder, nothing at the far end is a cone. Returns how far along the ray it is met from outside,
+// or -1 (also for a ray that starts inside it).
+function intersectRayWithTaperedRod(fromX, fromY, fromZ, toX, toY, toZ, radiusFrom, radiusTo, originX, originY, originZ, directionX, directionY, directionZ) {
+  let axisX = toX - fromX, axisY = toY - fromY, axisZ = toZ - fromZ;
+  const length = Math.sqrt(axisX * axisX + axisY * axisY + axisZ * axisZ);
+  if (length < 1e-6) return -1;
+  axisX /= length; axisY /= length; axisZ /= length;
+  const offsetX = originX - fromX, offsetY = originY - fromY, offsetZ = originZ - fromZ;
+  // `along` is measured down the rod from its first end; what is left of the ray is across it.
+  const originAlong = offsetX * axisX + offsetY * axisY + offsetZ * axisZ;
+  const directionAlong = directionX * axisX + directionY * axisY + directionZ * axisZ;
+  const taper = (radiusTo - radiusFrom) / length;        // how much thicker it gets per metre along
+  const radiusAtOrigin = radiusFrom + taper * originAlong;
+  // The side: where the ray is as far from the middle line as the rod is thick at that place.
+  const quadraticA = (directionX * directionX + directionY * directionY + directionZ * directionZ) - directionAlong * directionAlong - taper * taper * directionAlong * directionAlong;
+  const quadraticB = (offsetX * directionX + offsetY * directionY + offsetZ * directionZ) - originAlong * directionAlong - taper * directionAlong * radiusAtOrigin;
+  const quadraticC = (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ) - originAlong * originAlong - radiusAtOrigin * radiusAtOrigin;
+  // It is rounded out everywhere, so a straight line meets its surface twice at most: the nearer is the way in.
+  let nearest = Infinity;
+  if (Math.abs(quadraticA) > 1e-9) {
+    const discriminant = quadraticB * quadraticB - quadraticA * quadraticC;
+    if (discriminant > -1e-12) { // a ray straight at the point of a cone touches it, and must not miss by a rounding
+      const root = Math.sqrt(Math.max(0, discriminant));
+      for (let rootIndex = 0; rootIndex < 2; rootIndex++) {
+        const distance = (rootIndex === 0 ? -quadraticB - root : -quadraticB + root) / quadraticA;
+        const along = originAlong + directionAlong * distance;
+        if (along >= 0 && along <= length && distance < nearest) nearest = distance;
+      }
+    }
+  } else if (Math.abs(quadraticB) > 1e-12) {
+    // The ray runs along the slope of a cone: it meets the side once.
+    const distance = -quadraticC / (2 * quadraticB);
+    const along = originAlong + directionAlong * distance;
+    if (along >= 0 && along <= length) nearest = distance;
+  }
+  // The two flat ends.
+  if (Math.abs(directionAlong) > 1e-9) {
+    for (let endIndex = 0; endIndex < 2; endIndex++) {
+      const endRadius = endIndex === 0 ? radiusFrom : radiusTo;
+      if (endRadius <= 0) continue;
+      const distance = ((endIndex === 0 ? 0 : length) - originAlong) / directionAlong;
+      if (distance >= nearest) continue;
+      const acrossX = offsetX + directionX * distance - axisX * (endIndex === 0 ? 0 : length);
+      const acrossY = offsetY + directionY * distance - axisY * (endIndex === 0 ? 0 : length);
+      const acrossZ = offsetZ + directionZ * distance - axisZ * (endIndex === 0 ? 0 : length);
+      if (acrossX * acrossX + acrossY * acrossY + acrossZ * acrossZ <= endRadius * endRadius) nearest = distance;
+    }
+  }
+  return nearest > 0 && nearest < Infinity ? nearest : -1;
+}
+
 // How strongly a surface reflects at a given spot. Seams, skirting and floor joints return
 // less (or more) light, which is what makes a dense scan read as a real room.
 function computeFloorIntensity(x, z) {

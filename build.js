@@ -126,9 +126,12 @@ function build(options) {
       '<meta charset="utf-8">',
       '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
       '<meta name="description" content="A first-person horror game where a handheld LiDAR scanner is the only way to see.">',
-      // What the server this page is on calls itself, for bug reports. Empty as built: docker/40-server-name.sh
-      // fills it in when the container starts, and it looks for this line exactly as it is written here.
+      // What the server this page is on calls itself, for bug reports, and where its lobbies are reached
+      // ("Descend together"). Both empty as built: server/server.js fills them in when it serves the page, and
+      // it looks for these lines exactly as they are written here. A page that is opened from a file, or served
+      // by anything else, keeps them empty and is played alone.
       '<meta name="last-return-server" content="">',
+      '<meta name="last-return-relay" content="">',
       '<style>' + pageReset + '</style>',
       headMarkup,
       '<style>\n' + styles + '</style>',

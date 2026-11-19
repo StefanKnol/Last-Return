@@ -791,7 +791,7 @@ function takeQuestItem(interactable, itemKey) {
   removeInteractableFromWorld(interactable);
   game.carried[itemKey] = getCarriedCount(itemKey) + 1;
   playPickupSound();
-  emitNoise(player.x, player.z, TUNING.noiseRadiusPickup);
+  emitNoise(getActingPlayer().x, getActingPlayer().z, TUNING.noiseRadiusPickup);
   saveCheckpoint();
   showMessage(item.taken, 3, 'info');
   refreshObjective();
@@ -815,7 +815,7 @@ function useQuestObject(interactable) {
     object.isDone = true;
     instance.done++;
     playPickupSound();
-    emitNoise(player.x, player.z, TUNING.noiseRadiusPickup);
+    emitNoise(getActingPlayer().x, getActingPlayer().z, TUNING.noiseRadiusPickup);
     saveCheckpoint();
     showMessage(fillQuestText(instance, 'taken', object), 3, 'info');
     refreshObjective();
@@ -846,7 +846,7 @@ function useQuestObject(interactable) {
   instance.done++;
   if (definition.activated) definition.activated(instance, object);
   const noiseRadius = definition.noise ? definition.noise() : TUNING.noiseRadiusPickup;
-  if (definition.noiseAtPlayer) emitNoise(player.x, player.z, noiseRadius);
+  if (definition.noiseAtPlayer) emitNoise(getActingPlayer().x, getActingPlayer().z, noiseRadius);
   else emitNoise(object.x, object.z, noiseRadius);
   saveCheckpoint();
   // If the upload is already in and this was the last thing holding the lift, the car starts down at once.

@@ -1,0 +1,19 @@
+{
+  "label": "ball",
+  "mass": 1.5,
+  "value": 8,
+  "fragile": 0,
+  "shattersAt": 0,
+  "material": "card",
+  "loud": 1,
+  "lies": "either",
+  "bulky": false,
+  "bounce": 0.95,
+  "grip": 0.25,
+  "asLitter": 0,
+  "onTheFloor": 3,
+  "onASurface": 0,
+  "parts": [
+    { "shape": "ball", "center": [0,0,0], "radius": 0.25 }
+  ]
+}

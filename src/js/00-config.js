@@ -99,12 +99,16 @@ const QUALITY_PRESETS = {
 const TUNING = {
   // ---- The player's body ---------------------------------------------------
   playerRadius: 0.3,            // how wide you are for bumping into walls. Smaller squeezes through tighter gaps.
-  eyeHeightStanding: 1.62,      // camera height when standing
-  eyeHeightCrouching: 0.95,     // camera height when crouched
-  walkSpeed: 2.5,
-  sprintSpeed: 4.6,             // must stay above hollowHuntSpeed or sprinting cannot open a gap
+  playerHeight: 1.2,           // how tall you are, standing: where you bump your head. The body the others see is made to fit it (getFigureBody, 04-figures.js). Vents are 1.15 high: no taller than that and you walk into one upright.
+  playerHeightCrouching: 0.85, // ... and crouched. That body goes down on its haunches as far as it takes (getPlayerCrouchPose). Under about 0.85 you tip a vent cover over by crawling at it.
+  // eyeHeightStanding: 1.16,      // camera height when standing
+  // eyeHeightCrouching: 0.7,     // camera height when crouched
+  playerEyeHeightToBody: 0.94, // camera height when standing in percentage of player height
+  playerEyeHeightToCrouchedBody: 0.94, // camera height when crouched in percentage of player height when crouching
+  walkSpeed: 2.2,
+  sprintSpeed: 4.4,             // must stay above hollowHuntSpeed or sprinting cannot open a gap
   crouchSpeed: 1.3,
-  waterSpeedFactor: 0.72,       // speed multiplier while wading through flooded floor (1 = no slowdown)
+  waterSpeedFactor: 0.76,       // speed multiplier while wading through flooded floor (1 = no slowdown)
   playerAcceleration: 16,       // how quickly you reach full speed. Low feels like ice, high feels snappy.
   staminaSeconds: 6.5,          // how long you can sprint on a full bar
   staminaRecoverySeconds: 10,   // how long an empty bar takes to refill
@@ -113,8 +117,9 @@ const TUNING = {
   // ---- The scanner ---------------------------------------------------------
   scannerMaximumRange: 50,      // pulses that travel further than this report NO RETURN
   scannerSpreadMinimumDegrees: 3,   // narrowest beam (mouse wheel down). Half-angle of the cone.
-  scannerSpreadMaximumDegrees: 26,  // widest beam (mouse wheel up)
+  scannerSpreadMaximumDegrees: 28,  // widest beam (mouse wheel up)
   scannerSpreadDefaultDegrees: 11,
+  scannerSpreadScrollSpeed: 0.7,
   // The scanner is a thing in your hand and trails a little behind where you look (issue #55). Its dots, the
   // aiming ring, its lens and what it carries all go with it.
   scannerFollowRate: 22,            // how eagerly it comes round to where you look, per second. Lower trails further. 0 switches the trailing off.
@@ -229,7 +234,7 @@ const TUNING = {
   // What a knock costs (see "What a knock costs" in 08-loose-objects.js).
   looseDamageFromSpeed: 2.2,        // a knock slower than this (m/s) costs nothing. A thing set down is under it; a full walk into a wall (2.5) is just over.
   looseDamageRuinSpeed: 9,          // ... and at this speed it takes off the whole of the thing's `fragile` share. A drop from your hands lands at about 4.5, a hard throw at up to 11.
-  looseWorthLeastShare: 0.1,        // nothing is ever worth less than this share of what it was whole
+  looseWorthLeastShare: 0.05,        // nothing is ever worth less than this share of what it was whole
   noiseRadiusShatter: 24,           // a sample jar shattering: as far as the hardest knock carries
   // Walking into one that lies on the floor.
   looseShoveFreeMass: 2,            // lighter than this (kg) you kick along without it slowing you
@@ -382,6 +387,7 @@ const TUNING = {
   stillObservedHoldSeconds: 2.3,    // a dummy stays frozen this long after the last pulse that touched it.
                                     // Higher lets you look away for longer.
   stillKillDistance: 0.6,
+  playerImprintSeconds: 2.5,        // how long the points a scan leaves on another player stay visible: they do not stand still
   stillImprintSeconds: 22,          // how long the points a scan leaves on a dummy stay visible (maximum 63).
                                     // Long imprints mean old outlines linger and the room looks more crowded than it is.
 

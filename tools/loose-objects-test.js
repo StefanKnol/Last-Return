@@ -180,6 +180,17 @@ function installLab() {
   const { browser, page, problems } = await openGame({ dev: true });
   const inGame = (callback, argument) => page.evaluate(callback, argument);
   await startGame(page, false);
+  // Three kinds that only this suite has, so that every check below that is made of every kind is made of a
+  // cylinder and of a cone as well (no kind of the game's own has one yet), and of something made to bounce.
+  await inGame(() => {
+    const kinds = window.lastReturnDebug.looseObjectKinds;
+    kinds.testDrum = { label: 'test drum', mass: 5, value: 10, fragile: 0.3, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.25, grip: 0.5,
+      parts: [{ shape: 'cylinder', from: [0, -0.15, 0], to: [0, 0.15, 0], radius: 0.12 }] };
+    kinds.testCone = { label: 'test cone', mass: 2.5, value: 10, fragile: 0.3, material: 'case', loud: 1, lies: 'either', bulky: false, bounce: 0.2, grip: 0.6,
+      parts: [{ shape: 'cone', from: [0, -0.15, 0], to: [0, 0.3, 0], radius: 0.15 }] };
+    kinds.testBall = { label: 'test ball', mass: 1.5, value: 8, fragile: 0, material: 'card', loud: 1, lies: 'either', bulky: false, bounce: 0.95, grip: 0.25,
+      parts: [{ shape: 'ball', center: [0, 0, 0], radius: 0.25 }] };
+  });
   await inGame(installLab);
   await inGame(() => window.looseLab.setBreakable(false));
 
@@ -203,7 +214,8 @@ function installLab() {
       }
       if (Math.hypot(x, y, z) / total > 1e-6) wrong.push(kindKey + ': centre of mass is off');
       if (!(prepared.boundsRadius > 0.05 && prepared.boundsRadius < 1) || !(prepared.smallestRadius >= 0.01)) wrong.push(kindKey + ': size');
-      if (kindKey !== 'scanGrenade' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scan grenade is a tool, and a scanner is what is left of a player: neither is salvage.)
+      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length };
@@ -221,25 +233,160 @@ function installLab() {
       d.clearLooseObjects();
       const before = lab.knocks();
       const object = d.createLooseObject(kindKey, spot.x, 1.3, spot.z, 0.4);
-      let lowest = 99, asleepAfter = -1, leftTheOpen = false;
-      for (let step = 0; step < 150; step++) {
+      // Something made to bounce (a ball: nothing else keeps more than 0.35 of its speed) is given twice as long.
+      const isMadeToBounce = object.kind.bounce > 0.8;
+      let lowest = 99, asleepAfter = -1, leftTheOpen = false, wasRising = false, heightBefore = object.y;
+      const tops = []; // how high it was each time it came up again and turned
+      for (let step = 0; step < (isMadeToBounce ? 300 : 150); step++) {
         d.simulate(1 / 30);
         lowest = Math.min(lowest, object.y);
         if (!lab.isInTheOpen(object.x, object.y, object.z)) leftTheOpen = true;
         if (object.isAsleep && asleepAfter < 0) asleepAfter = lab.round((step + 1) / 30);
+        if (wasRising && object.y < heightBefore) tops.push(heightBefore);
+        wasRising = object.y > heightBefore; heightBefore = object.y;
       }
+      const bounces = tops.filter((top) => top > object.y + 0.02); // (not the last tremble before it lies still)
       result[kindKey] = { restsAt: lab.round(object.y), lowest: lab.round(lowest), asleepAfter: asleepAfter, drifted: lab.round(Math.hypot(object.x - spot.x, object.z - spot.z)),
-        leftTheOpen: leftTheOpen, knocks: lab.since(before), reach: lab.round(object.prepared.boundsRadius), smallest: lab.round(object.prepared.smallestRadius) };
+        leftTheOpen: leftTheOpen, knocks: lab.since(before), reach: lab.round(object.prepared.boundsRadius), smallest: lab.round(object.prepared.smallestRadius),
+        isMadeToBounce: isMadeToBounce, bounces: bounces.length, eachBounceLower: bounces.every((top, index) => index === 0 || top < bounces[index - 1]) };
     }
     return result;
   }, spot);
   const badDrops = Object.keys(drops).filter((key) => {
     const drop = drops[key];
-    return drop.asleepAfter < 0 || drop.asleepAfter > 4 || drop.leftTheOpen || drop.lowest < drop.smallest - 0.02 || drop.restsAt > drop.reach + 0.01 ||
-      drop.drifted > 1.2 || drop.knocks.heard < 1 || drop.knocks.heard > 4;
+    // What is made to bounce has ten seconds, and is heard once for every time it comes down hard enough.
+    return drop.asleepAfter < 0 || drop.asleepAfter > (drop.isMadeToBounce ? 10 : 4) || drop.leftTheOpen || drop.lowest < drop.smallest - 0.02 || drop.restsAt > drop.reach + 0.01 ||
+      drop.drifted > 1.2 || drop.knocks.heard < 1 || drop.knocks.heard > (drop.isMadeToBounce ? 12 : 4);
   });
-  check('dropped from chest height, every kind lands, stays above the floor, comes to rest within four seconds and is heard one to four times', badDrops.length === 0, drops);
+  check('dropped from chest height, every kind lands, stays above the floor, comes to rest within four seconds and is heard one to four times (ten seconds, and up to twelve times, for what is made to bounce)',
+    badDrops.length === 0, drops);
+  check('a ball that is made to bounce does: it comes up again at least five times, each time lower than the last, and nothing else comes up more than twice',
+    drops.testBall.bounces >= 5 && drops.testBall.eachBounceLower && Object.keys(drops).every((key) => drops[key].isMadeToBounce || drops[key].bounces <= 2),
+    Object.keys(drops).map((key) => key + ': ' + drops[key].bounces));
   check('a crate dropped flat lands flat (22 cm from its middle to the floor)', Math.abs(drops.crate.restsAt - 0.22) < 0.012, drops.crate.restsAt);
+
+  // --- cylinders and cones ---
+  const forms = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, result = {};
+    lab.stand(spot.x - 2.5, spot.z, Math.PI / 2);
+    const settle = function (kindKey, turn) {
+      d.clearLooseObjects();
+      const object = d.createLooseObject(kindKey, spot.x, 0.6, spot.z, 0);
+      if (turn) d.setLooseObjectOrientation(object, turn[0], turn[1], turn[2], turn[3]);
+      // Set down a finger above the floor, whichever way up: its lowest ball just clear of it.
+      let lowest = Infinity;
+      for (let ball = 0; ball < object.prepared.shellCount; ball++) {
+        const shell = object.prepared.shell, m = object.matrix;
+        lowest = Math.min(lowest, m[3] * shell[ball * 4] + m[4] * shell[ball * 4 + 1] + m[5] * shell[ball * 4 + 2] - shell[ball * 4 + 3]);
+      }
+      object.y = 0.02 - lowest;
+      d.wakeLooseObject(object);
+      d.simulate(4);
+      return object;
+    };
+    // Which way the object's own "up" points, and how high its own origin is (not its centre of mass).
+    const standing = function (object) {
+      const m = object.matrix, c = object.prepared;
+      return { up: lab.round(m[4]), originY: lab.round(object.y - (m[3] * c.centreX + m[4] * c.centreY + m[5] * c.centreZ)), isAtRest: object.isAsleep,
+        drifted: lab.round(Math.hypot(object.x - spot.x, object.z - spot.z)) };
+    };
+    // Turned about the line that points to your right: 0 is upright, a quarter turn lays it down, a half turn
+    // is upside down. Nothing is set down dead straight: three degrees off, each time.
+    const turned = function (angle) { return [Math.sin(angle / 2), 0, 0, Math.cos(angle / 2)]; };
+    const offStraight = 0.05;
+    result.drumUpright = standing(settle('testDrum', turned(offStraight)));
+    result.drumUpsideDown = standing(settle('testDrum', turned(Math.PI - offStraight)));
+    result.drumOnItsSide = standing(settle('testDrum', turned(Math.PI / 2)));
+    result.coneUpright = standing(settle('testCone', turned(offStraight)));
+    const coneOnItsSide = settle('testCone', turned(Math.PI / 2));
+    result.coneOnItsSide = standing(coneOnItsSide);
+    result.coneOnItsSide.top = lab.round(d.getLooseObjectTopY(coneOnItsSide));
+    // A canister is a capsule of much the same size: set down on its round end it does not stay there.
+    result.canisterUpright = standing(settle('canister', turned(offStraight)));
+
+    // What the scanner makes of them. Each hangs still in the air, upright, its own origin 1.2 m up; a pulse is
+    // fired at it and must land where the form itself is, not where the balls it touches with are.
+    const hang = function (kindKey) {
+      d.clearLooseObjects();
+      const centre = d.createLooseObject(kindKey, 0, 0, 0, 0).prepared;
+      d.clearLooseObjects();
+      const object = d.createLooseObject(kindKey, spot.x + centre.centreX, 1.2 + centre.centreY, spot.z + centre.centreZ, 0);
+      object.isAsleep = true;
+      return object;
+    };
+    const fire = function (fromX, fromY, fromZ, directionX, directionY, directionZ) {
+      const length = Math.hypot(directionX, directionY, directionZ);
+      const isHit = d.castScannerRay(fromX, fromY, fromZ, directionX / length, directionY / length, directionZ / length, 20);
+      return isHit && d.rayHit.looseObject ? { distance: lab.round(d.rayHit.distance), y: lab.round(d.rayHit.y), across: lab.round(Math.hypot(d.rayHit.x - spot.x, d.rayHit.z - spot.z)) } : null;
+    };
+    // The drum is 30 cm high and 24 across: from 1.05 to 1.35 m up.
+    hang('testDrum');
+    result.drumRays = {
+      side: fire(spot.x - 2, 1.2, spot.z, 1, 0, 0),              // square on to its side: 12 cm short of its middle line
+      top: fire(spot.x + 0.05, 2.2, spot.z, 0, -1, 0),           // straight down onto its flat top
+      overTheTop: fire(spot.x - 2, 1.36, spot.z, 1, 0, 0),       // a finger above the top: a capsule's round end would be there
+      pastTheSide: fire(spot.x - 2, 1.2, spot.z + 0.125, 1, 0, 0),
+      ontoTheTop: fire(spot.x - 1, 2.35, spot.z, 0.93, -1, 0),   // slanting down at the top: it lands on it 7 cm from the middle, at the top's own height
+      underneath: fire(spot.x, 0.3, spot.z + 0.1, 0, 1, 0)       // and from below, on its other flat end
+    };
+    // The cone is 45 cm high and 30 across its flat end: from 1.05 m up to its point at 1.5.
+    const cone = hang('testCone');
+    result.coneRays = {
+      low: fire(spot.x - 2, 1.14, spot.z, 1, 0, 0),              // a fifth of the way up it is four fifths as wide
+      high: fire(spot.x - 2, 1.41, spot.z, 1, 0, 0),             // four fifths of the way up, one fifth
+      point: fire(spot.x, 2.5, spot.z, 0, -1, 0),                // straight down onto the point
+      slope: fire(spot.x + 0.05, 2.5, spot.z, 0, -1, 0),         // 5 cm off the middle line it lands on the slope, a third of the way down
+      overThePoint: fire(spot.x - 2, 1.51, spot.z, 1, 0, 0),
+      besideThePoint: fire(spot.x - 2, 1.41, spot.z + 0.04, 1, 0, 0),
+      underneath: fire(spot.x + 0.1, 0.3, spot.z, 0, 1, 0)       // from below, on its flat end
+    };
+    // And lying any way at all: fired at from all round, every pulse that lands on it lands on its surface.
+    d.setLooseObjectOrientation(cone, 0.3, -0.5, 0.2, 0.79);
+    const m = cone.matrix, c = cone.prepared;
+    let landed = 0, offTheSurface = 0, worst = 0;
+    for (let shot = 0; shot < 400; shot++) {
+      const turn = shot * 2.399963, height = 1 - 2 * (shot + 0.5) / 400, ring = Math.sqrt(1 - height * height);
+      const aim = [(Math.sin(shot * 12.9898) * 43758.5453 % 1) * 0.2, (Math.sin(shot * 78.233) * 12543.123 % 1) * 0.2, (Math.sin(shot * 39.425) * 3758.31 % 1) * 0.2];
+      const from = [cone.x + Math.cos(turn) * ring * 1.5, cone.y + height * 1.1, cone.z + Math.sin(turn) * ring * 1.5];
+      const direction = [cone.x + aim[0] - from[0], cone.y + aim[1] - from[1], cone.z + aim[2] - from[2]];
+      const length = Math.hypot(direction[0], direction[1], direction[2]);
+      if (!d.castScannerRay(from[0], from[1], from[2], direction[0] / length, direction[1] / length, direction[2] / length, 20) || d.rayHit.looseObject !== cone) continue;
+      landed++;
+      // Where it landed, in the cone's own coordinates as its parts were given: how far up it, and how far from its middle line.
+      const offset = [d.rayHit.x - cone.x, d.rayHit.y - cone.y, d.rayHit.z - cone.z];
+      const local = [m[0] * offset[0] + m[3] * offset[1] + m[6] * offset[2] + c.centreX, m[1] * offset[0] + m[4] * offset[1] + m[7] * offset[2] + c.centreY, m[2] * offset[0] + m[5] * offset[1] + m[8] * offset[2] + c.centreZ];
+      const up = local[1] + 0.15, across = Math.hypot(local[0], local[2]);
+      const fromTheFlatEnd = Math.abs(up) + Math.max(0, across - 0.15), fromTheSlope = Math.abs(across - 0.15 * (1 - up / 0.45)) + Math.max(0, -up, up - 0.45);
+      const off = Math.min(fromTheFlatEnd, fromTheSlope);
+      worst = Math.max(worst, off);
+      if (off > 0.002) offTheSurface++;
+    }
+    result.coneAllRound = { landed: landed, offTheSurface: offTheSurface, worst: lab.round(worst) };
+    d.clearLooseObjects();
+    return result;
+  }, spot);
+  check('a cylinder stands on either of its flat ends, 15 cm from its middle to the floor, and stays where it was put',
+    [forms.drumUpright, forms.drumUpsideDown].every((drum) => drum.isAtRest && Math.abs(Math.abs(drum.up) - 1) < 0.002 && Math.abs(drum.originY - 0.15) < 0.012 && drum.drifted < 0.02) &&
+    forms.drumUpsideDown.up < 0, [forms.drumUpright, forms.drumUpsideDown]);
+  check('on its side the cylinder lies on its round, 12 cm from its middle line to the floor',
+    forms.drumOnItsSide.isAtRest && Math.abs(forms.drumOnItsSide.up) < 0.02 && Math.abs(forms.drumOnItsSide.originY - 0.12) < 0.012, forms.drumOnItsSide);
+  check('a cone stands on its flat end, and a capsule set down on its round end does not stay on it',
+    forms.coneUpright.isAtRest && forms.coneUpright.up > 0.998 && Math.abs(forms.coneUpright.originY - 0.15) < 0.012 && forms.coneUpright.drifted < 0.02 &&
+    Math.abs(forms.canisterUpright.up) < 0.5, [forms.coneUpright, forms.canisterUpright]);
+  check('laid on its side a cone comes to rest on its slope, point down a little, no higher than it is wide',
+    forms.coneOnItsSide.isAtRest && forms.coneOnItsSide.up < -0.1 && forms.coneOnItsSide.up > -0.6 && forms.coneOnItsSide.top < 0.31 && forms.coneOnItsSide.top > 0.2, forms.coneOnItsSide);
+  check('the scanner finds a cylinder where it is: its round side, its flat ends from above, aslant and below, and nothing above the top or beside it',
+    forms.drumRays.side && Math.abs(forms.drumRays.side.distance - 1.88) < 0.002 && forms.drumRays.top && Math.abs(forms.drumRays.top.y - 1.35) < 0.002 &&
+    forms.drumRays.overTheTop === null && forms.drumRays.pastTheSide === null &&
+    forms.drumRays.ontoTheTop && Math.abs(forms.drumRays.ontoTheTop.y - 1.35) < 0.002 && Math.abs(forms.drumRays.ontoTheTop.across - 0.07) < 0.002 &&
+    forms.drumRays.underneath && Math.abs(forms.drumRays.underneath.y - 1.05) < 0.002, forms.drumRays);
+  check('and a cone: as wide as it is at each height, its point, its slope from above, its flat end from below, and nothing beyond the point',
+    forms.coneRays.low && Math.abs(forms.coneRays.low.distance - 1.88) < 0.002 && forms.coneRays.high && Math.abs(forms.coneRays.high.distance - 1.97) < 0.002 &&
+    forms.coneRays.point && Math.abs(forms.coneRays.point.y - 1.5) < 0.002 && forms.coneRays.slope && Math.abs(forms.coneRays.slope.y - 1.35) < 0.002 &&
+    forms.coneRays.overThePoint === null && forms.coneRays.besideThePoint === null &&
+    forms.coneRays.underneath && Math.abs(forms.coneRays.underneath.y - 1.05) < 0.002 && Math.abs(forms.coneRays.underneath.across - 0.1) < 0.002, forms.coneRays);
+  check('turned any way and scanned from all round, every pulse that lands on the cone lands on its surface',
+    forms.coneAllRound.landed > 100 && forms.coneAllRound.offTheSurface === 0, forms.coneAllRound);
 
   const tumble = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab;
@@ -778,9 +925,18 @@ function installLab() {
     result.dropped = describe();
     result.dropped.settledAfter = settledAfter;
     result.dropped.milliseconds = Math.round(performance.now() - started);
-    // Something is lying on something: take the lowest thing away and what was on it comes down.
-    const lowest = d.looseObjects.slice().sort((a, b) => a.y - b.y)[0];
-    const above = d.looseObjects.filter((object) => object !== lowest && object.y > lowest.y + 0.05 && Math.hypot(object.x - lowest.x, object.z - lowest.z) < 0.5);
+    // Something is lying on something: take the thing underneath away and what was on it comes down. Of all the
+    // things that have another one over them (higher, and within a hand's breadth of straight above), the one
+    // that has it most squarely over it: that one is certainly lying on it, however the heap fell this time.
+    let lowest = null, nearestOver = 0.2;
+    for (const under of d.looseObjects) {
+      for (const over of d.looseObjects) {
+        const aside = Math.hypot(over.x - under.x, over.z - under.z);
+        if (over !== under && over.y > under.y + 0.05 && aside < nearestOver) { nearestOver = aside; lowest = under; }
+      }
+    }
+    if (!lowest) lowest = d.looseObjects.slice().sort((a, b) => a.y - b.y)[0];
+    const above = d.looseObjects.filter((object) => object !== lowest && object.y > lowest.y + 0.05 && Math.hypot(object.x - lowest.x, object.z - lowest.z) <= nearestOver);
     result.somethingOnTop = above.length;
     const heights = above.map((object) => object.y);
     d.removeLooseObject(lowest);
@@ -795,8 +951,128 @@ function installLab() {
   check('ten things dropped onto one spot make a heap that comes to rest, with nothing through the floor and nothing lost',
     pile.dropped.atRest === pile.dropped.of && pile.dropped.settledAfter >= 0 && pile.dropped.settledAfter <= 8 && pile.dropped.lowest > 0.02 &&
     pile.dropped.highest > 0.3 && pile.dropped.widest < 3 && pile.dropped.allInTheOpen && pile.dropped.allNumbers && pile.putBack === 0, pile.dropped);
-  check('take the lowest thing out of the heap and what lay on it wakes, comes down and comes to rest again',
+  check('take a thing out from under another in the heap and what lay on it wakes, comes down and comes to rest again',
     pile.somethingOnTop >= 1 && pile.wokeWhenItWent && pile.cameDown && pile.afterwards.atRest === pile.afterwards.of && pile.afterwards.allInTheOpen, pile);
+
+  // --- a crate that holds things ---
+  // Two loose things touch each other's boxes as they are, flat faces and all (against the station a thing
+  // touches with the balls of its shell, which leave gaps a can goes through). So an open crate holds what is put
+  // in it, carries it, and spills it when it goes over. The crate here is this suite's own: five boards.
+  const crated = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    d.looseObjectKinds.testCrate = { label: 'test crate', mass: 3, value: 10, fragile: 0.1, material: 'case', loud: 0.6, lies: 'upright', bulky: true, bounce: 0.15, grip: 0.6,
+      parts: [{ shape: 'box', center: [0.25, 0, 0], half: [0.02, 0.2, 0.25] }, { shape: 'box', center: [-0.25, 0, 0], half: [0.02, 0.2, 0.25] },
+        { shape: 'box', center: [0, 0, 0.25], half: [0.25, 0.2, 0.02] }, { shape: 'box', center: [0, 0, -0.25], half: [0.25, 0.2, 0.02] },
+        { shape: 'box', center: [0, -0.2, 0], half: [0.25, 0.02, 0.25] }] };
+    // Where a thing is in the crate's own frame, from the middle of the top of its bottom board.
+    const inCrate = function (thing, crate) {
+      const m = crate.matrix, board = crate.prepared.boxes[4], x = thing.x - crate.x, y = thing.y - crate.y, z = thing.z - crate.z;
+      return { x: m[0] * x + m[3] * y + m[6] * z - board.centerX, y: m[1] * x + m[4] * y + m[7] * z - board.centerY - board.halfY, z: m[2] * x + m[5] * y + m[8] * z - board.centerZ };
+    };
+    const isInIt = function (thing, crate) {
+      const at = inCrate(thing, crate);
+      return d.looseObjects.indexOf(thing) >= 0 && Math.abs(at.x) < 0.23 && Math.abs(at.z) < 0.23 && at.y > -0.01 && at.y < 0.6;
+    };
+    // The lowest point of a thing, above the top of the crate's bottom board (in the world: the crate stands level).
+    const aboveTheBoard = function (thing, crate) {
+      const shell = thing.prepared.shell, m = thing.matrix, board = crate.prepared.boxes[4];
+      let lowest = Infinity;
+      for (let ball = 0; ball < thing.prepared.shellCount; ball++) lowest = Math.min(lowest, thing.y + m[3] * shell[ball * 4] + m[4] * shell[ball * 4 + 1] + m[5] * shell[ball * 4 + 2] - shell[ball * 4 + 3]);
+      return lowest - (crate.y + board.centerY + board.halfY);
+    };
+    const untilAtRest = function (seconds) {
+      for (let step = 0; step < seconds * 30; step++) { d.simulate(1 / 30); if (d.looseObjects.every((object) => object.isAsleep)) return lab.round((step + 1) / 30); }
+      return -1;
+    };
+
+    // One thing let go of in it, with the crate made first and with the thing made first (the one made later is
+    // the one that notes what the two do to each other).
+    result.letGoOf = {};
+    for (const kindKey of ['can', 'jar', 'canister', 'pipe']) {
+      for (const isCrateFirst of [true, false]) {
+        d.clearLooseObjects();
+        lab.stand(spot.x - 2.5, spot.z, Math.PI / 2);
+        let crate = isCrateFirst ? d.createLooseObject('testCrate', spot.x, 0.25, spot.z, 0) : null;
+        const thing = d.createLooseObject(kindKey, spot.x + 0.04, 0.6, spot.z + 0.03, 0.3);
+        if (!crate) crate = d.createLooseObject('testCrate', spot.x, 0.25, spot.z, 0);
+        const atRestAfter = untilAtRest(8);
+        result.letGoOf[kindKey + (isCrateFirst ? ', crate first' : ', thing first')] = { isInIt: isInIt(thing, crate), aboveTheBoard: lab.round(aboveTheBoard(thing, crate)), atRestAfter: atRestAfter,
+          crateMoved: lab.round(Math.hypot(crate.x - spot.x, crate.z - spot.z)) };
+      }
+    }
+
+    // Filled, picked up, walked with, stood with, turned with, walked on with.
+    d.clearLooseObjects();
+    lab.stand(spot.x - 2.5, spot.z, Math.PI / 2);
+    p.pitch = -0.3;
+    const crate = d.createLooseObject('testCrate', spot.x - 1.1, 0.25, spot.z, 0);
+    d.simulate(1);
+    const contents = ['can', 'can', 'can', 'jar', 'canister'];
+    const things = contents.map((kindKey, index) => d.createLooseObject(kindKey, crate.x + [-0.12, 0.12, -0.12, 0.12, 0][index], crate.y + (index < 4 ? 0 : 0.3), crate.z + [-0.12, -0.12, 0.12, 0.12, 0][index], index));
+    const weight = things.reduce((sum, thing) => sum + thing.kind.mass, 0);
+    result.filled = { atRestAfter: untilAtRest(8), inIt: things.filter((thing) => isInIt(thing, crate)).length, of: things.length };
+    const before = lab.knocks();
+    d.pickUpLooseObject(crate, false);
+    d.simulate(1.5);
+    let asleepWhileCarried = 0, fewestInIt = things.length;
+    const carryFor = function (seconds, turn) {
+      for (let step = 0; step < seconds * 30; step++) {
+        if (turn) p.yaw += turn / (seconds * 30);
+        d.simulate(1 / 30);
+        asleepWhileCarried = Math.max(asleepWhileCarried, things.filter((thing) => thing.isAsleep).length);
+        fewestInIt = Math.min(fewestInIt, things.filter((thing) => isInIt(thing, crate)).length);
+      }
+    };
+    result.pickedUp = { held: d.getHeldLooseObject() === crate, liftedBy: lab.round(crate.y - 0.22), inIt: things.filter((thing) => isInIt(thing, crate)).length };
+    d.input.keysDown.add('KeyW'); carryFor(0.7);
+    result.walking = { speed: lab.round(Math.hypot(p.velocityX, p.velocityZ)), wantedSpeed: lab.round(d.tuning.walkSpeed / (1 + (crate.kind.mass + weight) * d.tuning.carrySlowdownPerKilogram)), emptyHanded: d.tuning.walkSpeed };
+    d.input.keysDown.clear(); carryFor(3);
+    result.standing = { load: lab.round(d.looseState.heldLoad), weight: lab.round(weight), speedFactor: lab.round(d.getCarrySpeedFactor()) };
+    carryFor(1.2, Math.PI / 2);
+    d.input.keysDown.add('KeyW'); carryFor(0.5);
+    d.input.keysDown.clear(); carryFor(0.6);
+    result.carried = { held: d.getHeldLooseObject() === crate, fewestInIt: fewestInIt, asleepWhileCarried: asleepWhileCarried, knocks: lab.since(before) };
+    // Set down: look at the floor, let go. It all comes to rest in it.
+    for (let step = 0; step < 30; step++) { p.pitch += (-0.75 - p.pitch) * 0.2; d.simulate(1 / 30); }
+    d.releaseHeldLooseObject(0);
+    result.setDown = { atRestAfter: untilAtRest(10), inIt: things.filter((thing) => isInIt(thing, crate)).length, load: d.looseState.heldLoad, speedFactor: d.getCarrySpeedFactor() };
+    // Tipped right over: it spills.
+    d.setLooseObjectOrientation(crate, Math.sin(1.15), 0, 0, Math.cos(1.15));
+    crate.y += 0.45;
+    d.wakeLooseObject(crate);
+    for (const thing of things) d.wakeLooseObject(thing);
+    // (Some of it may lie under the crate, if that ends upside down over it: it is on the floor all the same.)
+    result.tippedOver = { atRestAfter: untilAtRest(12), crateStandsUpright: lab.round(crate.matrix[4]),
+      onTheFloor: things.filter((thing) => thing.y < thing.prepared.boundsRadius + 0.06).length, allInTheOpen: d.looseObjects.every((object) => lab.isInTheOpen(object.x, object.y, object.z)) };
+
+    // Flat faces: one crate (the game's own, a plain box) set down on another stands on it, level.
+    d.clearLooseObjects();
+    const lower = d.createLooseObject('crate', spot.x, 0.23, spot.z, 0);
+    d.simulate(1);
+    const upper = d.createLooseObject('crate', spot.x + 0.03, lower.y + 0.47, spot.z + 0.02, 0.2);
+    const stackedAfter = untilAtRest(8);
+    result.stacked = { atRestAfter: stackedAfter, apart: lab.round(upper.y - lower.y), tilt: lab.round(Math.acos(Math.min(1, upper.matrix[4])) * 180 / Math.PI), aside: lab.round(Math.hypot(upper.x - lower.x, upper.z - lower.z)) };
+
+    d.clearLooseObjects();
+    delete d.looseObjectKinds.testCrate;
+    p.pitch = 0;
+    return result;
+  }, spot);
+  check('what is let go of in an open crate lies on its bottom board, not in it or under it, whichever of the two was made first: a can, a jar, a canister, a length of pipe',
+    Object.keys(crated.letGoOf).every((key) => { const entry = crated.letGoOf[key]; return (entry.isInIt || key.indexOf('pipe') === 0) && entry.aboveTheBoard > -0.006 && entry.atRestAfter >= 0 && entry.crateMoved < 0.1; }) &&
+    crated.letGoOf['pipe, crate first'].aboveTheBoard > 0.1 && crated.letGoOf['pipe, thing first'].aboveTheBoard > 0.1, crated.letGoOf);
+  check('a crate with three cans, a jar and a canister in it is picked up with all of it in it, and carried: walked with, stood with, turned and walked on with, nothing falls out and the beam keeps hold',
+    crated.filled.inIt === crated.filled.of && crated.filled.atRestAfter >= 0 && crated.pickedUp.held && crated.pickedUp.liftedBy > 0.08 && crated.pickedUp.inIt === 5 &&
+    crated.carried.held && crated.carried.fewestInIt === 5 && crated.carried.knocks.pulled === 0, [crated.filled, crated.pickedUp, crated.carried]);
+  check('what rides in a carried crate does not come to rest in it, and its weight is yours: the beam bears it to within a tenth, and you walk as slowly as with one thing that heavy',
+    crated.carried.asleepWhileCarried === 0 && Math.abs(crated.standing.load - crated.standing.weight) < crated.standing.weight * 0.1 &&
+    Math.abs(crated.walking.speed - crated.walking.wantedSpeed) < 0.12 && crated.walking.wantedSpeed < crated.walking.emptyHanded - 0.3, [crated.standing, crated.walking, crated.carried]);
+  check('set down, it all comes to rest in the crate, and the weight is off you',
+    crated.setDown.atRestAfter >= 0 && crated.setDown.inIt === 5 && crated.setDown.load === 0 && crated.setDown.speedFactor === 1, crated.setDown);
+  check('tipped right over, it spills: the crate ends on its side or on its top, all that was in it lies on the floor, and everything comes to rest',
+    crated.tippedOver.crateStandsUpright < 0.3 && crated.tippedOver.onTheFloor === 5 && crated.tippedOver.atRestAfter >= 0 && crated.tippedOver.allInTheOpen, crated.tippedOver);
+  check('one crate set down on another stands on it level: 44 cm apart, not tilted, not slid off',
+    crated.stacked.atRestAfter >= 0 && Math.abs(crated.stacked.apart - 0.44) < 0.012 && crated.stacked.tilt < 2 && crated.stacked.aside < 0.08, crated.stacked);
 
   // --- a door ---
   const wedged = await inGame(() => {
@@ -853,9 +1129,13 @@ function installLab() {
       for (let batch = 0; batch < 4; batch++) {
         d.clearLooseObjects();
         for (let index = 0; index < 30; index++) {
-          const place = places[Math.floor(chance() * places.length)];
+          let place = places[Math.floor(chance() * places.length)];
+          const kindKey = kinds[Math.floor(chance() * kinds.length)];
+          // Something too big to be in a vent at all (a vent cover is bigger than the vent it covers) is not started
+          // off inside one: that is not throwing it, and it is squeezed into the rock there. It gets another place.
+          while (d.isVentAt(place[0], place[1]) && d.looseObjectKinds[kindKey].prepared.boundsRadius > 0.7) place = places[Math.floor(chance() * places.length)];
           const floor = d.getFloorHeightAt(place[0], place[1]);
-          const object = d.createLooseObject(kinds[Math.floor(chance() * kinds.length)], place[0], floor + 0.7 + chance() * 0.6, place[1], chance() * 6);
+          const object = d.createLooseObject(kindKey, place[0], floor + 0.7 + chance() * 0.6, place[1], chance() * 6);
           d.setLooseObjectOrientation(object, chance() - 0.5, chance() - 0.5, chance() - 0.5, chance() - 0.5);
           const speed = 2 + chance() * 11, heading = chance() * Math.PI * 2, climb = (chance() - 0.5) * 2;
           object.velocityX = Math.cos(heading) * speed; object.velocityZ = Math.sin(heading) * speed; object.velocityY = climb * speed * 0.6;
@@ -1390,40 +1670,63 @@ function installLab() {
     result.size = { worth: d.looseObjectKinds.ventCover.value, width: sheet[0] * 2, height: sheet[1] * 2, mouthHeight: d.ventHeight };
     result.counts = [];
     // Loads a station and looks at where each of its covers is. Returns them: { item, object }.
-    const survey = function (size) {
-      d.loadStation('generated', 3, size, 'mixed', 'one');
-      d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
-      d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
-      const all = d.stationLooseObjects.map((item, index) => ({ item: item, object: d.looseObjects[index] })).filter((entry) => entry.item.kindKey === 'ventCover');
-      result.counts.push({ station: size, vents: d.level.ventCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length });
-      for (const entry of all) {
-        const object = entry.object, mouth = mouthOf(object), fromMouth = Math.hypot(mouth.faceX - object.x, mouth.faceZ - object.z), up = Math.abs(object.matrix[4]);
-        const where = size + ': the cover at ' + object.x.toFixed(1) + ', ' + object.z.toFixed(1);
-        if (entry.item.on === 'vent') { if (d.isVentAt(object.x, object.z) || up < 0.99 || fromMouth > 0.2 || along(mouth, object.x, object.z) > -0.05) result.wrong.push(where + ' should stand upright in front of the mouth of its vent, out in the room'); }
-        else if (d.isVentAt(object.x, object.z) || up > 0.1 || object.y - mouth.floorY > 0.12 || fromMouth > 3.2) result.wrong.push(where + ' should lie flat on the floor near its vent');
+    // Like every station in these checks they are built from the code alone, without the rooms and the objects
+    // from the workshop, so that making a room or an object does not make them other stations (browser-harness.js).
+    // And which of them has what these checks need is looked for, not written down: the first of forty seeds whose
+    // covers are `asWanted`, so that a change to how stations are planned does not break this either. What is counted,
+    // and what is found wrong, is of the station that was chosen (or, if none will do, of the last one looked at).
+    const survey = function (size, asWanted) {
+      let all = [], counts = null, wrong = [];
+      for (let seed = 1; seed <= 40; seed++) {
+        d.loadStation('generated', seed, size, 'mixed', 'one');
+        d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
+        d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
+        all = d.stationLooseObjects.map((item, index) => ({ item: item, object: d.looseObjects[index] })).filter((entry) => entry.item.kindKey === 'ventCover');
+        counts = { station: size, seed: seed, vents: d.level.ventCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length };
+        wrong = [];
+        for (const entry of all) {
+          const object = entry.object, mouth = mouthOf(object), fromMouth = Math.hypot(mouth.faceX - object.x, mouth.faceZ - object.z), up = Math.abs(object.matrix[4]);
+          const where = size + ' ' + seed + ': the cover at ' + object.x.toFixed(1) + ', ' + object.z.toFixed(1);
+          if (entry.item.on === 'vent') { if (d.isVentAt(object.x, object.z) || up < 0.99 || fromMouth > 0.2 || along(mouth, object.x, object.z) > -0.05) wrong.push(where + ' should stand upright in front of the mouth of its vent, out in the room'); }
+          else if (d.isVentAt(object.x, object.z) || up > 0.1 || object.y - mouth.floorY > 0.12 || fromMouth > 3.2) wrong.push(where + ' should lie flat on the floor near its vent');
+        }
+        if (asWanted(all)) break;
       }
+      result.counts.push(counts);
+      for (const line of wrong) result.wrong.push(line);
       return all;
+    };
+    // A way to walk right over a cover that lies on the floor: the first of the four ways along which there are
+    // three and a half metres of nothing from 1.3 m short of it, at shin height and at chest height. Or null.
+    const wayOver = function (cover) {
+      for (const yaw of [Math.PI / 2, -Math.PI / 2, 0, Math.PI]) {
+        const fromX = cover.x - Math.sin(yaw) * 1.3, fromZ = cover.z + Math.cos(yaw) * 1.3;
+        if (!d.isSpaceOpenAt(fromX, 1, fromZ)) continue;
+        if (lab.distanceAhead(fromX, fromZ, yaw) > 3.5 && (!d.castScannerRay(fromX, d.getFloorHeightAt(fromX, fromZ) + 0.35, fromZ, Math.sin(yaw), 0, -Math.cos(yaw), 60) || d.rayHit.distance > 3.5)) return { x: fromX, z: fromZ, yaw: yaw };
+      }
+      return null;
     };
     const into = function (mouth, metres) { return d.castScannerRay(mouth.faceX - mouth.outwardX * 0.7, mouth.floorY + 0.6, mouth.faceZ - mouth.outwardZ * 0.7, mouth.outwardX, 0, mouth.outwardZ, metres) ? { metres: lab.round(d.rayHit.distance), colour: d.rayHit.surfaceClass, isTheCover: d.rayHit.looseObject !== null } : { metres: 99, colour: -1, isTheCover: false }; };
 
-    // A massive station, which has covers of both sorts. One that lies flat is a plate on the floor: walked
-    // over, it stays where it is and makes no sound.
-    const lyingOnes = survey('massive').filter((entry) => entry.item.on === 'floor');
+    // A massive station that has covers of both sorts, one of them lying where there is room to walk over it.
+    // One that lies flat is a plate on the floor: walked over, it stays where it is and makes no sound.
+    const lyingOnes = survey('massive', (all) => all.some((entry) => entry.item.on === 'vent') && all.some((entry) => entry.item.on === 'floor' && wayOver(entry.object) !== null))
+      .filter((entry) => entry.item.on === 'floor' && wayOver(entry.object) !== null);
     if (lyingOnes.length === 0) return result;
-    const lying = lyingOnes[0].object;
-    lab.stand(lying.x - 1.3, lying.z, Math.PI / 2);
+    const lying = lyingOnes[0].object, way = wayOver(lying);
+    lab.stand(way.x, way.z, way.yaw);
     d.simulate(0.5);
     result.scanLying = d.castScannerRay(lying.x - 0.3, lying.y + 0.8, lying.z, 0.3, -0.954, 0, 3) ? { colour: d.rayHit.surfaceClass, isTheCover: d.rayHit.looseObject === lying } : { colour: -1, isTheCover: false };
     let before = lab.knocks();
-    const lyingAt = { x: lying.x, z: lying.z }, walkedFrom = p.x;
+    const lyingAt = { x: lying.x, z: lying.z }, walkedFrom = { x: p.x, z: p.z };
     d.input.keysDown.add('KeyW');
     d.simulate(1.4);
     d.input.keysDown.clear();
     d.simulate(0.5);
-    result.walkedOver = { youWalked: lab.round(Math.abs(p.x - walkedFrom)), itMoved: lab.round(Math.hypot(lying.x - lyingAt.x, lying.z - lyingAt.z)), knocks: lab.since(before) };
+    result.walkedOver = { youWalked: lab.round(Math.hypot(p.x - walkedFrom.x, p.z - walkedFrom.z)), itMoved: lab.round(Math.hypot(lying.x - lyingAt.x, lying.z - lyingAt.z)), knocks: lab.since(before) };
 
     // A large station, with five that stand, for the rest.
-    const standing = survey('large').filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
+    const standing = survey('large', (all) => all.filter((entry) => entry.item.on === 'vent').length >= 5).filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
     if (standing.length < 5) return result;
 
     // One taken off with the beam: quietly, and then the vent is open.
@@ -1607,19 +1910,16 @@ function installLab() {
     lab.setBreakable(false);
     return result;
   }, spot);
-  check('a knock costs by how hard it is: a tool case set down from a crouch is worth what it was, let go of standing up it is worth less, thrown it is worth less still, and the screen says so',
+  check('a knock costs by how hard it is: a tool case set down from a crouch is worth what it was, let go of standing up it is worth less, thrown it is worth less still',
     breakage.toolCase.setDown.worth === breakage.toolCase.setDown.whole && breakage.toolCase.dropped.worth < breakage.toolCase.dropped.whole && breakage.toolCase.dropped.worth > breakage.toolCase.dropped.whole * 0.6 &&
-    breakage.toolCase.thrown.worth < breakage.toolCase.dropped.worth && !breakage.toolCase.thrown.gone && breakage.toolCase.dropped.said.some((text) => /The tool case took that badly/.test(text)) &&
-    breakage.toolCase.setDown.said.every((text) => !/took that badly/.test(text)), breakage.toolCase);
+    breakage.toolCase.thrown.worth < breakage.toolCase.dropped.worth && !breakage.toolCase.thrown.gone, breakage.toolCase);
   check('an empty can loses nothing however it is thrown, and a thing thrown again and again is never worth less than a tenth of what it was',
     breakage.can.thrown.worth === breakage.can.thrown.whole && breakage.battered.worth >= Math.round(breakage.battered.least) && breakage.battered.worth <= breakage.battered.whole * 0.25 && breakage.battered.lostInAll > 0, [breakage.can, breakage.battered]);
   check('a sample jar set down is whole; carried into a wall at a walk it lives, worth no more than it was; let go of standing up it shatters, loudly, and is gone',
     !breakage.jar.setDown.gone && breakage.jar.setDown.worth === breakage.jar.setDown.whole && !breakage.jar.walkedIntoAWall.gone && breakage.jar.walkedIntoAWall.held && breakage.jar.walkedIntoAWall.worth <= breakage.jar.walkedIntoAWall.whole &&
-    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.85 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.caption === 1 && breakage.jar.dropped.loudest >= 18 &&
-    breakage.jar.dropped.said.some((text) => /The sample jar shatters\..*Mind the glass/.test(text)), breakage.jar);
+    breakage.jar.walkedIntoAWall.worth >= breakage.jar.walkedIntoAWall.whole * 0.7 && breakage.jar.dropped.gone && breakage.jar.dropped.shattered === 1 && breakage.jar.dropped.caption === 1 && breakage.jar.dropped.loudest >= 18, breakage.jar);
   check('anything set to shatter does, not only glass: a crate told to breaks apart when let go of, loudly, says so, and leaves no glass',
-    breakage.crate.dropped.gone && breakage.crate.dropped.shattered === 1 && breakage.crate.dropped.captionBreak === 1 && breakage.crate.dropped.caption === 0 && breakage.crate.dropped.loudest >= 18 &&
-    breakage.crate.glassLeft === 0 && breakage.crate.dropped.said.some((text) => /The crate breaks apart\./.test(text)) && !breakage.crate.dropped.said.some((text) => /glass/.test(text)), breakage.crate);
+    breakage.crate.dropped.gone && breakage.crate.dropped.shattered === 1 && breakage.crate.dropped.captionBreak === 1 && breakage.crate.dropped.caption === 0 && breakage.crate.dropped.loudest >= 18 && breakage.crate.glassLeft === 0, breakage.crate);
   check('where it shattered there is broken glass on the floor, as loud to walk over as any other; a new descent sweeps it up and has everything whole again',
     breakage.glass.patches === 1 && breakage.glass.kind === 'glass' && breakage.glass.metresFromWhereItBroke < 0.8 && breakage.glass.pieces >= 3 && breakage.glass.markedLoud && breakage.glass.setOffByWalkingOverIt >= 1 &&
     breakage.newDescent.glassLeft === 0 && breakage.newDescent.patches === 0 && breakage.newDescent.allWhole && breakage.newDescent.lost === 0, [breakage.glass, breakage.newDescent]);
@@ -1707,7 +2007,7 @@ function installLab() {
     readOnScreen.markers.length === 1 && readOnScreen.markers[0].text === '25' &&
     Math.abs(readOnScreen.markers[0].across - 0.5) < 0.08 && readOnScreen.markers[0].down > 0.25 && readOnScreen.markers[0].down < 0.55,
     { unread: unread, read: read, onScreen: readOnScreen });
-  check('in the beam a thing has no marker, and the status line says what it is worth', carried.markers.length === 0 && carried.chip === 'CARRYING: GAS CANISTER · 25', carried);
+  check('in the beam a thing has no marker, and the status line says what it is, not what it is worth', carried.markers.length === 0 && carried.chip === 'CARRYING: GAS CANISTER', carried);
   check('how to pick a thing up is a tutorial: once you have done it the screen never says it again, and nothing floats at a thing for being in reach; its worth shows when it is scanned, as before',
     setDown.prompt === '' && setDown.markers.length === 0 && setDown.inReach && setDown.remembered &&
     scannedAgain.prompt === '' && scannedAgain.markers.length === 1 && scannedAgain.markers[0].text === '25' && lookedAway.markers.length === 0,

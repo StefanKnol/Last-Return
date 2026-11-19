@@ -193,43 +193,40 @@ function check(description, condition, detail) {
   check('and those were different quests: most of the twenty got other quests or other places for them, some of them salvage bays in one build and none in another',
     apart.questsDiffered >= 15 && apart.withAndWithoutSalvage >= 5, [apart.questsDiffered, apart.withAndWithoutSalvage]);
 
-  // --- three stations, as they were when this was last read off ---
-  // Two records, because the map and the quests are two things. The first is one number for each station's whole
-  // map (and, to say what moved if it does, the number as it stood after each part of the map). The second is
-  // where each quest's things are. Neither may change by accident: a seed someone was given has to keep building
-  // what they were given. Changing the map on purpose (a room, a size, the furniture) changes the first; changing
-  // a quest on purpose changes the second, and only the second. Then that record is read off again, and that is
-  // the only time it is.
-  const asBefore = await inGame(() => {
+  // --- a seed keeps its promise within a build ---
+  // The same seed builds the same station every time it is asked for: the same map (one number for the whole of
+  // it, and the number as it stood after each part, to say what moved if it does), and its quests' things in the
+  // same places. Three stations, each built, then another one built in between, then built again.
+  // (That is all a seed can promise. A new room in the catalogue, a new kind of thing that lies loose, a change
+  // to how stations are planned: each makes every seed another station from that build on, on purpose. So what
+  // three seeds built is not written down here to be compared with, as it once was: that record had to be read
+  // off again with every room and every object anybody made.)
+  const builtTwice = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, result = {};
-    const before = {
-      // The maps: read off when the map and the quests were taken apart. The quests: read off when a descent came
-      // to have one work order instead of a mixed bag (two Survey orders with a complication each, and a Restart
-      // order), which changed what every station asks for, once, and nothing of any map.
-      // Until the two were taken apart the first four quests drew their
-      // numbers from the station's own sequence, so taking them out of it changed the furniture, the quests and
-      // what lies about in every generated station, once. The rooms, corridors, doors and vents did not change.
-      'medium 9 mixed one': { map: 1574309035,
-        quests: '3:63.7:42 4:95:83.5 5:130.55:65.5 14:60.5:88.5' },
-      'large 7 sparse one': { map: 3054155276,
-        quests: '3:85.4:41.7 4:40:73.5 5:143.5:81.55 13:121.5:45.5 50:100.5:43.5' },
-      'massive 12 tight two': { map: 204994769,
-        quests: '3:107.2:53.4 4:82.5:14 5:37.45:108.5 13:94.5:48.5 14:106.5:9.5 20:55.5:72.5 21:81.5:51.5 180:61.5:91.5 181:90.5:42.5' }
-    };
-    for (const name in before) {
-      const parts = name.split(' ');
-      lab.fresh('generated', Number(parts[1]), parts[0], parts[2], parts[3]);
+    const describe = function () {
       const mapParts = {}; d.computeMapFingerprint(mapParts);
       const quests = d.interactables.filter((thing) => d.level.quests.some((quest) => quest.objects.some((object) => object.objectId === thing.objectId || object.itemObjectId === thing.objectId)))
         .sort((a, b) => a.objectId - b.objectId).map((thing) => thing.objectId + ':' + thing.x + ':' + thing.z).join(' ');
-      result[name] = { sameMap: d.level.mapFingerprint === before[name].map, sameQuests: quests === before[name].quests, mapNow: d.level.mapFingerprint, questsNow: quests, mapPartByPart: mapParts };
+      return { map: d.level.mapFingerprint, mapPartByPart: mapParts, quests: quests };
+    };
+    for (const name of ['medium 9 mixed one', 'large 7 sparse one', 'massive 12 tight two']) {
+      const parts = name.split(' ');
+      lab.fresh('generated', Number(parts[1]), parts[0], parts[2], parts[3]);
+      const first = describe();
+      lab.fresh('generated', Number(parts[1]) + 1, parts[0], parts[2], parts[3]);
+      const other = describe();
+      lab.fresh('generated', Number(parts[1]), parts[0], parts[2], parts[3]);
+      const again = describe();
+      result[name] = { sameMap: first.map === again.map && JSON.stringify(first.mapPartByPart) === JSON.stringify(again.mapPartByPart), sameQuests: first.quests === again.quests && first.quests !== '',
+        otherSeedDiffers: other.map !== first.map, first: first, again: again };
     }
     return result;
   });
-  check('the maps of three stations are what they were when they were last read off',
-    Object.keys(asBefore).every((name) => asBefore[name].sameMap), Object.keys(asBefore).map((name) => name + ': ' + asBefore[name].mapNow + ' ' + JSON.stringify(asBefore[name].mapPartByPart)));
-  check('and so are the places of their quests\' things',
-    Object.keys(asBefore).every((name) => asBefore[name].sameQuests), Object.keys(asBefore).map((name) => name + ': ' + asBefore[name].questsNow));
+  check('three stations built twice, with another built in between, have the same map both times, part by part, and another seed has another map',
+    Object.keys(builtTwice).every((name) => builtTwice[name].sameMap && builtTwice[name].otherSeedDiffers),
+    Object.keys(builtTwice).map((name) => name + ': ' + builtTwice[name].first.map + ' and ' + builtTwice[name].again.map + ' ' + JSON.stringify(builtTwice[name].again.mapPartByPart)));
+  check('and their quests\' things are in the same places both times',
+    Object.keys(builtTwice).every((name) => builtTwice[name].sameQuests), Object.keys(builtTwice).map((name) => name + ': ' + builtTwice[name].first.quests + ' | ' + builtTwice[name].again.quests));
 
   // --- adding a quest moves nothing else ---
   const added = await inGame(() => {
@@ -377,7 +374,8 @@ function check(description, condition, detail) {
     result.secondMeanwhile = { state: state.bays[1].state, said: /bay 1 is still open\. One at a time/.test(lab.messages()) };
 
     // What it wants carried in, with you standing in it: it counts, and the door stays up.
-    const dearestFirst = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
+    // (Nothing of glass: the third thing is let go of a metre up, on top of the first, and a jar does not survive that.)
+    const dearestFirst = d.looseObjects.filter((object) => !object.kind.shattersAt).sort((a, b) => b.kind.value - a.kind.value);
     const isAlongX = bay.maximumX - bay.minimumX > 1;
     let carried = 0;
     for (const object of dearestFirst) {

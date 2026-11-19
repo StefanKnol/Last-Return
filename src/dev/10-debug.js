@@ -13,7 +13,7 @@
 // The switches. `group` decides which heading they appear under in the panel.
 // To add a switch: add a line here, then read `debugState.options.yourKey` wherever it should act.
 const DEBUG_OPTION_DEFINITIONS = [
-  { key: 'showCreatures', group: 'See', label: 'Show creatures', hint: 'Draws the Hollow (red), the Stills (amber) and apparitions (violet) as solid bodies.' },
+  { key: 'showCreatures', group: 'See', label: 'Show creatures', hint: 'Draws the Hollow (red), the Stills (amber), apparitions (violet) and other players (teal) as solid bodies.' },
   { key: 'seeThroughWalls', group: 'See', label: 'See creatures through walls', hint: 'Also draws them faintly behind walls. Needs "Show creatures".' },
   { key: 'lightStation', group: 'See', label: 'Light the station', hint: 'Draws every wall, floor and object with a metre grid, scanned or not.' },
   { key: 'showSenses', group: 'See', label: 'Show senses and paths', hint: 'Rings for how far you can be heard, noises as they happen, and the route the Hollow is walking.' },
@@ -80,6 +80,7 @@ function refreshDebugBadge() {
 
 // Called when a new run starts: switches stay as they are, so a run that starts with one on is already marked.
 function resetDebugForNewRun() {
+  removeDebugWalker();
   debugState.hasBeenUsedThisRun = isAnyDebugOptionOn();
   debugState.noiseEvents.length = 0;
   refreshDebugBadge();
@@ -112,7 +113,7 @@ function landAfterFlying() {
     player.x = index % GRID_WIDTH + 0.5;
     player.z = Math.floor(index / GRID_WIDTH) + 0.5;
   }
-  player.eyeHeight = TUNING.eyeHeightStanding;
+  player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
   player.floorY = getFloorHeightAt(player.x, player.z);
 }
 
@@ -208,6 +209,71 @@ function debugRevealMap() {
   showMessage('Debug: the whole station is on the map.', 3, 'info');
 }
 
+// ---- Another player, walking about ----
+//
+// To look at how another player looks and moves without a second browser: a stand-in that walks up and down in
+// front of where you stood when you asked for it. Out it carries its scanner and scans ahead of itself; back it
+// comes crouched; at each end it stops, turns to you and scans you. Every fourth turn it lies dead for a moment,
+// which shows what is left of a player then (the scanner, lit). It is shown through the same code as a real
+// other player (presentOtherPlayer, 11-together.js); nothing hunts it and no door opens for it.
+const debugWalker = { other: null, time: 0, fromX: 0, fromZ: 0, toX: 0, toZ: 0, legSeconds: 4 };
+const DEBUG_WALKER_PAUSE_SECONDS = 2.5;
+
+function debugToggleWalkingPlayer() {
+  markDebugUsed();
+  if (debugWalker.other) { removeDebugWalker(); showMessage('Debug: the walking player is gone.', 3, 'info'); return; }
+  // A line across your view, three and a half metres ahead: from your left to your right.
+  const forwardX = Math.sin(player.yaw), forwardZ = -Math.cos(player.yaw), rightX = Math.cos(player.yaw), rightZ = Math.sin(player.yaw);
+  const ends = [];
+  for (const side of [-2.5, 2.5]) {
+    const index = findNearestWalkableTileIndex(player.x + forwardX * 3.5 + rightX * side, player.z + forwardZ * 3.5 + rightZ * side);
+    if (index < 0) { showMessage('Debug: no room in front of you for somebody to walk.', 3, 'warning'); return; }
+    ends.push([index % GRID_WIDTH + 0.5, Math.floor(index / GRID_WIDTH) + 0.5]);
+  }
+  debugWalker.fromX = ends[0][0]; debugWalker.fromZ = ends[0][1]; debugWalker.toX = ends[1][0]; debugWalker.toZ = ends[1][1];
+  debugWalker.legSeconds = Math.max(1, distanceBetweenPoints(ends[0][0], ends[0][1], ends[1][0], ends[1][1]) / 1.5); // TWEAK: 1.5 = its walking speed in m/s
+  debugWalker.time = 0;
+  debugWalker.other = createOtherPlayer(-1);
+  showMessage('Debug: another player is walking up and down in front of you. Scan them. The same button takes them away.', 6, 'info');
+}
+
+function removeDebugWalker() {
+  if (!debugWalker.other) return;
+  setFigureRaycastable(debugWalker.other.figure, false);
+  debugWalker.other = null;
+}
+
+function updateDebugWalker(dt) {
+  const other = debugWalker.other;
+  if (!other || game.mode !== 'playing') return;
+  debugWalker.time += dt;
+  const legSeconds = debugWalker.legSeconds, lapSeconds = (legSeconds + DEBUG_WALKER_PAUSE_SECONDS) * 2;
+  const lap = Math.floor(debugWalker.time / lapSeconds);
+  let time = debugWalker.time % lapSeconds;
+  const isComingBack = time >= legSeconds + DEBUG_WALKER_PAUSE_SECONDS;
+  if (isComingBack) time -= legSeconds + DEBUG_WALKER_PAUSE_SECONDS;
+  const isWalking = time < legSeconds, along = Math.min(1, time / legSeconds);
+  const startX = isComingBack ? debugWalker.toX : debugWalker.fromX, startZ = isComingBack ? debugWalker.toZ : debugWalker.fromZ;
+  const endX = isComingBack ? debugWalker.fromX : debugWalker.toX, endZ = isComingBack ? debugWalker.fromZ : debugWalker.toZ;
+  const x = interpolateLinear(startX, endX, along), z = interpolateLinear(startZ, endZ, along);
+  // Walking it looks where it goes; stopped it turns to you.
+  const lookX = isWalking ? endX - startX : player.x - x, lookZ = isWalking ? endZ - startZ : player.z - z;
+  const isCrouching = isWalking && isComingBack;
+  const isFallen = !isWalking && isComingBack && lap % 4 === 3;
+  // Said the way a real one says it, and all at once: it is simply there.
+  other.fromX = other.toX = x; other.fromZ = other.toZ = z;
+  other.fromYaw = other.toYaw = Math.atan2(lookX, -lookZ);
+  other.fromPitch = other.toPitch = isWalking ? -0.15 : 0;
+  other.fromEyeY = other.toEyeY = getFloorHeightAt(x, z) + (isCrouching ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody));
+  other.blend = 1;
+  other.isCrouching = isCrouching;
+  other.spreadDegrees = isFallen || isCrouching ? 0 : (isWalking ? 10 : 6);
+  if (!other.hasBeenHeardFrom || isFallen !== other.isFallen) setFigureRaycastable(other.figure, !isFallen);
+  other.hasBeenHeardFrom = true;
+  other.isFallen = isFallen;
+  presentOtherPlayer(other, dt, true);
+}
+
 function debugClearPoints() {
   markDebugUsed();
   clearAllPoints();
@@ -229,7 +295,7 @@ function debugTeleportToZone(zone) {
     markDebugUsed();
     player.x = destination.x; player.z = destination.z;
     player.velocityX = 0; player.velocityZ = 0;
-    if (!debugState.options.flyMode) player.eyeHeight = TUNING.eyeHeightStanding;
+    if (!debugState.options.flyMode) player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
     return;
   }
 }
@@ -359,6 +425,12 @@ function buildDebugFrameData() {
       // Waiting apparitions are drawn darker than ones that can currently be scanned.
       const strength = phantom.state === 1 ? 1 : 0.45;
       data.figures.push({ figure: phantom.figure, red: 0.6 * strength, green: 0.4 * strength, blue: 1.0 * strength });
+    }
+    // The other players, and the stand-in for one ("Another player, walking about"): teal, as a scan shows them.
+    // One who lies dead has no body to draw.
+    const others = debugWalker.other ? together.others.concat(debugWalker.other) : together.others;
+    for (const other of others) {
+      if (other.hasBeenHeardFrom && !other.isFallen) data.figures.push({ figure: other.figure, red: 0.3, green: 0.95, blue: 0.85 });
     }
   }
 
@@ -608,7 +680,8 @@ function initializeDebugMode() {
     ['debug-action-stills', 'Wake the Stills', debugWakeStills],
     ['debug-action-lift', 'Bring the lift now', debugBringLift],
     ['debug-action-map', 'Reveal the whole map', debugRevealMap],
-    ['debug-action-clear', 'Clear the point cloud', debugClearPoints]
+    ['debug-action-clear', 'Clear the point cloud', debugClearPoints],
+    ['debug-action-walker', 'Another player, walking about', debugToggleWalkingPlayer]
   ];
   const actionGrid = createDebugElement('div', 'debug-actions');
   for (const action of actions) {
@@ -796,6 +869,7 @@ function toggleDebugPanel() {
 }
 
 function updateDebugMode(realDt) {
+  updateDebugWalker(realDt);
   debugState.frameCounter++;
   debugState.frameCounterTime += realDt;
   if (debugState.frameCounterTime >= 0.5) {

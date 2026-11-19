@@ -565,8 +565,8 @@ function check(description, condition, detail) {
   await debugPage.keyboard.up('KeyW');
   check('"Fly through walls": looking up and moving forward gains height', flight > 3, flight);
   await clickInPage('debug-option-flyMode');
-  const landed = await inDebugGame(() => window.lastReturnDebug.player.eyeHeight);
-  check('switching flying off puts the player back on the floor', Math.abs(landed - 1.62) < 0.01, landed);
+  const landed = await inDebugGame(() => [window.lastReturnDebug.player.eyeHeight, window.lastReturnDebug.tuning.playerHeight*window.lastReturnDebug.tuning.playerEyeHeightToBody]);
+  check('switching flying off puts the player back on the floor', Math.abs(landed[0] - landed[1]) < 0.01, landed);
 
   await inDebugGame(() => { document.getElementById('debug-zone').value = '19'; });
   await clickInPage('debug-teleport');
@@ -575,13 +575,14 @@ function check(description, condition, detail) {
 
   const tuned = await inDebugGame(() => {
     const field = document.getElementById('debug-tuning-walkSpeed');
+    const asBuilt = window.lastReturnDebug.tuning.walkSpeed;
     field.value = '5';
     field.dispatchEvent(new Event('change'));
     const changed = window.lastReturnDebug.tuning.walkSpeed;
     document.getElementById('debug-tuning-reset').click();
-    return [changed, window.lastReturnDebug.tuning.walkSpeed, field.value];
+    return [changed, window.lastReturnDebug.tuning.walkSpeed, field.value, asBuilt];
   });
-  check('live tuning changes a value and reset restores it', tuned[0] === 5 && tuned[1] === 2.5 && tuned[2] === '2.5', tuned);
+  check('live tuning changes a value and reset restores it', tuned[0] === 5 && tuned[3] !== 5 && tuned[1] === tuned[3] && tuned[2] === String(tuned[3]), tuned);
   // --- leaving for the title screen must leave no sound of play running under it ---
   await inDebugGame(() => { const debug = window.lastReturnDebug; debug.spawnHollow(debug.player.x + 6, debug.player.z); debug.simulate(0.5); });
   await drawFrames(debugSession.page, 2);

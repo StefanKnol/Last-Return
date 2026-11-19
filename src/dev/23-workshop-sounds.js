@@ -305,7 +305,7 @@ function startSoundBoardAudio() {
     // Your ears and the sources are moved into place smoothly, from the corner of the map. Give them a
     // moment to arrive, or the first sound after a reload is heard from far away.
     return Promise.resolve(context.state === 'running' ? null : context.resume()).then(function () {
-      updateAudioListener(getSoundBoardListenerX(), TUNING.eyeHeightStanding, getSoundBoardListenerZ(), 0);
+      updateAudioListener(getSoundBoardListenerX(), (TUNING.playerHeight * TUNING.playerEyeHeightToBody), getSoundBoardListenerZ(), 0);
       return waitSoundBoardSeconds(0.3);
     });
   }
@@ -594,7 +594,7 @@ function closeSoundBoard() {
 }
 
 function placeSoundBoardCamera() {
-  placeWorkshopCamera(getSoundBoardListenerX(), TUNING.eyeHeightStanding, getSoundBoardListenerZ(), 0, 0);
+  placeWorkshopCamera(getSoundBoardListenerX(), (TUNING.playerHeight * TUNING.playerEyeHeightToBody), getSoundBoardListenerZ(), 0, 0);
 }
 
 function updateSoundBoard(dt) {

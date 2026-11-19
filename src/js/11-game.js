@@ -35,6 +35,9 @@ const game = {
   ascentTimer: 0,
   hasShownHollowHint: false,
   hasShownVentHint: false,
+  isDescentLost: false,          // down there with others: every one of you is down, and nobody is left to carry anybody back
+  isLeftBehind: false,           // down there with others: the car has gone up with those on their feet, and you were not one of them
+  actor: null,                   // somebody else whose action is being carried out here right now, or null: getActingPlayer
   hasShownNoisyFloorHint: false, // the first time something loose underfoot gives you away, you are told what it was
   attract: { yaw: -0.9, pitch: 0, timer: 0, sweepTimer: 4, sweepProgress: -1, rayBudget: 0, centerRange: -1 }
 };
@@ -66,7 +69,14 @@ function scheduleEvent(delaySeconds, action) {
   game.scheduledEvents.push({ time: game.time + delaySeconds, action: action });
 }
 
+// Whoever is doing what is being done right now: you, or (down there with others, while something one of them
+// did is being carried out in your game too) that one. See performActionFor in 11-together.js.
+function getActingPlayer() {
+  return game.actor || player;
+}
+
 function saveCheckpoint() {
+  if (game.actor) return; // somebody else's doing: it is not your place to come back to
   game.checkpoint.x = player.x; game.checkpoint.z = player.z; game.checkpoint.yaw = player.yaw;
 }
 
@@ -89,6 +99,7 @@ function isInteractableWantedNow(interactable) {
   if (objectId === OBJECT_LIFT_TERMINAL) {
     return flags.powerOn && !flags.uploadStarted && getUnfinishedQuests('upload').length === 0 && !(flags.spoolsUploaded && getUnfinishedQuests('lift').length > 0);
   }
+  if (objectId === OBJECT_LIFT_PANEL) return liftDoor.forcedState !== true && liftDoor.openFraction < 1; // only while the door is shut on you
   if (objectId === OBJECT_NOTE_SECURITY || objectId === OBJECT_NOTE_LOCKER || objectId === OBJECT_NOTE_LAB || objectId === OBJECT_NOTE_ARCHIVE) return false;
   return true; // spools and keycards are always worth going for
 }
@@ -141,6 +152,8 @@ function resetWorldState() {
   game.statistics.elapsed = 0; game.statistics.distanceWalked = 0; game.statistics.deaths = 0;
   game.interference = 0; game.danger = 0;
   game.hasShownHollowHint = false;
+  game.isDescentLost = false;
+  game.isLeftBehind = false;
   game.hasShownVentHint = false;
   game.hasShownNoisyFloorHint = false;
   noisyFloorCounts.byPlayer = 0; noisyFloorCounts.byPlayerCrouched = 0; noisyFloorCounts.byHollow = 0;
@@ -203,14 +216,27 @@ function chooseSeedFromText(text) {
   return 1 + hash % 999999999;
 }
 
-function beginNewGame() {
+// What a descent is of: which station, and at what threat level. This is what is chosen on the title screen,
+// with the seed settled. Players who descend together all go down with the host's (11-together.js).
+function describeChosenDescent() {
+  return {
+    kind: settings.station === 'generated' ? 'generated' : 'classic',
+    seed: chooseSeedFromText(settings.seedText), sizeKey: settings.stationSize, layoutKey: settings.stationLayout, levelsKey: settings.stationLevels,
+    workOrders: getAllowedWorkOrders(),
+    difficultyKey: settings.difficulty, customDifficulty: settings.customDifficulty
+  };
+}
+
+// `descent` is what to go down into (see describeChosenDescent): left out, what the title screen says.
+function beginNewGame(descent) {
+  descent = descent || describeChosenDescent();
   initializeAudioEngine();
   setMasterVolume(settings.volume);
   suspendAudio(false);
-  game.difficulty = getChosenDifficulty();
+  game.difficulty = descent.difficultyKey === 'custom' ? buildCustomDifficulty(descent.customDifficulty) : (DIFFICULTY_PRESETS[descent.difficultyKey] || DIFFICULTY_PRESETS.standard);
   const quality = QUALITY_PRESETS[settings.quality];
   if (pointCloud.capacity !== quality.maximumPoints) allocatePointCloud(quality.maximumPoints);
-  if (settings.station === 'generated') loadStation('generated', chooseSeedFromText(settings.seedText), settings.stationSize, settings.stationLayout, settings.stationLevels, undefined, getAllowedWorkOrders());
+  if (descent.kind === 'generated') loadStation('generated', descent.seed, descent.sizeKey, descent.layoutKey, descent.levelsKey, undefined, descent.workOrders);
   else if (level.kind !== 'classic') loadStation('classic', 0);
   resetWorldState();
   requestPointerLockOnCanvas();
@@ -329,7 +355,7 @@ function pauseGame() {
   interfaceState.refreshSettingControls();
   showOnlyScreen('screen-pause');
   if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
-  suspendAudio(true);
+  if (!isWorldShared()) suspendAudio(true); // down there with others the station goes on, and so does what you hear of it
 }
 
 function resumeGame() {
@@ -348,6 +374,7 @@ function returnToTitle() {
   silenceGameplaySounds();
   if (debugHooks.hidePanel) debugHooks.hidePanel();
   if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
+  leaveDescentTogether(); // back at the surface you are on your own again
   resetWorldState();
   game.mode = 'title';
   game.fade = 1;
@@ -385,7 +412,7 @@ function collectSpool(interactable) {
   removeInteractableFromWorld(interactable);
   game.flags.spoolsCollected++;
   playPickupSound();
-  emitNoise(player.x, player.z, TUNING.noiseRadiusPickup);
+  emitNoise(getActingPlayer().x, getActingPlayer().z, TUNING.noiseRadiusPickup);
   saveCheckpoint();
   refreshObjective();
   // Ripley numbered hers "of 3". In a station with more spools than that, the heading counts them all.
@@ -417,6 +444,19 @@ function useInteractable(interactable) {
         showMessage('LIFT CONTROL: car descending.', 3, 'info');
       } else {
         showMessage('LIFT CONTROL: car at this level. Doors open.', 3, 'info');
+      }
+      break;
+    case OBJECT_LIFT_PANEL:
+      // The panel in the car. Its door comes down behind the last one out, and nobody should ever be behind it.
+      // If somebody is all the same (down there with others, say, having come down late), this opens it again.
+      // It then goes by the rule it always had: open while anybody is in the car or its doorway, down after.
+      if (liftDoor.forcedState === true || liftDoor.openFraction >= 1) {
+        showMessage('LIFT: door open.', 2.5, 'info');
+      } else {
+        liftDoor.forcedState = true;
+        game.isLiftDoorClosingBehindYou = true;
+        playInterfaceBlip(520);
+        showMessage('LIFT: door opening.', 2.5, 'info');
       }
       break;
     case OBJECT_GENERATOR:
@@ -518,17 +558,23 @@ function completeLiftArrival(radioKey) {
 // game's to kill.
 function catchPlayer(caught, kind, figure) {
   if (caught === player) triggerPlayerDeath(kind, figure);
+  else catchOtherPlayer(caught, kind, figure); // 11-together.js: they are told, and it is their game that kills them
 }
 
+// Returns whether you died of it.
 function triggerPlayerDeath(kind, figure) {
-  if (game.mode !== 'playing') return;
-  if (debugState.options.invulnerable || debugState.options.flyMode) return;
+  // Down there with others the station does not wait while you read or have the menu open, and neither does this.
+  const isAway = isWorldShared() && (game.mode === 'paused' || game.mode === 'reading');
+  if (game.mode !== 'playing' && !isAway) return false;
+  if (debugState.options.invulnerable || debugState.options.flyMode) return false;
+  if (isAway) { stopVoiceLine(); suspendAudio(false); showOnlyScreen(null); }
   game.mode = 'dying';
   game.statistics.deaths++;
   game.deathSequence = { kind: kind, figure: figure, timer: 0 };
   setScannerSound(0);
   closeMapOverlay();
-  playStinger('death');
+  asYoursAlone(function () { playStinger('death'); }); // (as the host of others this is reached while the creatures are run, and their sounds are everybody's)
+  return true;
 }
 
 function updateDying(dt) {
@@ -560,14 +606,36 @@ function updateDying(dt) {
   if (sequence.timer > 1.55) {
     game.mode = 'dead';
     game.fade = 0;
+    sendCreaturesAwayAfterCatch(sequence.kind); // down there with others, as their host: it does not stand over you while the others play on
+    if (isWorldShared()) askToAct({ what: 'fall', x: player.x, y: getFloorHeightAt(player.x, player.z) + 0.25, z: player.z }); // your scanner lies where you fell
     silenceGameplaySounds();
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
     showDeathScreen(sequence.kind);
   }
 }
 
+// On your feet again where your scanner was restarted (11-together.js): down there with others that is how
+// you come back, and not from a checkpoint.
+function standUpAgainAt(x, z) {
+  if (game.mode !== 'dead' && game.mode !== 'dying') return;
+  player.x = x; player.z = z;
+  player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
+  steadyHeldScanner();
+  player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
+  player.sweepTimeRemaining = 0;
+  input.keysDown.clear();
+  game.interference = 0; game.danger = 0; game.fade = 0;
+  game.deathSequence = null;
+  showOnlyScreen(null);
+  setHudVisible(true);
+  game.mode = 'playing';
+  focusGameView();
+  requestPointerLockOnCanvas();
+  showMessage('Scanner restarted. Somebody carried it back.', 5, 'info');
+}
+
 function retryFromCheckpoint() {
-  if (game.mode !== 'dead') return;
+  if (game.mode !== 'dead' || isWorldShared()) return;
   if (!game.difficulty.checkpointsEnabled) return; // one life: the only way on is to start over
   player.x = game.checkpoint.x; player.z = game.checkpoint.z; player.yaw = game.checkpoint.yaw;
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
@@ -583,7 +651,7 @@ function retryFromCheckpoint() {
     relocateHollowAwayFromPlayer(12);
   }
   if (stillsAreHunting) resetStillsToHomePositions();
-  if (game.flags.uploadStarted && !game.flags.liftArrived) {
+  if (game.flags.uploadStarted && !game.flags.liftArrived && !isWorldShared()) { // (down there with others the car does not start over for one of you)
     game.liftCountdown = TUNING.liftArrivalSeconds;
     scheduleEvent(8, function () {
       if (game.flags.uploadStarted && !game.flags.liftArrived && hollow.isActive) hollow.knowsPlayerPositionAlways = true;
@@ -594,7 +662,52 @@ function retryFromCheckpoint() {
   game.mode = 'playing';
   focusGameView();
   requestPointerLockOnCanvas();
+  if (isWorldTheHosts()) sayToOthers({ k: 'back' }); // the host's creatures may come for you again
   showMessage('Scanner restarted from the last checkpoint.', 5, 'info');
+}
+
+// ---------------------------------------------------------------------------
+// Things that happen to the whole descent. Alone they happen the moment you do them. Down there with others
+// the host's game puts everyone's in one order, and each browser carries them out in that order
+// (askToAct and performActionFor in 11-together.js), so that every game ends up the same.
+// ---------------------------------------------------------------------------
+
+// The first time anyone sets foot in a room, whatever is waiting on that room hears of it.
+function notePlaceEntered(placeName) {
+  if (game.placesEntered[placeName]) return;
+  game.placesEntered[placeName] = true;
+  fireGameEvent('enter:' + placeName);
+}
+
+// Somebody is out of the car and a good step past its door.
+function noteLiftLeft() {
+  if (game.flags.hasLeftLift) return;
+  game.flags.hasLeftLift = true;
+  liftDoor.forcedState = false;
+  game.isLiftDoorClosingBehindYou = true;
+  saveCheckpoint();
+  refreshObjective();
+  fireGameEvent('leftLift'); // (the car is heard going up when its door is down: updateGameProgress)
+}
+
+// The car goes up, with whoever is on their feet in it. Down there with others, somebody who is dead is not:
+// nobody carried their scanner back, and they are left behind. Their death screen says so, and that is where
+// their descent ends. (They used to be taken up with the rest: the ending, and a best time for it.)
+function beginAscent() {
+  if (game.mode === 'ascending' || game.mode === 'ending' || game.mode === 'title') return;
+  if (isWorldShared() && (game.mode === 'dead' || game.mode === 'dying')) {
+    game.isLeftBehind = true;
+    if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // (still dying: it says so when that is over)
+    return;
+  }
+  if (game.mode !== 'playing') { stopVoiceLine(); suspendAudio(false); showOnlyScreen(null); setHudVisible(true); } // whatever you were at
+  game.mode = 'ascending';
+  game.ascentTimer = 0;
+  liftDoor.forcedState = false;
+  hollow.knowsPlayerPositionAlways = false;
+  setScannerSound(0);
+  setLiftMachinerySound(0.9);
+  closeMapOverlay();
 }
 
 // ---------------------------------------------------------------------------
@@ -606,8 +719,9 @@ function updateGameProgress(dt) {
   game.statistics.elapsed += dt;
 
   // The first time you set foot in a room, whatever is waiting on that room hears of it: 'enter:PUMP HALL B'.
+  // (Down there with others, the first of you to set foot in it: askToAct, 11-together.js.)
   const placeName = ZONE_NAMES[getZoneAtPosition(player.x, player.z)] || '';
-  if (placeName !== '' && !game.placesEntered[placeName]) { game.placesEntered[placeName] = true; fireGameEvent('enter:' + placeName); }
+  if (placeName !== '' && !game.placesEntered[placeName]) askToAct({ what: 'enter', place: placeName });
 
   for (let index = game.scheduledEvents.length - 1; index >= 0; index--) {
     if (game.time >= game.scheduledEvents[index].time) {
@@ -618,25 +732,24 @@ function updateGameProgress(dt) {
   }
 
   // Out of the car and a good step past its door.
-  if (!flags.hasLeftLift && distanceOutsideLiftCar(player.x, player.z) > 1.7) {
-    flags.hasLeftLift = true;
-    liftDoor.forcedState = false;
-    game.isLiftDoorClosingBehindYou = true;
-    saveCheckpoint();
-    refreshObjective();
-    scheduleEvent(1.4, function () { playLiftDepartSound(); });
-    fireGameEvent('leftLift');
-  }
+  if (!flags.hasLeftLift && distanceOutsideLiftCar(player.x, player.z) > 1.7) askToAct({ what: 'leaveLift' });
 
   // The car's door never comes down on you. Step out and dart back in while it is closing, and it goes up
   // again; it shuts when you are clear of it. (Once it is down it stays down: the car has gone up.)
   // A salvage bay's door keeps the same rule (updateHaulBays in 08-loose-objects.js).
   if (game.isLiftDoorClosingBehindYou) {
-    const isInTheWay = distanceOutsideLiftCar(player.x, player.z) < 1.2; // in the car, or in its doorway
+    let isInTheWay = false; // somebody in the car, or in its doorway
+    for (const one of players) if (distanceOutsideLiftCar(one.x, one.z) < 1.2) isInTheWay = true;
+    // Down there with others, somebody who came down with you and has not been heard from yet is in the car: their
+    // browser is still building the station. (The host could be out and the door down before they had arrived.)
+    if (isSomebodyStillOnTheirWayDown()) isInTheWay = true;
     if (isInTheWay && liftDoor.openFraction > 0) liftDoor.forcedState = true;
     else if (!isInTheWay) {
       liftDoor.forcedState = false;
-      if (liftDoor.openFraction <= 0) game.isLiftDoorClosingBehindYou = false; // down, with you outside: that is that
+      if (liftDoor.openFraction <= 0) {
+        game.isLiftDoorClosingBehindYou = false; // down, with you outside: that is that (until somebody uses the panel in the car)
+        playLiftDepartSound();
+      }
     }
   }
 
@@ -646,16 +759,18 @@ function updateGameProgress(dt) {
     if (game.liftCountdown <= 0) completeLiftArrival();
   }
 
-  const isWellInsideLiftCar = player.x > LIFT_CAR_BOUNDS.minimumX + 0.3 && player.x < LIFT_CAR_BOUNDS.maximumX - 0.3 &&
-    player.z > LIFT_CAR_BOUNDS.minimumZ + 0.3 && player.z < LIFT_CAR_BOUNDS.maximumZ - 0.3;
-  if (flags.liftArrived && isWellInsideLiftCar) {
-    game.mode = 'ascending';
-    game.ascentTimer = 0;
-    liftDoor.forcedState = false;
-    hollow.knowsPlayerPositionAlways = false;
-    setScannerSound(0);
-    setLiftMachinerySound(0.9);
-    closeMapOverlay();
+  // The car goes up with everyone who is still on their feet in it. Alone, that is you. Down there with others
+  // it waits for all of you, and it is the host's game that says when (the list of players is the host's).
+  // (And not with nobody: when every one of you is down the list is you alone, so that it is never empty, and
+  // a host who lay dead in the car used to send it up.)
+  const isSomebodyOnTheirFeet = (game.mode !== 'dying' && game.mode !== 'dead') || players.some(function (one) { return one !== player; });
+  if (flags.liftArrived && !isWorldTheHosts() && isSomebodyOnTheirFeet) {
+    let isEveryoneAboard = true;
+    for (const one of players) {
+      if (!(one.x > LIFT_CAR_BOUNDS.minimumX + 0.3 && one.x < LIFT_CAR_BOUNDS.maximumX - 0.3 &&
+          one.z > LIFT_CAR_BOUNDS.minimumZ + 0.3 && one.z < LIFT_CAR_BOUNDS.maximumZ - 0.3)) isEveryoneAboard = false;
+    }
+    if (isEveryoneAboard) askToAct({ what: 'ascend' });
   }
 
   if (hollow.isActive && !game.hasShownHollowHint && hollow.figure.totalHits > 30) {
@@ -705,23 +820,45 @@ function updatePlaying(dt) {
   updateLooseObjects(dt, player.x, getPlayerEyeY(), player.z); // before the scanner: what you carry is in its way
   updateScanner(dt, player.x, eyeY, player.z);
   updateInteractionFocus(player.x, eyeY, player.z);
-  updateDoors(dt);
-  if (debugState.options.freezeCreatures) {
-    hollow.figure.hitsThisFrame = 0;
-  } else {
-    updateHollow(dt);
-    updateStills(dt);
-  }
+  updateStation(dt);
   updatePhantoms(dt);
   if (game.mode === 'playing') updateGameProgress(dt);
   updateAtmosphere(dt);
+}
+
+// What goes on in the station whoever is looking: its doors, and what walks in it. Down there with others, in
+// the host's station, none of that is decided here: it is shown as the host's game says it is.
+function updateStation(dt) {
+  if (isWorldTheHosts()) { followHostStation(dt); return; }
+  updateDoors(dt);
+  // (While it has hold of you, it has no mind for anything else. Alone that is the whole of the station
+  // standing still; as the host of others it is only this, for the moment it takes.)
+  if (debugState.options.freezeCreatures || game.mode === 'dying') {
+    hollow.figure.hitsThisFrame = 0;
+  } else {
+    shareWorldSoundsDuring(function () { updateHollow(dt); updateStills(dt); });
+  }
+}
+
+// Down there with others the station does not stop for the one who is reading, has the menu open, or is dead.
+// This is a frame of it going on without you. (Alone, it waits for you, as it always did.)
+// Everything goes on but what you would be doing yourself: what walks down there, the doors, the work order,
+// and whatever lies loose that is this browser's to move (all of it, for the host: a thing that was falling
+// when the host opened the menu used to hang in the air in everybody's game until the menu was shut).
+// What you hear of it goes on too, while you are only looking at a menu or a page.
+function updateStationWithoutYou(dt, hasTimeMoved) {
+  if (!hasTimeMoved) { game.time += dt; currentPointTime = game.time; }
+  updateLooseObjects(dt, player.x, getPlayerEyeY(), player.z);
+  updateStation(dt);
+  updateGameProgress(dt);
+  if (game.mode === 'paused' || game.mode === 'reading') updateAtmosphere(dt);
 }
 
 function updateAscending(dt) {
   game.time += dt;
   currentPointTime = game.time;
   game.ascentTimer += dt;
-  updateDoors(dt);
+  if (isWorldTheHosts()) followHostStation(dt); else updateDoors(dt);
   resetBeamLines(0, 0, 0);
   game.interference = approachValue(game.interference, 0, dt);
   game.danger = approachValue(game.danger, 0, dt);
@@ -734,8 +871,8 @@ function updateAscending(dt) {
     setGeneratorSoundRunning(false);
     for (const definition of QUESTS) if (definition.reset) definition.reset(); // anything of a quest that is still making a noise
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
-    if (debugState.hasBeenUsedThisRun) {
-      game.statistics.bestTime = null; // a run with debug mode does not count
+    if (debugState.hasBeenUsedThisRun || isWorldShared()) {
+      game.statistics.bestTime = null; // a run with debug mode does not count, and neither does one with others: the best times are of descents made alone
     } else {
       try {
         // Best times are kept per threat level, and per station: a generated station only competes with itself.
@@ -812,10 +949,13 @@ function runFrame(timestamp) {
     game.interference = 0; game.danger = 0; game.fade = 1;
   } else {
     if (game.mode === 'playing') updatePlaying(realDt);
-    else if (game.mode === 'dying') updateDying(realDt);
+    else if (game.mode === 'dying') { updateDying(realDt); if (isWorldShared()) updateStationWithoutYou(realDt, true); }
     else if (game.mode === 'ascending') updateAscending(realDt);
     else if (game.mode === 'workshop') workshopHooks.update(realDt);
-    else resetBeamLines(0, 0, 0);
+    else {
+      resetBeamLines(0, 0, 0);
+      if (isWorldShared() && (game.mode === 'paused' || game.mode === 'reading' || game.mode === 'dead')) updateStationWithoutYou(realDt, false);
+    }
     const isScanning = player.isPainting || player.sweepTimeRemaining > 0;
     renderCamera.x = player.x;
     renderCamera.y = getPlayerEyeY() + Math.sin(player.bobPhase) * 0.028;
@@ -852,9 +992,20 @@ function runFrame(timestamp) {
   frameState.scannerHeat = player.heat;
   if (game.mode === 'workshop') frameState.debug = workshopHooks.buildFrameData();
   else frameState.debug = game.mode === 'title' || !debugHooks.buildFrameData ? null : debugHooks.buildFrameData();
+  updateTogether(realDt); // the others down here with you: where they are now, and what their scanners show
   renderFrame(renderCamera, frameState);
   updateHud(realDt);
   if (debugHooks.update) debugHooks.update(realDt);
+}
+
+// A frame of the station going on with nothing drawn and nobody at the controls: for the host of others, while
+// the host's tab is hidden (startUnseenTicks, 11-together.js). A hidden tab is never in play: hiding it opens the menu.
+function runFrameUnseen(dt) {
+  game.realTime += dt;
+  if (game.mode === 'dying') { updateDying(dt); updateStationWithoutYou(dt, true); }
+  else if (game.mode === 'ascending') updateAscending(dt);
+  else if (game.mode === 'paused' || game.mode === 'reading' || game.mode === 'dead') updateStationWithoutYou(dt, false);
+  updateTogether(dt);
 }
 
 // ---------------------------------------------------------------------------
@@ -877,6 +1028,7 @@ function startApplication() {
   createPhantoms();
   initializeInput();
   initializeInterface();
+  initializeTogether();
   liftDoor.forcedState = true;
   liftDoor.openFraction = 1;
   liftDoor.slab.isRemoved = true;
@@ -884,7 +1036,7 @@ function startApplication() {
   showOnlyScreen('screen-title');
 
   window.lastReturnDebug = {
-    game: game, player: player, players: players, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
+    game: game, player: player, players: players, together: together, updateTogether: updateTogether, askToAct: askToAct, returnToTitle: returnToTitle, hollow: hollow, renderer: renderer, renderCamera: renderCamera, audio: audio,
     playHollowRoar: playHollowRoar, playHollowSnarl: playHollowSnarl, playHollowLostHiss: playHollowLostHiss, playHollowSniff: playHollowSniff, playHollowCuriousTrill: playHollowCuriousTrill,
     playStinger: playStinger, playSweepSound: playSweepSound, playInterfaceBlip: playInterfaceBlip, playRadioBlip: playRadioBlip, playDeniedSound: playDeniedSound, stills: stills, doors: doors, pointCloud: pointCloud, settings: settings,
     beamLines: beamLines,
@@ -935,12 +1087,14 @@ function startApplication() {
     teleport: function (x, z, yaw) { player.x = x; player.z = z; if (yaw !== undefined) player.yaw = yaw; },
     grantPower: function () { game.flags.powerOn = true; refreshObjective(); },
     grantKeycard: function () { setKeycardLevel(3); },
-    keycardObjectIds: KEYCARD_OBJECT_IDS,
+    keycardObjectIds: KEYCARD_OBJECT_IDS, liftPanelObjectId: OBJECT_LIFT_PANEL,
+    // Whether the stations built from now on use what the workshop made (see isWorkshopContentUsed in 03-levelgen.js).
+    setWorkshopContentUsed: function (isUsed) { isWorkshopContentUsed = isUsed !== false; },
     missionObjectIds: { fuelCan: OBJECT_FUEL_CAN, winchBreaker: OBJECT_WINCH_BREAKER, firstCore: OBJECT_CORE_FIRST, firstExtraGenerator: OBJECT_EXTRA_GENERATOR_FIRST, firstExtraFuelCan: OBJECT_EXTRA_FUEL_CAN_FIRST },
     // Quests (09-quests.js): the descriptions, this station's, and the questions the game asks of them.
     quests: QUESTS, questItems: QUEST_ITEMS, findQuest: findQuest, isQuestUnfinished: isQuestUnfinished, getUnfinishedQuests: getUnfinishedQuests,
     getQuestChips: getQuestChips, fireGameEvent: fireGameEvent, dispatchCues: DISPATCH_CUES,
-    radioText: function (key) { return RADIO_MESSAGES[key]; }, clearMessages: clearMessages, closeReader: closeReader,
+    radioText: function (key) { return RADIO_MESSAGES[key]; }, clearMessages: clearMessages, showMessage: showMessage, updateGameProgress: updateGameProgress, playLooseObjectFlingSound: playLooseObjectFlingSound, closeReader: closeReader,
     // Does a quest the way a player would, thing by thing (fetching what a machine needs first), wherever the player stands.
     doQuest: function (key) {
       const instance = findQuest(key);
@@ -1009,7 +1163,7 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     stationLooseObjects: stationLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
-    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth, getLooseObjectValue: getLooseObjectValue, addBrokenGlassAt: addBrokenGlassAt, removeBrokenGlassFromPlay: removeBrokenGlassFromPlay,
+    haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth, getLooseObjectTopY: getLooseObjectTopY, getLooseObjectValue: getLooseObjectValue, addBrokenGlassAt: addBrokenGlassAt, removeBrokenGlassFromPlay: removeBrokenGlassFromPlay,
     startOver: function () { resetWorldState(); }, // a new descent into the station that is loaded, as "Begin descent" does it
 
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,

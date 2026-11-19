@@ -30,7 +30,7 @@ const player = {
   yaw: PLAYER_START.yaw, pitch: 0,
   scannerYaw: PLAYER_START.yaw, scannerPitch: 0, // where the scanner in your hand points: it trails a little behind where you look
   scannerDriftRight: 0, scannerDriftBack: 0,     // how far it has been left behind by your steps, in metres: to your right, and toward you
-  eyeHeight: TUNING.eyeHeightStanding, // eyes above the floor you stand on
+  eyeHeight: (TUNING.playerHeight * TUNING.playerEyeHeightToBody), // eyes above the floor you stand on
   floorY: 0,                           // height of that floor: 0 on the lift's level, negative further down
   velocityX: 0, velocityZ: 0,
   stamina: 1,
@@ -133,7 +133,10 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  try { window.localStorage.setItem('last-return-settings', JSON.stringify(settings)); } catch (error) { /* storage is optional */ }
+  // In somebody else's lobby the title screen shows what the host has chosen. What is kept is what you chose yourself.
+  const kept = together.ownChoices ? Object.assign({}, settings, together.ownChoices) : settings;
+  try { window.localStorage.setItem('last-return-settings', JSON.stringify(kept)); } catch (error) { /* storage is optional */ }
+  tellLobbyWhatIsChosen(); // as the host of a lobby: the others see it change (11-together.js)
 }
 
 // Where the eyes (and so the camera and the scanner) are, measured from the lift's floor level.
@@ -149,7 +152,7 @@ function resetPlayerToStart() {
   player.stamina = 1; player.isStaminaLocked = false;
   player.heat = 0; player.isOverheated = false;
   player.sweepTimeRemaining = 0;
-  player.eyeHeight = TUNING.eyeHeightStanding;
+  player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
   player.floorY = getFloorHeightAt(player.x, player.z);
   player.focusedInteractable = null;
   player.focusedLooseObject = null;
@@ -161,6 +164,10 @@ function resetPlayerToStart() {
 
 function requestPointerLockOnCanvas() {
   if (input.isTouchDevice || input.isPointerLocked) return;
+  // A browser only hands over the mouse when the player has just clicked or pressed a key. Asked at any other
+  // moment (the host has begun, and you go down with them) it refuses, and that refusal says nothing about
+  // whether capture works here. So it is not asked: the next click on the game takes the mouse.
+  if (navigator.userActivation && !navigator.userActivation.isActive) return;
   const canvas = renderer.canvas;
   if (!canvas.requestPointerLock) { input.useDragLook = true; return; }
   try {
@@ -248,7 +255,7 @@ function initializeInput() {
   canvas.addEventListener('wheel', function (event) {
     if (game.mode !== 'playing') return;
     event.preventDefault();
-    setScannerSpread(player.spreadDegrees + (event.deltaY > 0 ? -0.5 : 0.5));
+    setScannerSpread(player.spreadDegrees + (event.deltaY > 0 ? -TUNING.scannerSpreadScrollSpeed : TUNING.scannerSpreadScrollSpeed));
   }, { passive: false });
   canvas.addEventListener('contextmenu', function (event) { event.preventDefault(); });
 
@@ -425,7 +432,7 @@ function updatePlayerMovement(dt) {
 
   // Under a ceiling too low to stand under (a vent), you are down whether you hold the key or not.
   const isInVent = (getTileFlagsAtPosition(player.x, player.z) & TILE_FLAG_VENT) !== 0;
-  const hasNoRoomToStand = getHeadroomAt(player.x, player.z) < 1.75;
+  const hasNoRoomToStand = getHeadroomAt(player.x, player.z) < TUNING.playerHeight + 0.05;
   player.isCrouching = keys.has('KeyC') || input.touchCrouch || hasNoRoomToStand;
   player.isInVent = isInVent;
   const wantsSprint = (keys.has('ShiftLeft') || keys.has('ShiftRight') || input.touchSprint) && !player.isCrouching && canSprintWhileCarrying();
@@ -461,7 +468,7 @@ function updatePlayerMovement(dt) {
 
   const previousX = player.x, previousZ = player.z;
   const resolved = resolveBodyCollision(player.x + player.velocityX * dt, player.z + player.velocityZ * dt,
-    TUNING.playerRadius, player.isCrouching ? 1.0 : 1.7, getFloorHeightAt(player.x, player.z));
+    TUNING.playerRadius, player.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight, getFloorHeightAt(player.x, player.z));
   player.x = resolved.x; player.z = resolved.z;
   // Follow the floor. Stairs are taken smoothly; anything bigger (a teleport, a checkpoint) lands at once.
   // TWEAK: 2.5 = how fast the view rises and falls on stairs, in metres per second. Lower feels floatier.
@@ -472,7 +479,7 @@ function updatePlayerMovement(dt) {
   player.isMoving = movedDistance > dt * 0.3;
   game.statistics.distanceWalked += movedDistance;
 
-  player.eyeHeight = approachValue(player.eyeHeight, player.isCrouching ? TUNING.eyeHeightCrouching : TUNING.eyeHeightStanding, dt * 3.2);
+  player.eyeHeight = approachValue(player.eyeHeight, player.isCrouching ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody), dt * 3.2);
   player.bobPhase += movedDistance * (player.isSprinting ? 5.2 : 6.4);
 
   // Footsteps are what the Hollow listens for.
@@ -835,7 +842,7 @@ function updateInteractionFocus(eyeX, eyeY, eyeZ) {
       if (getHeldLooseObject()) showMessage('The beam is already holding something.', 2, 'info');
       else pickUpLooseObject(looseObject);
     } else if (best) {
-      useInteractable(best);
+      askToAct({ what: 'use', objectId: best.objectId });
     } else if (getHeldLooseObject()) {
       beginLettingGo();
     }

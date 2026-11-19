@@ -55,8 +55,25 @@ function installLetTheBrowserCatchUp() {
 const gamePagePath = path.join(__dirname, '..', 'index.html');
 const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 
+// Runs in the page before any of its own script. The checks are made on stations that are built from the code
+// alone: without the rooms in src/rooms/ and the loose things in src/objects/, which the workshop makes. A seed
+// then builds the same station whatever anybody makes there, and a check that was written against one station
+// (a cover lying where it can be walked over, a crate behind a door) does not have to be looked at again for
+// every new room. The game is told as soon as it puts out its test hook, so that it holds after a reload too.
+// (What the workshop makes is checked where that is the point: generated-station-test.js builds its hundred and
+// twenty stations with all of it, and workshop-test.js makes a room and an object of its own.)
+function installStationsFromCodeAlone() {
+  let hook;
+  Object.defineProperty(window, 'lastReturnDebug', {
+    configurable: true,
+    get: function () { return hook; },
+    set: function (value) { hook = value; if (value && value.setWorkshopContentUsed) value.setWorkshopContentUsed(false); }
+  });
+}
+
+// `workshopContent: true` leaves the stations as the game builds them, with what the workshop made.
 async function openGame(options) {
-  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false }, options || {});
+  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false }, options || {});
   const browser = await chromium.launch({
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
   });
@@ -73,7 +90,9 @@ async function openGame(options) {
   });
   page.on('pageerror', (error) => problems.push('page error: ' + error.message));
   await page.addInitScript(installLetTheBrowserCatchUp);
-  await page.goto('file://' + (settings.dev ? devPagePath : gamePagePath));
+  if (!settings.workshopContent) await page.addInitScript(installStationsFromCodeAlone);
+  // `address` opens the game where a server has it (together-test.js); otherwise it is opened from its file.
+  await page.goto(settings.address || 'file://' + (settings.dev ? devPagePath : gamePagePath));
   await page.waitForFunction((needsDebugMode) => Boolean(window.lastReturnDebug && (!needsDebugMode || window.lastReturnDebug.setDebugOption)), settings.dev);
   return { browser, page, problems };
 }

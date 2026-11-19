@@ -22,24 +22,33 @@ spec:
         - name: web
           image: "{{ required "image.repository is not set. Pass --set image.repository=<registry-host>/last-return" .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- with .Values.serverName }}
-          {{- if not (regexMatch "^[A-Za-z0-9 ._-]{1,40}$" .) }}
-          {{- fail "serverName may only hold letters, digits, spaces, dots, underscores and hyphens, 40 at most." }}
+          {{- if and .Values.lobbies.enabled (gt (int .Values.replicaCount) 1) }}
+          {{- fail "replicaCount must be 1 while lobbies.enabled is true: a lobby lives in the memory of one pod." }}
           {{- end }}
           env:
+            - name: PORT
+              value: "8080"
+            - name: LAST_RETURN_LOBBIES
+              value: {{ ternary "on" "off" .Values.lobbies.enabled | quote }}
+            - name: LAST_RETURN_PROXIES
+              value: {{ .Values.lobbies.proxies | default (ternary 1 0 .Values.ingress.enabled) | quote }}
+            {{- with .Values.serverName }}
+            {{- if not (regexMatch "^[A-Za-z0-9 ._-]{1,40}$" .) }}
+            {{- fail "serverName may only hold letters, digits, spaces, dots, underscores and hyphens, 40 at most." }}
+            {{- end }}
             - name: LAST_RETURN_SERVER_NAME
               value: {{ . | quote }}
-          {{- end }}
+            {{- end }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
           readinessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

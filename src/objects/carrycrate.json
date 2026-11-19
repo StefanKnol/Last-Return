@@ -1,0 +1,23 @@
+{
+  "label": "crate",
+  "mass": 2,
+  "value": 10,
+  "fragile": 0.1,
+  "shattersAt": 0,
+  "material": "case",
+  "loud": 0.6,
+  "lies": "upright",
+  "bulky": true,
+  "bounce": 0.15,
+  "grip": 0.6,
+  "asLitter": 0,
+  "onTheFloor": 2,
+  "onASurface": 1,
+  "parts": [
+    { "shape": "box", "center": [0.325,0,0], "half": [0.025,0.2,0.3] },
+    { "shape": "box", "center": [-0.325,0,0], "half": [0.025,0.2,0.3] },
+    { "shape": "box", "center": [0,0,0.275], "half": [0.3,0.2,0.025] },
+    { "shape": "box", "center": [0,0,-0.275], "half": [0.3,0.2,0.025] },
+    { "shape": "box", "center": [0,-0.225,0], "half": [0.35,0.025,0.3] }
+  ]
+}
