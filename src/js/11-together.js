@@ -973,12 +973,18 @@ function performAction(action) {
 // loose thing like any other, with its light still on. One of the others carries it to the lift (to within
 // TOGETHER_RESTART_METRES of the car) or into a salvage bay that stands open, and puts it down. When it has
 // lain there for TOGETHER_RESTART_SECONDS it restarts, loudly, and its owner is on their feet where it lay.
-// It has to have been carried: somebody must have had it in their beam. Falling at the lift is not a way back.
+// It does not have to be one of you that brings it there. Kicked or flung there by the Hollow, knocked there by
+// a crate: lying there is what counts, and luck is welcome. What does not count is lying where its owner fell:
+// until it has been moved from there (TOGETHER_RESTART_MOVED_METRES, or once in anybody's beam), a scanner does
+// not restart, or falling within reach of the car would be a way back that costs three seconds.
+// The seconds are counted afresh whenever it leaves: one that is taken out again, rolls out, or flies through
+// on its way somewhere else does not restart.
 // A scanner lost down the shaft is lost, and so is its owner, for this descent. When every one of you is down,
 // nobody is left to carry anybody, and the descent is over.
 
 const TOGETHER_RESTART_METRES = 2.5; // TWEAK: how near the lift car counts as "at the lift"
 const TOGETHER_RESTART_SECONDS = 3;  // TWEAK: how long it lies there before it restarts
+const TOGETHER_RESTART_MOVED_METRES = 1; // TWEAK: how far from where its owner fell it has to have been before it can restart at all
 
 function dropFallenScanner(action) {
   const actingId = together.actingId;
@@ -987,6 +993,7 @@ function dropFallenScanner(action) {
   if (action.id > 0) { scanner.id = action.id; looseState.nextId = Math.max(looseState.nextId, action.id + 1); }
   scanner.fallenPlayerId = actingId;
   scanner.wasHandled = false;
+  scanner.fellX = scanner.x; scanner.fellZ = scanner.z; scanner.hasBeenMoved = false; // (updateFallenScanners)
 }
 
 function restartFallenScanner(id) {
@@ -1011,11 +1018,12 @@ function updateFallenScanners(dt) {
   if (game.isDescentLost) return;
   for (const object of looseObjects) {
     if (!object.fallenPlayerId) continue;
-    // Carried there: one that somebody has had in their beam. A scanner that simply lies where its owner fell
-    // does not restart for lying near the lift, or dying within reach of the car would cost three seconds.
-    let canRestart = object.wasHandled && !object.heldById && distanceOutsideLiftCar(object.x, object.z) < TOGETHER_RESTART_METRES;
+    // Moved from where its owner fell, by whoever or whatever: in somebody's beam, or a good step away from
+    // there at any time since. (Once moved it stays moved, wherever it ends up.)
+    if (object.wasHandled || distanceBetweenPoints(object.x, object.z, object.fellX, object.fellZ) > TOGETHER_RESTART_MOVED_METRES) object.hasBeenMoved = true;
+    let canRestart = object.hasBeenMoved && !object.heldById && distanceOutsideLiftCar(object.x, object.z) < TOGETHER_RESTART_METRES;
     const bay = findOpenHaulBay();
-    if (object.wasHandled && !object.heldById && bay && isLooseObjectInHaulBay(object, bay)) canRestart = true;
+    if (object.hasBeenMoved && !object.heldById && bay && isLooseObjectInHaulBay(object, bay)) canRestart = true;
     object.restartSeconds = canRestart ? object.restartSeconds + dt : 0;
     if (object.restartSeconds >= TOGETHER_RESTART_SECONDS) { decideAction(together.myId, { what: 'restart', id: object.id }); return; }
   }

@@ -843,21 +843,36 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // One of you is dead and nobody carried their scanner back: the car goes up with those on their feet, and
   // the dead one is left behind. (They used to be taken up too: the ending, and a best time for it.)
   for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
-  // They fell in the lift car, so their scanner lies where a carried one restarts. It has not been carried: it
-  // does not restart for lying there, however long. (All in one go in the host's game: on a slow machine the
-  // seconds would pass between two steps of this check anyway, and did, which is how this was found.)
+  // They fell in the lift car, so their scanner lies where one restarts. It has not been moved from where they
+  // fell: it does not restart for lying there, however long. Moved by anything at all (nobody's beam: as if
+  // the Hollow had kicked it) and lying there again, its seconds start; out of reach again before they are up,
+  // they start over. (All in one go in the host's game: on a slow machine the seconds would pass between two
+  // steps of this check anyway, and did, which is how this was found.)
   await a.waitForFunction(() => window.lastReturnDebug.looseObjects.some((object) => object.fallenPlayerId), null, { timeout: 8000 }).catch(() => {});
   const fellAtTheLift = await a.evaluate(() => {
     const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.fallenPlayerId)[0], other = d.together.others[0];
     if (!scanner) return null;
     const result = { metresFromTheCar: Math.hypot(scanner.x - d.playerStart.x, scanner.z - d.playerStart.z), wasHandled: scanner.wasHandled };
     d.hollow.isActive = false;
-    for (let count = 0; count < 12; count++) d.updateTogether(0.5); // six seconds; a carried one takes three
+    for (let count = 0; count < 12; count++) d.updateTogether(0.5); // six seconds; one that counts takes three
     result.stillLies = d.looseObjects.indexOf(scanner) >= 0; result.ownerIsDown = other.isDown; result.restartSeconds = scanner.restartSeconds;
+    // Kicked a metre and a half off and back to where it lay: nobody's beam has had it, and it counts now.
+    const x = scanner.x;
+    scanner.x = x + 1.5; d.updateTogether(0.5);
+    scanner.x = x; d.updateTogether(0.5); d.updateTogether(0.5);
+    result.afterBeingMoved = { hasBeenMoved: scanner.hasBeenMoved, wasHandled: scanner.wasHandled, restartSeconds: scanner.restartSeconds, stillLies: d.looseObjects.indexOf(scanner) >= 0 };
+    // Out of reach of the car again before the three seconds are up: they start over.
+    scanner.x = x + 40; d.updateTogether(0.5);
+    result.takenOutAgain = scanner.restartSeconds;
+    // (Back as it was, for the checks that follow: not moved, where its owner fell.)
+    scanner.x = x; scanner.hasBeenMoved = false; scanner.restartSeconds = 0;
     return result;
   });
-  check('a scanner that lies at the lift because its owner fell there does not restart: it has to have been carried',
+  check('a scanner that lies at the lift because its owner fell there does not restart, however long it lies',
     fellAtTheLift !== null && fellAtTheLift.metresFromTheCar < 2 && !fellAtTheLift.wasHandled && fellAtTheLift.stillLies && fellAtTheLift.ownerIsDown && fellAtTheLift.restartSeconds === 0, fellAtTheLift);
+  check('moved from there by anything, with nobody\'s beam on it, and lying at the lift again, its seconds start; out of reach before they are up, they start over',
+    fellAtTheLift !== null && fellAtTheLift.afterBeingMoved.hasBeenMoved && !fellAtTheLift.afterBeingMoved.wasHandled && fellAtTheLift.afterBeingMoved.stillLies &&
+    fellAtTheLift.afterBeingMoved.restartSeconds > 0.4 && fellAtTheLift.afterBeingMoved.restartSeconds < 3 && fellAtTheLift.takenOutAgain === 0, fellAtTheLift);
   await a.evaluate(() => {
     const d = window.lastReturnDebug;
     d.hollow.isActive = false;
@@ -937,7 +952,9 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // One of them goes back up alone. They wait for the others; the descent goes on.
   await b.evaluate(() => window.lastReturnDebug.returnToTitle());
-  await a.waitForFunction(() => window.lastReturnDebug.together.others.length === 1, null, { timeout: 8000 }).catch(() => {});
+  // (Asked on a timer and given time: with three browsers drawing in software, the host's page has been seen to
+  // take longer than eight seconds to get round to what it was told.)
+  await a.waitForFunction(() => window.lastReturnDebug.together.others.length === 1, null, { polling: 200, timeout: 30000 }).catch(() => {});
   const wentUp = { other: await b.evaluate(() => ({ code: window.lastReturnDebug.together.code, isRoundOn: window.lastReturnDebug.together.isRoundOn, button: document.getElementById('button-begin').textContent })),
     host: await a.evaluate(() => ({ others: window.lastReturnDebug.together.others.length, mode: window.lastReturnDebug.game.mode, members: window.lastReturnDebug.together.memberIds.length })) };
   check('one who goes back up alone stays in the lobby and waits; for the others the descent goes on without them',
