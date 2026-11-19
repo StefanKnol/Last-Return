@@ -138,14 +138,16 @@ function installLab() {
     // Counts the scan points inside a box that will stay (not fading, not removed): those on the floor and walls,
     // and those on things that can be picked up.
     countPoints: function (x, y, z, reach) {
-      const floats = d.pointCloud.floatView, bytes = d.pointCloud.byteView, counts = { station: 0, onObjects: 0, fading: 0 };
+      const floats = d.pointCloud.floatView, bytes = d.pointCloud.byteView, counts = { station: 0, onObjects: 0, fading: 0, inTheWarningColour: 0 };
       for (let index = 0; index < d.pointCloud.storedCount; index++) {
         const px = floats[index * 5], py = floats[index * 5 + 1], pz = floats[index * 5 + 2];
         if (Math.abs(px - x) > reach || Math.abs(py - y) > reach || Math.abs(pz - z) > reach) continue;
         if (floats[index * 5 + 3] < -1e8) continue; // removed
-        const surfaceClass = bytes[index * 20 + 17], lifeCode = bytes[index * 20 + 18];
+        // (Which points are a loose thing's is kept with the point, not read off its colour: a thing that is loud
+        // to kick is scanned in the warning colour.)
+        const isOnALooseThing = bytes[index * 20 + 19] === 1, lifeCode = bytes[index * 20 + 18];
         if (lifeCode !== 0) counts.fading++;
-        else if (surfaceClass === 7) counts.onObjects++;
+        else if (isOnALooseThing) { counts.onObjects++; if (bytes[index * 20 + 17] === 12) counts.inTheWarningColour++; }
         else counts.station++;
       }
       return counts;
@@ -1387,6 +1389,48 @@ function installLab() {
   check('"Remove them all" in debug mode takes each object\'s points with it, and leaves the floor\'s',
     pointsKept.usedTheDebugButton && pointsKept.scannedAgain.onObjects > 50 && pointsKept.removed.loose === 0 && pointsKept.removed.points.onObjects === 0 && pointsKept.removed.points.station === pointsKept.scannedAgain.station,
     [pointsKept.scannedAgain, pointsKept.removed]);
+
+  // The same for a thing that is loud to kick, which is scanned in the warning colour and not in the colour of
+  // things you can take: a steel plate. (Its points used to stay where it had lain, for good.)
+  const loudPointsKept = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    lab.reset();
+    d.clearLooseObjects();
+    const object = d.createLooseObject('plate', spot.x, 0.3, spot.z, 0.3);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    lab.scan(object);
+    const reach = object.prepared.partsRadius + 0.3;
+    result.scannedAtRest = lab.countPoints(object.x, object.y, object.z, reach);
+    const wasAt = { x: object.x, y: object.y, z: object.z };
+    lab.stand(object.x - 1.6, object.z, Math.PI / 2);
+    d.pickUpLooseObject(object);
+    p.pitch = 0.9;
+    d.simulate(2);
+    result.carriedOff = lab.countPoints(wasAt.x, wasAt.y, wasAt.z, reach);
+    // Set down and scanned where it lies now, then kicked away by something else (not carried): they are let go as well.
+    d.releaseHeldLooseObject(0);
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    lab.scan(object);
+    const liesAt = { x: object.x, y: object.y, z: object.z };
+    result.scannedAgain = lab.countPoints(liesAt.x, liesAt.y, liesAt.z, reach);
+    d.wakeLooseObject(object); object.velocityX = 4; object.velocityY = 1.5;
+    d.simulate(2.5);
+    result.kickedAway = { metres: Math.hypot(object.x - liesAt.x, object.z - liesAt.z), points: lab.countPoints(liesAt.x, liesAt.y, liesAt.z, reach) };
+    // And taken out of the station where it has come to lie: its points go with it.
+    for (let step = 0; step < 200 && !object.isAsleep; step++) d.simulate(1 / 30);
+    lab.scan(object);
+    const lastAt = { x: object.x, y: object.y, z: object.z };
+    result.scannedLast = lab.countPoints(lastAt.x, lastAt.y, lastAt.z, reach);
+    d.removeLooseObject(object);
+    result.removed = lab.countPoints(lastAt.x, lastAt.y, lastAt.z, reach);
+    return result;
+  }, spot);
+  check('the same for a thing that is loud to kick, scanned in the warning colour (a steel plate): carried off, kicked away or taken out of the station, its points are let go and the floor keeps its own',
+    loudPointsKept.scannedAtRest.onObjects > 50 && loudPointsKept.scannedAtRest.inTheWarningColour === loudPointsKept.scannedAtRest.onObjects &&
+    loudPointsKept.carriedOff.onObjects === 0 && loudPointsKept.carriedOff.station === loudPointsKept.scannedAtRest.station &&
+    loudPointsKept.scannedAgain.onObjects > 50 && loudPointsKept.kickedAway.metres > 0.5 && loudPointsKept.kickedAway.points.onObjects === 0 &&
+    loudPointsKept.scannedLast.onObjects > 50 && loudPointsKept.removed.onObjects === 0 && loudPointsKept.removed.station === loudPointsKept.scannedLast.station,
+    loudPointsKept);
 
   // --- walking into one that lies on the floor ---
   const shoved = await inGame((bare) => {

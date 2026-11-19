@@ -626,7 +626,7 @@ function recordScanHit(drawBeam) {
   }
   const looseObject = rayHit.looseObject;
   if (looseObject !== null) { lifeCode = getLooseObjectPointLifeCode(looseObject); noteLooseObjectScanned(looseObject); }
-  addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode, looseObject !== null);
+  addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode, looseObject !== null, looseObject !== null);
   if (rayHit.objectId !== 0) markInteractableDiscovered(rayHit.objectId);
   if (drawBeam) addBeamLine(rayHit.x, rayHit.y, rayHit.z, 0.1 + Math.random() * 0.12);
 }
