@@ -623,6 +623,17 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   };
   const crateFilled = { atRest: await crateAtRest(8), host: await crateIn(a), other: await crateIn(b) };
   // The other takes the crate into their beam, lifts it, walks six strides with it, stops, and stands.
+  // And over a slow line: everything the host says reaches the other six tenths of a second late. So the host's
+  // word that the things in the crate are the other's to move ('carry') comes when their beam has long lifted
+  // the crate clear of where it stood, and where the host says those things are is where the crate was more than
+  // half a second ago. (Between two windows on one machine the answer comes at once, and what this is about
+  // hardly showed: on a slow machine, or with any real distance between two browsers, the things were left
+  // standing where the crate had been.)
+  await a.evaluate(() => {
+    const socket = window.lastReturnDebug.together.socket, send = socket.send.bind(socket);
+    window.undoSlowLine = () => { socket.send = send; };
+    socket.send = (text) => { setTimeout(() => send(text), 600); }; // (all of it by the same wait, so in the order it was said)
+  });
   await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.3; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
   await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, crateIds[0][0]);
   await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
@@ -649,6 +660,9 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const crateWeight = crateFilled.host ? crateFilled.host.things.reduce((sum, thing) => sum + (thing.mass || 0), 0) : 0;
   check('a crate with two cans and something heavy in it is the same crate in both games, with the same things in it',
     lane !== null && crateIds[0].length === 4 && crateIds[0].join() === crateIds[1].join() && crateFilled.atRest && crateFilled.host.inIt === 3 && crateFilled.other.inIt === 3, [lane, crateIds, crateFilled]);
+  check('over a slow line, what is in the crate is kept in it until the host has said it is the other\'s: lifted, all of it is in the crate in both games, and theirs to move',
+    crateLifted.other.inIt === 3 && crateLifted.host.inIt === 3 && crateLifted.other.things.every((thing) => thing.ownerId === ids.other) && crateLifted.host.things.every((thing) => thing.ownerId === ids.other),
+    [crateLifted.other.things.map((thing) => [thing.isInIt, thing.ownerId]), crateLifted.host.things.map((thing) => [thing.isInIt, thing.ownerId])]);
   check('the other carries it: in the host\'s game, where what is in it is the host\'s to move, all of it stays in the crate and goes where the crate goes, and none of it comes to rest on the way',
     crateLifted.host.heldById === ids.other && crateLifted.host.inIt === 3 && crateCarried.fewestInItForHost === 3 && crateCarried.mostAsleepForHost === 0 &&
     Math.hypot(crateCarried.host.x - crateFilled.host.x, crateCarried.host.z - crateFilled.host.z) > 2 && Math.hypot(crateCarried.host.x - crateCarried.other.x, crateCarried.host.z - crateCarried.other.z) < 0.3,
@@ -660,6 +674,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     crateSetDown.atRest && crateSetDown.host.inIt === 3 && crateSetDown.other.inIt === 3 && crateSetDown.host.ownerId === ids.host && crateSetDown.host.heldById === 0 &&
     crateSetDown.host.things.every((thing, index) => Math.hypot(thing.x - crateSetDown.other.things[index].x, thing.y - crateSetDown.other.things[index].y, thing.z - crateSetDown.other.things[index].z) < 0.03) &&
     Math.hypot(crateSetDown.host.x - crateSetDown.other.x, crateSetDown.host.y - crateSetDown.other.y, crateSetDown.host.z - crateSetDown.other.z) < 0.03, crateSetDown);
+  await a.evaluate(() => window.undoSlowLine());
+  await pause(800); // (what was still on its way has arrived)
   for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } delete d.looseObjectKinds.testCrate; delete d.looseObjectKinds.testWeight; }, crateIds[0]);
 
   // Something breaks: it is gone from both games.
@@ -988,7 +1004,10 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 8000 }).catch(() => {});
   await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.spawnHollow(other.x + 0.3, other.z); d.hollow.graceTimer = 0; });
-  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
+  // (Their page is drawn until they are dead: a page that is not asked to draw does not run its game, and on a
+  // slow machine the second and a half of dying had not passed when this was looked at.)
+  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 20000 }).catch(() => {});
+  for (let count = 0; count < 80 && await c.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) { await c.screenshot({ type: 'jpeg', quality: 5 }); await pause(50); }
   const waitingDead = await c.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }));
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
