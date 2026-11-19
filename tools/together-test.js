@@ -317,6 +317,10 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     const d = window.lastReturnDebug;
     for (let time = 0; time < seconds; time += 0.1) { d.simulate(0.1); d.updateTogether(0.1); }
   }, seconds);
+  // Being caught takes 1.55 seconds of the game, at a twentieth of a second a frame at the most: thirty-one frames
+  // or more. With two or three browsers drawing in software one frame can take seconds, so a death is waited for
+  // in frames drawn and not in seconds. (Fifteen seconds was not always enough for it on GitHub's machine.)
+  const drawUntilDead = async (page) => { for (let count = 0; count < 60 && await page.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await page.screenshot({ type: 'jpeg', quality: 5 }); };
   const both = async (seconds) => { for (let time = 0; time < seconds; time += 0.3) { await play(a, 0.3); await play(b, 0.3); await pause(170); } }; // (not faster than the clock: the server shows a browser the door for saying too much)
   await a.evaluate(() => { window.lastReturnDebug.settings.captions = 'all'; });
   await b.evaluate(() => { window.lastReturnDebug.settings.captions = 'all'; });
@@ -385,13 +389,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
   await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
   // The station does not stop for the dead, and there is no checkpoint to come back from.
-  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 });
+  await drawUntilDead(b);
   const timeBefore = await b.evaluate(() => window.lastReturnDebug.game.time);
   for (let count = 0; count < 4; count++) await b.screenshot({ type: 'jpeg', quality: 5 });
   check('the station goes on while you lie dead', await b.evaluate((before) => window.lastReturnDebug.game.time > before, timeBefore));
   const noWayBack = await b.evaluate(() => { const d = window.lastReturnDebug; d.retryFromCheckpoint(); return { mode: d.game.mode, retryHidden: document.getElementById('button-retry').hidden, told: document.getElementById('death-lines').textContent }; });
   check('down there with others there is no checkpoint to come back from: it is for the others to carry your scanner back',
-    noWayBack.mode === 'dead' && noWayBack.retryHidden && /carries it to the lift/.test(noWayBack.told), noWayBack);
+    noWayBack.mode === 'dead' && noWayBack.retryHidden && /carries it into the lift car/.test(noWayBack.told), noWayBack);
   // Their scanner lies where they fell, in both games, lit; their body is gone.
   await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
   await a.waitForFunction(() => window.lastReturnDebug.together.others[0].isFallen && window.lastReturnDebug.looseObjects.some((object) => object.fallenPlayerId > 0), null, { timeout: 5000 }).catch(() => {});
@@ -404,7 +408,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const scannerInTheirs = await b.evaluate((id) => window.lastReturnDebug.looseObjects.some((object) => object.id === id && object.fallenPlayerId === window.lastReturnDebug.together.myId), fallen.scanner ? fallen.scanner.id : -1);
   check('dead, their body is gone and their scanner lies where they fell, still lit, the same thing in both games',
     fallen.isFallen && !fallen.bodyHit && fallen.light > 0 && fallen.scanner !== null && fallen.scanner.metresFromThem < 0.5 && scannerInTheirs, fallen);
-  // The host carries it to the lift and puts it down. It restarts, and they are on their feet there.
+  // The host carries it into the lift car and puts it down. It restarts, and they are on their feet there.
   await a.evaluate((id) => {
     const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.id === id)[0];
     const spot = d.findWalkableSpotNear(scanner.x + 1, scanner.z) || d.findWalkableSpotNear(scanner.x, scanner.z + 1);
@@ -417,24 +421,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const notYet = await b.evaluate(() => window.lastReturnDebug.game.mode);
   await a.evaluate(() => {
     const d = window.lastReturnDebug;
-    // The nearest walkable spot to the car that is outside it.
-    let best = null;
-    for (let step = 1; step < 6 && !best; step += 0.5) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
-      const spot = d.findWalkableSpotNear(d.playerStart.x + way[0] * 1.2, d.playerStart.z + way[1] * 1.2);
-      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 2.2) { best = spot; break; }
-    }
-    d.teleport(best.x, best.z, Math.atan2(d.playerStart.x - best.x, -(d.playerStart.z - best.z))); d.player.pitch = -0.4;
+    // Into the lift car, which has stayed: that is where a scanner restarts.
+    const best = { x: d.playerStart.x, z: d.playerStart.z };
+    d.teleport(best.x, best.z, d.player.yaw); d.player.pitch = -0.4;
     // (The walk there is left out: what is in the beam is brought along, as it would have come.)
     const carried = d.getHeldLooseObject();
     carried.x = d.player.x; carried.y = d.getPlayerEyeY() - 0.3; carried.z = d.player.z; carried.velocityX = 0; carried.velocityY = 0; carried.velocityZ = 0;
     d.simulate(1.5);
     d.releaseHeldLooseObject(0);
   });
-  for (let turn = 0; turn < 12; turn++) { await both(0.9); if (await b.evaluate(() => window.lastReturnDebug.game.mode === 'playing')) break; }
+  for (let turn = 0; turn < 24; turn++) { await both(0.9); if (await b.evaluate(() => window.lastReturnDebug.game.mode === 'playing')) break; }
   const restarted = { other: await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, metresFromCar: Math.hypot(d.player.x - d.playerStart.x, d.player.z - d.playerStart.z), scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }),
     host: await a.evaluate(() => { const d = window.lastReturnDebug; return { players: d.players.length, isDown: d.together.others[0].isDown, isFallen: d.together.others[0].isFallen, scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }) };
-  check('carried, it does nothing; put down at the lift, it restarts and they are on their feet there, and one of the players again',
-    notYet === 'dead' && restarted.other.mode === 'playing' && restarted.other.metresFromCar < 7 && restarted.other.scanners === 0 && restarted.host.scanners === 0 && restarted.host.players === 2 && !restarted.host.isDown, [notYet, restarted]);
+  check('carried, it does nothing; put down in the lift car, it restarts and they are on their feet there, and one of the players again',
+    notYet === 'dead' && restarted.other.mode === 'playing' && restarted.other.metresFromCar < 2.2 && restarted.other.scanners === 0 && restarted.host.scanners === 0 && restarted.host.players === 2 && !restarted.host.isDown, [notYet, restarted]);
 
   // What one of you does to the station is done in every game: the other takes the first keycard.
   const taken = await b.evaluate(() => {
@@ -446,9 +446,10 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await a.waitForFunction(() => window.lastReturnDebug.game.flags.keycardLevel >= 1, null, { timeout: 5000 }).catch(() => {});
   await b.waitForFunction(() => window.lastReturnDebug.game.flags.keycardLevel >= 1, null, { timeout: 5000 }).catch(() => {});
   const card = { before: taken,
-    host: await a.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: document.getElementById('hud-messages').textContent.includes('eycard') }; }),
-    other: await b.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: document.getElementById('hud-messages').textContent.includes('eycard') }; }) };
+    host: await a.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: /Keycard( \d)? taken/.test(document.getElementById('hud-messages').textContent) }; }),
+    other: await b.evaluate(() => { const d = window.lastReturnDebug; return { level: d.game.flags.keycardLevel, gone: !d.findInteractable(d.keycardObjectIds[1]).isAvailable, told: /Keycard( \d)? taken/.test(document.getElementById('hud-messages').textContent) }; }) };
   check('a keycard one of you takes is taken in every game, once the host has said so', card.before === 0 && card.host.level === 1 && card.other.level === 1 && card.host.gone && card.other.gone, card);
+  // ("Keycard taken", that is. What Dispatch says about the card a moment later is for everybody.)
   check('and only the one who took it is told so', card.other.told && !card.host.told, card);
 
   // ---- Things that lie loose have one place, in every game ----
@@ -744,9 +745,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await b.keyboard.press('Escape');
   await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing', null, { timeout: 5000 }).catch(() => {});
 
-  // The lift car's door came down behind the last one out, long ago. Nobody should ever be behind it; but put the
-  // other in the car all the same, as one who came down late would be. The panel beside the door opens it again,
-  // in every game, it stays open while they are in the car, and it comes down once they are out.
+  // Down there with others the car stays, and its door is yours to open and shut: the panel in the car and the
+  // button outside it both do, in every game, for whoever presses.
   const wellAwayFromTheCar = () => {
     const d = window.lastReturnDebug;
     for (let step = 6; step < 20; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
@@ -755,37 +755,87 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     }
   };
   const liftDoors = async () => [await a.evaluate(() => Math.round(window.lastReturnDebug.getLiftDoor().openFraction * 100) / 100), await b.evaluate(() => Math.round(window.lastReturnDebug.getLiftDoor().openFraction * 100) / 100)];
+  const saidOfTheDoor = async (words) => [await a.evaluate((words) => document.getElementById('hud-messages').textContent.includes(words), words), await b.evaluate((words) => document.getElementById('hud-messages').textContent.includes(words), words)];
   await a.evaluate(wellAwayFromTheCar);
   await b.evaluate(() => { const d = window.lastReturnDebug; d.teleport(d.playerStart.x, d.playerStart.z, 0); d.clearMessages(); });
+  await a.evaluate(() => window.lastReturnDebug.clearMessages());
   await both(1.2);
-  const carDoor = { shutIn: await liftDoors() };
+  const carDoor = { stays: await a.evaluate(() => window.lastReturnDebug.game.isCarStaying) && await b.evaluate(() => window.lastReturnDebug.game.isCarStaying), atFirst: await liftDoors() };
   await b.evaluate(() => { const d = window.lastReturnDebug; d.askToAct({ what: 'use', objectId: d.liftPanelObjectId }); });
   await both(2.1);
-  carDoor.opened = await liftDoors();
-  carDoor.told = [await a.evaluate(() => document.getElementById('hud-messages').textContent.includes('door opening')), await b.evaluate(() => document.getElementById('hud-messages').textContent.includes('door opening'))];
+  carDoor.shut = await liftDoors();
+  carDoor.toldOfShutting = await saidOfTheDoor('door closing');
   await both(3);
-  carDoor.stillOpen = await liftDoors();
-  await b.evaluate(wellAwayFromTheCar);
-  await both(4.2);
-  carDoor.shutAgain = await liftDoors();
-  check('shut in the lift car, the panel beside its door opens it again, in every game, and it stays open while somebody is in the car',
-    carDoor.shutIn.join() === '0,0' && carDoor.opened.join() === '1,1' && carDoor.stillOpen.join() === '1,1' && carDoor.told[1] && !carDoor.told[0], carDoor);
-  check('and it comes down again once they are out', carDoor.shutAgain.join() === '0,0', carDoor);
-  // The door also waits for one who came down with the others and has not been heard from yet: their browser is
-  // still building the station, and they are in the car. (Somebody like that is made up here, in the host's game.)
-  await b.evaluate(() => { const d = window.lastReturnDebug; d.teleport(d.playerStart.x, d.playerStart.z, 0); });
+  carDoor.stillShut = await liftDoors(); // with somebody in the car: it is theirs to keep shut
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.askToAct({ what: 'use', objectId: d.liftButtonObjectId }); });
+  await both(2.1);
+  carDoor.openedFromOutside = await liftDoors();
+  check('down there with others the car stays, its door open until somebody shuts it: the panel in the car shuts it in every game and it stays shut with them in it, and the button outside opens it again',
+    carDoor.stays && carDoor.atFirst.join() === '1,1' && carDoor.shut.join() === '0,0' && carDoor.toldOfShutting[1] && !carDoor.toldOfShutting[0] && carDoor.stillShut.join() === '0,0' &&
+    carDoor.openedFromOutside.join() === '1,1', carDoor);
+  // It never comes down on anybody: asked to shut with one of you in the doorway, it waits, and comes down when they are out of it.
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.teleport(d.liftPosition.x, d.liftPosition.z, 0); });
   await both(0.6);
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.askToAct({ what: 'use', objectId: d.liftButtonObjectId }); });
+  await both(2.4);
+  carDoor.withOneInTheDoorway = await liftDoors();
+  await b.evaluate(wellAwayFromTheCar);
+  await both(3);
+  carDoor.withTheDoorwayClear = await liftDoors();
+  check('the car\'s door never comes down on anybody: asked to shut with one of you in the doorway it waits, and comes down once they are out of it',
+    carDoor.withOneInTheDoorway.join() === '1,1' && carDoor.withTheDoorwayClear.join() === '0,0', carDoor);
+  // Shut, it keeps the Hollow out for a while and no longer. One of you is in the car with the door shut and
+  // the Hollow is after them: it pounds on the door, and then it finds the button. (All of it in the host's
+  // game, which is where the Hollow is run, and in one go: see the note on slow machines further down.)
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.askToAct({ what: 'use', objectId: d.liftButtonObjectId }); });
+  await both(2.1);
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.teleport(d.playerStart.x, d.playerStart.z, 0); });
+  await both(0.9);
   await b.evaluate(() => { const d = window.lastReturnDebug; d.askToAct({ what: 'use', objectId: d.liftPanelObjectId }); });
   await both(2.1);
-  await a.evaluate(() => { const d = window.lastReturnDebug; d.together.others.push(Object.assign({}, d.together.others[0], { id: 999, hasBeenHeardFrom: false, isDown: false })); });
+  carDoor.shutWithOneInside = await liftDoors();
+  const atTheDoor = await a.evaluate(() => {
+    const d = window.lastReturnDebug, door = d.getLiftDoor(), result = { poundedFor: 0, blows: 0, opened: false, pressed: 0 };
+    const hadPower = d.game.flags.powerOn;
+    d.game.flags.powerOn = true; // (it only goes at doors once the mains is on)
+    d.captionCounts.liftButtonPressed = 0;
+    // Outside the door, three metres off, straight out from it: on the lobby's side, whichever way this station's car faces.
+    const carX = (d.liftCarBounds.minimumX + d.liftCarBounds.maximumX) / 2, carZ = (d.liftCarBounds.minimumZ + d.liftCarBounds.maximumZ) / 2;
+    const outX = Math.sign(Math.round(d.liftPosition.x - carX)), outZ = Math.sign(Math.round(d.liftPosition.z - carZ));
+    const spot = d.findWalkableSpotNear(d.liftPosition.x + outX * 3, d.liftPosition.z + outZ * 3);
+    result.spot = spot ? [spot.x, spot.z, Math.round(Math.hypot(spot.x - d.liftPosition.x, spot.z - d.liftPosition.z) * 10) / 10] : null;
+    // You, the host, a long way from all this: it goes for whoever is nearest, and that is to be the one in the car.
+    for (let step = 14; step < 40; step++) {
+      const far = d.findWalkableSpotNear(d.liftPosition.x + outX * step, d.liftPosition.z + outZ * step);
+      if (far && Math.hypot(far.x - d.liftPosition.x, far.z - d.liftPosition.z) > 11) { d.teleport(far.x, far.z, 0); break; }
+    }
+    result.hostMetresOff = Math.round(Math.hypot(d.player.x - d.liftPosition.x, d.player.z - d.liftPosition.z));
+    if (!spot) return result;
+    for (let count = 0; count < 2; count++) d.updateTogether(0.05); // (who is on their feet, and where: the one in the car)
+    result.inTheCar = d.players.filter((one) => one !== d.player && one.x > d.liftCarBounds.minimumX && one.x < d.liftCarBounds.maximumX && one.z > d.liftCarBounds.minimumZ && one.z < d.liftCarBounds.maximumZ).length;
+    d.spawnHollow(spot.x, spot.z); d.hollow.graceTimer = 0; d.hollow.knowsPlayerPositionAlways = true;
+    // (Until the moment it presses the button, and no further: it is taken away then, before the door is up and
+    // it is in the car with the one who is standing there.)
+    // (Nothing is said to the others meanwhile: thirty seconds of the host's talk in one go is more than the
+    // server lets anybody say, and it would hang up on the host.)
+    for (let tenth = 0; tenth < 300 && !d.game.isLiftDoorWantedOpen; tenth++) {
+      d.simulate(0.1);
+      if (d.hollow.doorBang && d.hollow.doorBang.isPounding && door.openFraction === 0) { result.poundedFor += 0.1; result.blows = Math.max(result.blows, d.hollow.doorBang.hits); }
+    }
+    result.opened = d.game.isLiftDoorWantedOpen; result.doorWhenItPressed = door.openFraction; result.pressed = d.captionCounts.liftButtonPressed; result.damageAfter = door.damage;
+    result.poundedFor = Math.round(result.poundedFor * 10) / 10;
+    result.hollowEndedAt = [Math.round(d.hollow.figure.x * 10) / 10, Math.round(d.hollow.figure.z * 10) / 10, d.hollow.state];
+    d.hollow.knowsPlayerPositionAlways = false; d.hollow.isActive = false;
+    d.game.flags.powerOn = hadPower;
+    return result;
+  });
+  await both(2.1);
+  carDoor.afterTheHollow = await liftDoors();
+  check('shut with one of you inside and the Hollow after them, the door holds while it pounds on it; then it finds the button, the door goes up in every game, and the door is whole for the next time',
+    carDoor.shutWithOneInside.join() === '0,0' && atTheDoor.poundedFor >= 1.5 && atTheDoor.blows >= 3 && atTheDoor.opened && atTheDoor.pressed === 1 && atTheDoor.damageAfter === 0 &&
+    carDoor.afterTheHollow.join() === '1,1', [carDoor.shutWithOneInside, atTheDoor, carDoor.afterTheHollow]);
   await b.evaluate(wellAwayFromTheCar);
-  await both(4.2);
-  const awaited = { withNobodyInTheCar: await liftDoors() };
-  await a.evaluate(() => { const d = window.lastReturnDebug; d.together.others.pop(); });
-  await both(4.2);
-  awaited.afterwards = await liftDoors();
-  check('the car\'s door waits for one who has not been heard from yet: open with nobody in the car, and down once nobody is awaited',
-    awaited.withNobodyInTheCar.join() === '1,1' && awaited.afterwards.join() === '0,0', awaited);
+  await both(0.6);
 
   // What Dispatch says at the moment somebody does a thing is for everybody; the line that only says what was
   // done is for the one who did it. (His lines used to be held back with the rest, so the others heard his
@@ -867,7 +917,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // One of you is dead and nobody carried their scanner back: the car goes up with those on their feet, and
   // the dead one is left behind. (They used to be taken up too: the ending, and a best time for it.)
-  for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  await drawUntilDead(b);
   // They fell in the lift car, so their scanner lies where one restarts. It has not been moved from where they
   // fell: it does not restart for lying there, however long. Moved by anything at all (nobody's beam: as if
   // the Hollow had kicked it) and lying there again, its seconds start; out of reach again before they are up,
@@ -929,8 +979,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   await a.evaluate(() => { const d = window.lastReturnDebug; d.hollow.isActive = true; d.hollow.figure.x = d.player.x + 0.3; d.hollow.figure.z = d.player.z; d.hollow.graceTimer = 0; d.hollow.crawlspace = null; });
   await play(a, 0.2);
-  for (let count = 0; count < 40 && await a.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await a.screenshot({ type: 'jpeg', quality: 5 });
-  for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  await drawUntilDead(a);
+  await drawUntilDead(b);
   await b.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
   await pause(200);
   await a.evaluate(() => { for (let count = 0; count < 3; count++) window.lastReturnDebug.updateTogether(0.1); });
@@ -1020,7 +1070,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // (Only once they are dying. A picture of a page that is still playing is the slowest there is, and has been
   // seen to take longer than the thirty seconds a picture is given, which ended the suite then and there.)
   const isCaught = await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 30000 }).then(() => true, () => false);
-  if (isCaught) for (let count = 0; count < 80 && await c.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) { await c.screenshot({ type: 'jpeg', quality: 5 }); await pause(50); }
+  if (isCaught) await drawUntilDead(c);
   const waitingDead = await c.evaluate((heard) => ({ hasHostHeardWhereTheyWent: heard[0], isCaught: heard[1], mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }), [hasHostHeard, isCaught]);
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.

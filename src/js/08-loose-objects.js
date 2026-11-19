@@ -590,7 +590,7 @@ function isPointOnLooseObject(object, x, y, z) {
 function changePointsOnLooseObject(object, seconds) {
   const reach = object.prepared.partsRadius + 0.05;
   changePointsOnShape(object.x - reach, object.y - reach, object.z - reach, object.x + reach, object.y + reach, object.z + reach,
-    SURFACE_INTERACTIVE, seconds > 0 ? convertSecondsToPointLifeCode(seconds) : 0,
+    seconds > 0 ? convertSecondsToPointLifeCode(seconds) : 0,
     function (x, y, z) { return isPointOnLooseObject(object, x, y, z); });
 }
 

@@ -583,9 +583,11 @@ function uploadWorldOccluderMesh(vertices) {
 }
 
 // Stores one scanner return. `lifeCode` 0 keeps the point forever; otherwise it fades
-// after lifeCode * 0.25 seconds.
+// after lifeCode * 0.25 seconds. `isOnALooseThing`: it landed on something that can be moved about, and is
+// that thing's to take along or let go (changePointsOnShape). That is kept with the point itself, and not
+// read off its colour: a thing that is loud to kick is scanned in the warning colour, like broken glass.
 // `isOffTheMap`: the point is on something that moves about, and is left off the map.
-function addScanPoint(x, y, z, intensity, surfaceClass, lifeCode, isOffTheMap) {
+function addScanPoint(x, y, z, intensity, surfaceClass, lifeCode, isOffTheMap, isOnALooseThing) {
   const index = pointCloud.writeIndex;
   const floatOffset = index * POINT_STRIDE_FLOATS;
   pointCloud.floatView[floatOffset] = x;
@@ -596,7 +598,7 @@ function addScanPoint(x, y, z, intensity, surfaceClass, lifeCode, isOffTheMap) {
   pointCloud.byteView[byteOffset] = intensity * 255;
   pointCloud.byteView[byteOffset + 1] = surfaceClass;
   pointCloud.byteView[byteOffset + 2] = lifeCode;
-  pointCloud.byteView[byteOffset + 3] = 0;
+  pointCloud.byteView[byteOffset + 3] = isOnALooseThing ? 1 : 0; // (the shader does not read this one)
   pointCloud.writeIndex = index + 1 === pointCloud.capacity ? 0 : index + 1;
   if (pointCloud.storedCount < pointCloud.capacity) pointCloud.storedCount++;
   pointCloud.pendingUploadCount++;
@@ -647,10 +649,14 @@ function fadePointsInsideBox(minimumX, minimumY, minimumZ, maximumX, maximumY, m
   if (fadedAny) pointCloud.needsFullUpload = true;
 }
 
-// Like the two above, for points that lie on one particular thing: only points of `surfaceClass` inside the box
-// for which `isOnIt(x, y, z)` says yes are touched, so that the floor under a crate keeps its points when the
-// crate is taken away. `lifeCode` 0 removes them at once; anything else lets them fade over that time.
-function changePointsOnShape(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ, surfaceClass, lifeCode, isOnIt) {
+// Like the two above, for points that lie on one particular loose thing: only points that were scanned onto
+// a loose thing (addScanPoint), inside the box, for which `isOnIt(x, y, z)` says yes are touched, so that the
+// floor under a crate keeps its points when the crate is taken away. `lifeCode` 0 removes them at once; anything
+// else lets them fade over that time.
+// (It used to go by colour: only points in the colour of things you can take. A thing that is loud to kick is
+// scanned in the warning colour, so the points on a can, a steel plate or a vent cover stayed where the thing
+// had been, for good, when it was carried off, kicked away or taken out of the station.)
+function changePointsOnShape(minimumX, minimumY, minimumZ, maximumX, maximumY, maximumZ, lifeCode, isOnIt) {
   const floats = pointCloud.floatView, bytes = pointCloud.byteView;
   let changedAny = false;
   for (let index = 0; index < pointCloud.storedCount; index++) {
@@ -663,7 +669,7 @@ function changePointsOnShape(minimumX, minimumY, minimumZ, maximumX, maximumY, m
     if (y < minimumY || y > maximumY) continue;
     if (floats[offset + 3] === DEAD_POINT_BIRTH_TIME) continue;
     const byteOffset = index * POINT_STRIDE_BYTES + 16;
-    if (bytes[byteOffset + 1] !== surfaceClass || !isOnIt(x, y, z)) continue;
+    if (bytes[byteOffset + 3] !== 1 || !isOnIt(x, y, z)) continue;
     if (lifeCode === 0) {
       floats[offset + 3] = DEAD_POINT_BIRTH_TIME;
     } else {
