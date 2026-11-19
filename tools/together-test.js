@@ -685,6 +685,73 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await pause(800); // (what was still on its way has arrived)
   for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } delete d.looseObjectKinds.testCrate; delete d.looseObjectKinds.testWeight; }, crateIds[0]);
 
+  // ---- A fuel can: one can, one tank, in both games ----
+  // (This station has no generator with an empty tank, so the tank is this suite's own: a place on the floor of
+  // the lane that both games are told is the body of a generator with nothing in it. The can is the game's.)
+  const fuelCanIds = [];
+  for (const page of [a, b]) fuelCanIds.push(await page.evaluate((lane) => {
+    const d = window.lastReturnDebug;
+    if (!lane) return 0;
+    const x = lane.x + lane.wayX * 4.5, z = lane.z + lane.wayZ * 4.5;
+    window.testTank = { index: d.getFuelTanks().length, instance: { definition: { kind: 'activate' }, total: 1, done: 0 }, object: { objectId: 0, name: 'Test set', needsItem: true, isSupplied: false, isDone: false, fuel: 0 },
+      name: 'Test set', minimumX: x - 0.46, maximumX: x + 0.46, minimumZ: z - 0.32, maximumZ: z + 0.32, x: x, z: z, splashes: 0 };
+    d.getFuelTanks().push(window.testTank);
+    d.hollow.isActive = false;
+    return d.createLooseObject('fuelCan', lane.x + lane.wayX * 1.7, lane.floor + 0.2, lane.z + lane.wayZ * 1.7, 0).id;
+  }, lane));
+  const fuelIn = (page) => page.evaluate((id) => {
+    const d = window.lastReturnDebug, can = d.looseObjects.filter((object) => object.id === id)[0], tank = window.testTank, round = (value) => Math.round(value * 1000) / 1000;
+    return { can: round(can.fuel), tank: round(tank.object.fuel), isFull: tank.object.isSupplied, kind: can.kindKey, label: d.getLooseObjectLabel(can), worth: d.getLooseObjectValue(can), mass: can.kind.mass,
+      heldById: can.heldById, ownerId: can.ownerId, metresFromTheSet: round(Math.hypot(Math.max(tank.minimumX - can.x, 0, can.x - tank.maximumX), Math.max(tank.minimumZ - can.z, 0, can.z - tank.maximumZ))),
+      carrying: d.getCarriedCount('fuel'), onMap: d.getQuestItemKeyOfLooseObject(can) };
+  }, fuelCanIds[0]);
+  await fine(1.5);
+  // The other takes it. Away from the set nothing pours, and pouring is not theirs to ask for: only the host's game says a can pours.
+  await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.3; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+  await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, fuelCanIds[0]);
+  await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
+  await fine(1);
+  await b.evaluate((id) => { const d = window.lastReturnDebug; for (let count = 0; count < 3; count++) d.askToAct({ what: 'pour', id: id, tank: window.testTank.index }); }, fuelCanIds[0]);
+  await fine(1);
+  const fuelCarried = { host: await fuelIn(a), other: await fuelIn(b) };
+  // They walk up to the set and hold the can against it until a tenth of it has gone in; then they step back.
+  // (For this the can pours slowly, in both games: half a minute for a whole one. These browsers' games run by the
+  // clock as well as by the steps this suite gives them, so "for a second and a half" would be anything.)
+  const pourSecondsAsItWas = await a.evaluate(() => window.lastReturnDebug.tuning.fuelPourSeconds);
+  for (const page of [a, b]) await page.evaluate(() => { window.lastReturnDebug.tuning.fuelPourSeconds = 30; });
+  const standWithCanAt = (metresAlong) => b.evaluate(([lane, metresAlong, id]) => {
+    const d = window.lastReturnDebug, can = d.looseObjects.filter((object) => object.id === id)[0];
+    d.teleport(lane.x + lane.wayX * metresAlong, lane.z + lane.wayZ * metresAlong, lane.yaw); d.player.pitch = -0.25;
+    can.x = d.player.x; can.y = d.getPlayerEyeY() - 0.3; can.z = d.player.z; can.velocityX = 0; can.velocityY = 0; can.velocityZ = 0;
+  }, [lane, metresAlong, fuelCanIds[0]]);
+  await standWithCanAt(2.9);
+  for (let turn = 0; turn < 80 && (await fuelIn(a)).tank < 0.1; turn++) await fine(0.1);
+  await standWithCanAt(0);
+  await fine(1.2);
+  const fuelPartly = { host: await fuelIn(a), other: await fuelIn(b) };
+  await fine(0.9);
+  const fuelPartlyLater = { host: await fuelIn(a), other: await fuelIn(b) };
+  // Back at the set until the tank is full (at the can's own pace again).
+  for (const page of [a, b]) await page.evaluate((seconds) => { window.lastReturnDebug.tuning.fuelPourSeconds = seconds; }, pourSecondsAsItWas);
+  await standWithCanAt(2.9);
+  for (let turn = 0; turn < 30 && !((await fuelIn(a)).isFull && (await fuelIn(b)).isFull); turn++) await fine(0.4);
+  await fine(1);
+  const fuelPoured = { host: await fuelIn(a), other: await fuelIn(b) };
+  check('a fuel can in the other\'s beam is a full can in both games; away from a generator nothing pours, and a can pouring is not the other\'s to ask for',
+    fuelCanIds[0] > 0 && fuelCanIds[0] === fuelCanIds[1] && fuelCarried.host.heldById === ids.other && fuelCarried.other.carrying === 1 && fuelCarried.host.carrying === 0 &&
+    fuelCarried.host.can === 1 && fuelCarried.other.can === 1 && fuelCarried.host.tank === 0 && fuelCarried.other.tank === 0, fuelCarried);
+  check('held against the set by the other for a moment and taken away again: the same part of it is in the tank in both games, the rest is still in the can in both, and no more goes in once it is away',
+    fuelPartly.host.tank >= 0.1 && fuelPartly.host.tank < 0.9 && fuelPartly.host.tank === fuelPartly.other.tank && fuelPartly.host.can === fuelPartly.other.can && Math.abs(fuelPartly.host.tank + fuelPartly.host.can - 1) < 0.002 &&
+    fuelPartlyLater.host.tank === fuelPartly.host.tank && fuelPartlyLater.other.tank === fuelPartly.other.tank && /fuel can, \d+ % full/.test(fuelPartly.other.label) && fuelPartly.other.label === fuelPartly.host.label,
+    [fuelPartly, fuelPartlyLater]);
+  check('brought back, the rest goes in: the tank is full in both games, and the can is an empty fuel can in both, a sixth of the weight, worth the same in both, still in the other\'s beam and nothing they carry for a job',
+    fuelPoured.host.isFull && fuelPoured.other.isFull && fuelPoured.host.tank === 1 && fuelPoured.other.tank === 1 && fuelPoured.host.can === 0 && fuelPoured.other.can === 0 &&
+    fuelPoured.host.kind === 'emptyFuelCan' && fuelPoured.other.kind === 'emptyFuelCan' && fuelPoured.host.mass < 2 && fuelPoured.host.worth > 0 && fuelPoured.host.worth === fuelPoured.other.worth &&
+    fuelPoured.host.heldById === ids.other && fuelPoured.other.carrying === 0 && fuelPoured.other.onMap === '', fuelPoured);
+  await b.evaluate(() => { const d = window.lastReturnDebug; if (d.getHeldLooseObject()) d.releaseHeldLooseObject(0); });
+  await fine(0.6);
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, can = d.looseObjects.filter((object) => object.id === id)[0]; if (can) d.removeLooseObject(can); d.getFuelTanks().splice(d.getFuelTanks().indexOf(window.testTank), 1); }, fuelCanIds[0]);
+
   // Something breaks: it is gone from both games.
   const brokenId = await a.evaluate(() => {
     const d = window.lastReturnDebug, thing = d.looseObjects.filter((object) => object.kind.shattersAt)[0] || d.looseObjects[d.looseObjects.length - 1];
@@ -843,7 +910,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const radioForAll = await b.evaluate(() => {
     const d = window.lastReturnDebug, messages = () => Array.from(document.querySelectorAll('#hud-messages .hud-message')).map((element) => element.textContent).join(' | ');
     d.clearMessages();
-    d.game.actor = { x: d.player.x, z: d.player.z, carried: {} }; // as while something one of the others did is being carried out here
+    d.game.actor = { x: d.player.x, z: d.player.z }; // as while something one of the others did is being carried out here
     try { d.playRadioLine('uploadStartedCarWaiting'); d.showMessage('Keycard taken.', 3, 'info'); } finally { d.game.actor = null; }
     return { line: d.radioText('uploadStartedCarWaiting'), shown: messages() };
   });

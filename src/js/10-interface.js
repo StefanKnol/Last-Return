@@ -355,6 +355,7 @@ function revealWholeMap() {
   }
   for (const door of doors) plotPointOnMap(door.centerX, door.centerZ, SURFACE_DOOR_AUTOMATIC);
   for (const interactable of interactables) interactable.isDiscovered = true;
+  for (const object of looseObjects) { object.isKnownOnMap = true; object.mapX = object.x; object.mapZ = object.z; }
 }
 
 function flushMapPixels() {
@@ -398,6 +399,16 @@ function drawMinimap() {
     if (markerX < 0 || markerY < 0 || markerX > canvas.width || markerY > canvas.height) continue;
     // Bright for what can be acted on now, dim for the rest (see isInteractableWantedNow).
     context.fillStyle = isInteractableWantedNow(interactable) ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
+    context.fillRect(markerX - 3, markerY - 3, 6, 6);
+  }
+  // What lies loose and a quest needs (a fuel can with fuel in it), where you last knew it to be.
+  for (const object of looseObjects) {
+    const itemKey = getQuestItemKeyOfLooseObject(object);
+    if (!itemKey) continue;
+    const markerX = (object.mapX - player.x) * scale + canvas.width / 2;
+    const markerY = (object.mapZ - player.z) * scale + canvas.height / 2;
+    if (markerX < 0 || markerY < 0 || markerX > canvas.width || markerY > canvas.height) continue;
+    context.fillStyle = isQuestItemWantedNow(itemKey) ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
     context.fillRect(markerX - 3, markerY - 3, 6, 6);
   }
   if (debugHooks.drawMapMarkers) {
@@ -476,6 +487,14 @@ function drawFullMap() {
     context.fillRect(toCanvasX(interactable.x) - half, toCanvasY(interactable.z) - half, half * 2, half * 2);
     if (interactable.mapLabel) context.fillText(interactable.mapLabel, toCanvasX(interactable.x) + 8, toCanvasY(interactable.z) + 4);
   }
+  for (const object of looseObjects) {
+    const itemKey = getQuestItemKeyOfLooseObject(object);
+    if (!itemKey) continue;
+    const isWanted = isQuestItemWantedNow(itemKey), half = isWanted ? 4 : 3;
+    context.fillStyle = isWanted ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
+    context.fillRect(toCanvasX(object.mapX) - half, toCanvasY(object.mapZ) - half, half * 2, half * 2);
+    context.fillText(QUEST_ITEMS[itemKey].mapLabel, toCanvasX(object.mapX) + 8, toCanvasY(object.mapZ) + 4);
+  }
   if (debugHooks.drawMapMarkers) debugHooks.drawMapMarkers(context, toCanvasX, toCanvasY, 7);
   drawPlayerMarker(context, toCanvasX(player.x), toCanvasY(player.z), player.yaw, 9);
 }
@@ -497,11 +516,18 @@ function closeMapOverlay() {
 // Messages and captions
 // ---------------------------------------------------------------------------
 
-function showMessage(text, seconds, style) {
+// `slot` is for a line that is said again and again with a number in it that changes (a tank filling): a new
+// line with the same slot takes the place of the last one, where it stands, and does not push the others out.
+function showMessage(text, seconds, style, slot) {
   const container = interfaceState.elements['hud-messages'];
   if (!container) return;
   for (const existing of interfaceState.messages) {
     if (existing.text === text) { existing.expiresAt = game.realTime + seconds; return; }
+    if (slot && existing.slot === slot) {
+      existing.text = text; existing.expiresAt = game.realTime + seconds;
+      existing.element.lastChild.nodeValue = text;
+      return;
+    }
   }
   const element = document.createElement('div');
   element.className = 'hud-message' + (style === 'warning' ? ' is-warning' : '') + (style === 'radio' ? ' is-radio' : '');
@@ -513,7 +539,7 @@ function showMessage(text, seconds, style) {
   }
   element.appendChild(document.createTextNode(text));
   container.appendChild(element);
-  interfaceState.messages.push({ element: element, text: text, expiresAt: game.realTime + seconds });
+  interfaceState.messages.push({ element: element, text: text, expiresAt: game.realTime + seconds, slot: slot || '' });
   while (interfaceState.messages.length > 3) {
     const removed = interfaceState.messages.shift();
     removed.element.remove();

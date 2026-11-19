@@ -23,7 +23,9 @@
 //   - Being caught is the host's to say ('caught'), and your own game's to carry out.
 //   - What lies loose has one place: each thing is moved by one browser, which tells the others ("Things that
 //     lie loose", further down).
-//   - Still each browser's own: the apparitions (on purpose), and what you carry for a job.
+//   - A fuel can is one of those loose things, and the fuel in the tanks is everybody's: a can pouring is
+//     decided by the host's game, a splash at a time, and carried out in every browser ('pour').
+//   - Still each browser's own: the apparitions (on purpose).
 // ---------------------------------------------------------------------------
 
 const TOGETHER_SENDS_PER_SECOND = 15;    // how often you say where you are
@@ -421,7 +423,6 @@ function createOtherPlayer(id) {
     velocityX: 0, velocityZ: 0, audibleRadius: 0, // what the host's Hollow goes by, as they say it
     isDown: false,      // caught, and not back on their feet: nothing hunts them (the host's game keeps this)
     isFallen: false,    // dead, as they say themselves: their body is gone and their scanner lies where they fell
-    carried: {},        // what they carry for the quests (game.carried is yours)
     spreadDegrees: 0,   // how wide their scanner is firing, or 0 when it is not
     walkPhase: 0, stride: 0, armRaise: 0.1,
     rayBudget: 0
@@ -920,6 +921,8 @@ function readAction(data) {
   if (data.what === 'restart' && Number.isInteger(data.id)) return { what: 'restart', id: data.id };
   // Things that lie loose (see further down).
   if ((data.what === 'take' || data.what === 'release' || data.what === 'carry' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
+  // A splash from a fuel can into a tank (the host's to decide: see hearOfTheStation, which lets nobody else ask).
+  if (data.what === 'pour' && Number.isInteger(data.id) && Number.isInteger(data.tank)) return { what: 'pour', id: data.id, tank: data.tank };
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
     return { what: 'shatter', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
   }
@@ -930,18 +933,16 @@ function readAction(data) {
   return null;
 }
 
-// Carries an action out as the doing of one of you. If that is somebody else, it is done with what they carry,
-// the noise of it is where they stand, and what is only for the one who did it (see wrapForTogether) is left out.
+// Carries an action out as the doing of one of you. If that is somebody else, the noise of it is where they
+// stand, and what is only for the one who did it (see wrapForTogether) is left out.
 function performActionFor(actorId, action) {
   // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
-  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown';
-  const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z, carried: {} }); // (gone since: it is still done)
-  const yours = game.carried;
+  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour';
+  const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z }); // (gone since: it is still done)
   game.actor = other;
-  if (other) game.carried = other.carried;
   together.isCarryingOut = true;
   together.actingId = actorId;
-  try { performAction(action); } finally { game.actor = null; game.carried = yours; together.isCarryingOut = false; together.actingId = together.myId; }
+  try { performAction(action); } finally { game.actor = null; together.isCarryingOut = false; together.actingId = together.myId; }
 }
 
 function performAction(action) {
@@ -1049,6 +1050,7 @@ function performLooseAction(action) {
     if (object.heldById && isWorldShared()) return; // somebody was quicker
     object.heldById = actingId; object.ownerId = actingId;
     object.wasHandled = true; object.isIgnoredByHollow = false; object.lastHandledTime = game.time;
+    object.hasBeenTaken = true; // (a fuel can pours from now on: updateFuelCan, 08-loose-objects.js)
     // Somebody else's: awake here, and so is what rests on it, as when you take a thing yourself. What is in a
     // crate has to be awake to go on riding in it: asleep, it is counted as riding for a fifth of a second and
     // then left standing where it was, unless the crate's first move happened to arrive sooner than that. Between
@@ -1086,7 +1088,11 @@ function performLooseAction(action) {
     shatterLooseObjectNow(object);
   } else if (action.what === 'lose') {
     looseState.statistics.lostDownThePit++;
-    removeLooseObject(object);
+    // (A fuel can with fuel in it cannot be done without: it is back on its crate, in every browser alike.)
+    if (isLooseObjectStillNeeded(object) && returnLooseObjectToWhereItStood(object)) sayNeededThingIsBack(object);
+    else removeLooseObject(object);
+  } else if (action.what === 'pour') {
+    pourFuelIntoTank(object, action.tank);
   } else if (action.what === 'setOff') {
     if (object.kind.use && !object.isSpent && object.armedTime < 0) object.kind.use.activate(object);
   }
@@ -1254,9 +1260,9 @@ function hearOfTheStation(id, data) {
     else if (data.k === 'back' && other) other.isDown = false;
     else if (data.k === 'ask') {
       const action = readAction(data.a);
-      // When the car goes up, when a scanner is restarted, when everyone is down, and what a salvage bay does and
-      // takes are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
-      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay'].indexOf(action.what) >= 0;
+      // When the car goes up, when a scanner is restarted, when everyone is down, what a salvage bay does and
+      // takes, and a fuel can pouring are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
+      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour'].indexOf(action.what) >= 0;
       if (action && !isTheHostsToSay) decideAction(id, action);
     }
     return;

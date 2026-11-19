@@ -216,8 +216,9 @@ function installLab() {
       }
       if (Math.hypot(x, y, z) / total > 1e-6) wrong.push(kindKey + ': centre of mass is off');
       if (!(prepared.boundsRadius > 0.05 && prepared.boundsRadius < 1) || !(prepared.smallestRadius >= 0.01)) wrong.push(kindKey + ': size');
-      // (A scan grenade is a tool, and a scanner is what is left of a player: neither is salvage.)
-      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scan grenade is a tool, a scanner is what is left of a player, and a fuel can with fuel in it is what a
+      // generator is waiting for: none of them is salvage. The can is, once it is empty.)
+      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length };
@@ -1561,7 +1562,9 @@ function installLab() {
     for (const station of [['classic', 0], ['generated', 7, 'medium', 'mixed', 'one'], ['generated', 99, 'large', 'mixed', 'one'], ['generated', 3, 'massive', 'mixed', 'one']]) {
       d.loadStation.apply(null, station);
       d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
-      const entry = { total: d.stationLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
+      // (What lies about is the station's own, and after it whatever its quests have put out: a fuel can on a crate,
+      // for a generator with an empty tank. Both lie at rest, and both are back where they were on a new descent.)
+      const entry = { total: d.stationLooseObjects.length + d.questLooseObjects.length, fromQuests: d.questLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
         counts: {}, value: 0, onSurfaces: 0, lowestSurface: 9, cansInHeaps: d.noisyFloorCanHeaps.length * 6, problems: d.auditStationLooseObjects() };
       for (const item of d.stationLooseObjects) {
         entry.counts[item.kindKey] = (entry.counts[item.kindKey] || 0) + 1;
@@ -1569,7 +1572,7 @@ function installLab() {
         if (item.on === 'surface') { entry.onSurfaces++; entry.lowestSurface = Math.min(entry.lowestSurface, item.y - d.getFloorHeightAt(item.x, item.z)); }
       }
       entry.lowestSurface = Math.round(entry.lowestSurface * 100) / 100;
-      const signature = JSON.stringify(d.stationLooseObjects);
+      const signature = JSON.stringify([d.stationLooseObjects, d.questLooseObjects]);
       // Wake every one of them: put down as it would lie, none of them should stir, and none should make a sound.
       const noises = []; d.debugHooks.recordNoise = function (x, z, radius) { noises.push(radius); };
       const before = d.looseObjects.map((object) => [object.x, object.y, object.z, object.orientationX, object.orientationY, object.orientationZ, object.orientationW]);
@@ -1588,7 +1591,7 @@ function installLab() {
       d.removeLooseObject(d.looseObjects[1]);
       d.simulate(0.5);
       d.loadStation.apply(null, station);
-      entry.sameAgain = JSON.stringify(d.stationLooseObjects) === signature && d.looseObjects.length === entry.total &&
+      entry.sameAgain = JSON.stringify([d.stationLooseObjects, d.questLooseObjects]) === signature && d.looseObjects.length === entry.total &&
         d.looseObjects.every((object, index) => object.isAsleep && Math.hypot(object.x - before[index][0], object.y - before[index][1], object.z - before[index][2]) < 1e-6);
       result[station.join(' ')] = entry;
     }
@@ -1598,7 +1601,7 @@ function installLab() {
   for (const stationName of Object.keys(lyingAbout)) {
     const entry = lyingAbout[stationName];
     check(stationName + ': the station has things lying about, each at rest, none in rock, a doorway, a vent, the pit or the lift car',
-      entry.total >= 25 && entry.loose === entry.total && entry.asleep === entry.total && entry.problems.length === 0, entry);
+      entry.total >= 25 && entry.fromQuests <= 4 && entry.loose === entry.total && entry.asleep === entry.total && entry.problems.length === 0, entry);
     check(stationName + ': cans where the draw put cans (six to a heap), litter, and things worth carrying out, some of them on tables and shelves',
       entry.counts.can >= entry.cansInHeaps && entry.cansInHeaps >= 6 && entry.counts.carton >= 3 && entry.counts.plate >= 1 && entry.onSurfaces >= 2 && entry.lowestSurface >= 0.35 && entry.value >= 250, entry);
     check(stationName + ': woken, none of them stirs or makes a sound, and they are at rest again', entry.stirred === 0 && entry.noises === 0 && entry.asleepAgain === entry.total, entry);

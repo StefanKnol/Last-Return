@@ -23,7 +23,12 @@ function check(description, condition, detail) {
     // Where every thing of every quest stands, as one text: the same text means the same places.
     lab.describeQuests = function (leaveOut) {
       return d.level.quests.filter((quest) => quest.key !== leaveOut).map((quest) => quest.key + ' ' + quest.objects.map((object) =>
-        [object.objectId, object.x, object.z, object.needsItem, object.itemObjectId].concat(object.itemObjectId > 0 ? [d.findInteractable(object.itemObjectId).x, d.findInteractable(object.itemObjectId).z] : []).join(':')).join(',')).join(' / ');
+        [object.objectId, object.x, object.z, object.needsItem, object.itemObjectId].concat(object.itemObjectId > 0 ? lab.whereItemIs(object.itemObjectId) : []).join(':')).join(',')).join(' / ');
+    };
+    // Where the thing a machine needs was put out (a fuel can: a loose thing, known by the number its quest gave it).
+    lab.whereItemIs = function (itemObjectId) {
+      const item = d.questLooseObjects.filter((entry) => entry.questObjectId === itemObjectId)[0];
+      return item ? [item.kindKey, item.x, item.z] : ['not put out'];
     };
     // `order`: the one work order switched on for this build (left out: all of them, and the seed picks).
     lab.fresh = function (kind, seed, size, layout, levels, order) {
@@ -209,7 +214,8 @@ function check(description, condition, detail) {
     const describe = function () {
       const mapParts = {}; d.computeMapFingerprint(mapParts);
       const quests = d.interactables.filter((thing) => d.level.quests.some((quest) => quest.objects.some((object) => object.objectId === thing.objectId || object.itemObjectId === thing.objectId)))
-        .sort((a, b) => a.objectId - b.objectId).map((thing) => thing.objectId + ':' + thing.x + ':' + thing.z).join(' ');
+        .sort((a, b) => a.objectId - b.objectId).map((thing) => thing.objectId + ':' + thing.x + ':' + thing.z).join(' ') + ' | ' +
+        d.questLooseObjects.slice().sort((a, b) => a.questObjectId - b.questObjectId).map((thing) => thing.questObjectId + ':' + thing.kindKey + ':' + thing.x + ':' + thing.z).join(' ');
       return { map: d.level.mapFingerprint, mapPartByPart: mapParts, quests: quests };
     };
     for (const name of ['medium 9 mixed one', 'large 7 sparse one', 'massive 12 tight two']) {
@@ -906,6 +912,61 @@ function check(description, condition, detail) {
   check('a small generator with an empty tank: Dispatch says the line about fuel, which no longer names Generator 2, a second and a half later',
     fuelLine.seed > 0 && !fuelLine.first.tooSoon && fuelLine.first.said && !fuelLine.first.namesGenerator2, fuelLine.first);
   check('and says it once a descent: the second refusal is the generator\'s own message only', fuelLine.seed > 0 && !fuelLine.second.saidAgain && fuelLine.second.refusedAgain, fuelLine.second);
+
+  // --- A fuel can cannot be lost while there is fuel in it: a station has as many cans as empty tanks ---
+  // (On a Salvage order with an empty tank on Generator 2: the two ways a loose thing leaves a station for good
+  // are the shaft and a salvage bay.)
+  const lostCan = await inGame(async () => {
+    const d = window.lastReturnDebug, lab = window.lab, result = {};
+    for (let seed = 1; seed < 300 && !result.seed; seed++) {
+      await window.letTheBrowserCatchUp();
+      lab.fresh('generated', seed, 'large', 'mixed', 'one', 'salvage');
+      if (d.findQuest('fuel') && d.findQuest('haul')) result.seed = seed;
+    }
+    if (!result.seed) return result;
+    d.hollow.isActive = false;
+    const can = d.findQuestItem(d.missionObjectIds.fuelCan), home = { x: can.x, y: can.y, z: can.z };
+    const about = () => ({ isThere: d.looseObjects.indexOf(can) >= 0, metresFromItsCrate: Math.round(Math.hypot(can.x - home.x, can.y - home.y, can.z - home.z) * 1000) / 1000, fuel: can.fuel, kind: can.kindKey,
+      isAsleep: can.isAsleep, inTheBeam: d.getHeldLooseObject() === can, said: /fuel can.* is out of reach\. It is back where it first stood/.test(lab.messages()) });
+    result.cans = d.looseObjects.filter((object) => object.kindKey === 'fuelCan').length; result.tanks = d.getFuelTanks().length;
+    // Down the shaft, with a third of it already poured somewhere: carried off, thrown, and gone over the edge.
+    // (What the game does with a thing that has fallen out of the bottom of the station is 'lose'.)
+    const stand = d.findWalkableSpotNear(can.x, can.z);
+    d.teleport(stand.x, stand.z, 0); d.simulate(0.1);
+    d.pickUpLooseObject(can, false);
+    can.fuel = 0.65;
+    d.teleport(stand.x + 3, stand.z, 0); can.x = d.player.x; can.z = d.player.z;
+    d.releaseHeldLooseObject(0.5);
+    d.clearMessages();
+    d.askToAct({ what: 'lose', id: can.id });
+    result.downTheShaft = about();
+    d.simulate(1);
+    result.downTheShaft.staysThere = Math.hypot(can.x - home.x, can.y - home.y, can.z - home.z) < 0.02 && can.isAsleep;
+    // Sealed into a salvage bay with everything else that lay in it: what is salvage is taken, the can is not.
+    const bayThing = d.findQuest('haul').objects[0];
+    d.use(bayThing.objectId);
+    const bay = d.haulState.bays[0];
+    const crate = d.looseObjects.filter((object) => object.kind.value > 0 && !object.kind.shattersAt)[0];
+    for (const object of [can, crate]) { object.x = bay.minimumX + 0.5; object.z = bay.minimumZ + 0.5; object.y = bay.floorY + 0.4 + (object === can ? 0 : 0.7); object.isAsleep = true; object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; }
+    result.inTheBay = { state: bay.state, can: d.isLooseObjectInHaulBay(can, bay), crate: d.isLooseObjectInHaulBay(crate, bay), countsFor: d.getHaulBayValue(bay), crateWorth: d.getLooseObjectValue(crate) };
+    d.clearMessages();
+    d.askToAct({ what: 'sealBay', index: 0, ids: [can.id, crate.id], value: d.getLooseObjectValue(crate) });
+    result.sealedIn = about();
+    result.sealedIn.bay = bay.state; result.sealedIn.crateGone = d.looseObjects.indexOf(crate) < 0;
+    // An empty can is only an empty can: sealed in, it is salvage like anything else.
+    d.emptyFuelCan(can);
+    result.emptyWorth = d.getLooseObjectValue(can);
+    result.emptyIsNeeded = d.isLooseObjectStillNeeded(can);
+    return result;
+  });
+  check('a station has as many fuel cans as empty tanks', lostCan.seed > 0 && lostCan.cans === lostCan.tanks && lostCan.cans >= 1, [lostCan.seed, lostCan.cans, lostCan.tanks]);
+  check('a fuel can that goes down the shaft with fuel in it is back on its crate, at rest, out of the beam, with what was in it, and the screen says so',
+    lostCan.seed > 0 && lostCan.downTheShaft.isThere && lostCan.downTheShaft.metresFromItsCrate < 0.01 && lostCan.downTheShaft.fuel === 0.65 && lostCan.downTheShaft.kind === 'fuelCan' &&
+    lostCan.downTheShaft.isAsleep && !lostCan.downTheShaft.inTheBeam && lostCan.downTheShaft.said && lostCan.downTheShaft.staysThere, lostCan.downTheShaft);
+  check('a fuel can with fuel in it counts for nothing in a salvage bay, and is not sealed in with the rest: the bay seals, the salvage is taken, and the can is back on its crate',
+    lostCan.seed > 0 && lostCan.inTheBay.can && lostCan.inTheBay.crate && lostCan.inTheBay.countsFor === lostCan.inTheBay.crateWorth && lostCan.sealedIn.bay === 'sealed' && lostCan.sealedIn.crateGone &&
+    lostCan.sealedIn.isThere && lostCan.sealedIn.metresFromItsCrate < 0.01 && lostCan.sealedIn.fuel === 0.65 && lostCan.sealedIn.said, [lostCan.inTheBay, lostCan.sealedIn]);
+  check('emptied, it is an empty can and nothing more: worth a little as salvage, and no longer something to be put back', lostCan.seed > 0 && lostCan.emptyWorth > 0 && lostCan.emptyIsNeeded === false, [lostCan.emptyWorth, lostCan.emptyIsNeeded]);
 
   // --- Dispatch's table: a line that goes with the Stills waking, and a line that goes with a room ---
   const cues = await inGame(() => {

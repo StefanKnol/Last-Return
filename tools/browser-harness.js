@@ -122,4 +122,13 @@ async function drawFrames(page, frameCount) {
   }
 }
 
-module.exports = { openGame, startGame, drawFrames };
+// Does with a fuel can what a player does: stands by the can that a quest put out (known by the number the
+// quest gave it), takes it into the beam, goes and stands at the generator facing it, and holds the can against
+// it until the tank is full, or `mostSeconds` have gone by (twelve, if left out). `machineObjectId` is the
+// generator's own object number; 0, or left out, is Generator 2. Returns what happened, for the test to look at.
+// (The doing of it is one of the game's own test hooks, so that a test can also call it from inside the page.)
+async function carryFuelToTank(page, canQuestObjectId, machineObjectId, mostSeconds) {
+  return page.evaluate((given) => window.lastReturnDebug.carryFuelToTank(given[0], given[1], given[2]), [canQuestObjectId, machineObjectId || 0, mostSeconds || 12]);
+}
+
+module.exports = { openGame, startGame, drawFrames, carryFuelToTank };
