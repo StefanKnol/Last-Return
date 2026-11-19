@@ -24,6 +24,28 @@ const path = require('path');
 const SUITES = ['playthrough', 'generated-station', 'generators', 'quests', 'custom-difficulty', 'locked-doors', 'noisy-floor', 'captions',
   'loose-objects', 'apparition', 'workshop', 'players', 'together'];
 
+// `--plan` runs nothing. It reads the names of the files a pull request changes (one a line) and prints, as JSON,
+// the suites worth running for them: .github/workflows/ci.yml gives each of those a machine of its own.
+//   - a file that neither the build nor any suite reads (the README, docs/, what deploys the game): none for it
+//   - a suite's own file: that suite
+//   - anything else: every suite. The game is one page, so a change in src/ can reach any of them.
+// To see what a change would run: git diff --name-only main | node tools/run-tests.js --plan
+const IS_BESIDE_THE_TESTS = /\.md$|^(docs|chart|cluster|\.idea)\/|^(deploy\.sh|Dockerfile|\.dockerignore|\.gitignore|LICENSE|\.github\/workflows\/docker\.yml)$/;
+function planSuites(changedFiles) {
+  const planned = [];
+  for (const file of changedFiles) {
+    if (IS_BESIDE_THE_TESTS.test(file)) continue;
+    const ownSuite = (/^tools\/(.+)-test\.js$/.exec(file) || [])[1];
+    if (SUITES.indexOf(ownSuite) < 0) return SUITES;
+    planned.push(ownSuite);
+  }
+  return SUITES.filter(function (name) { return planned.indexOf(name) >= 0; });
+}
+if (process.argv.indexOf('--plan') >= 0) {
+  console.log(JSON.stringify(planSuites(fs.readFileSync(0, 'utf8').split('\n').filter(Boolean))));
+  process.exit(0);
+}
+
 const givenNames = process.argv.slice(2).filter(function (argument) { return argument.indexOf('--') !== 0; });
 const hasSecondTry = process.argv.indexOf('--no-second-try') < 0;
 for (const name of givenNames) {

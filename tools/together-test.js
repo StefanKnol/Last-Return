@@ -690,7 +690,10 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   const droppedIds = [];
   for (const page of [a, b]) droppedIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('crate', spot.x, spot.y, spot.z, 0).id, dropSpot));
-  for (let count = 0; count < 45; count++) await a.screenshot({ type: 'jpeg', quality: 5 });
+  // Frames are drawn until it is down in both games, and no more: with the menu open a frame takes about five
+  // seconds on the machine GitHub runs this on, and forty-five of them every time came to nearly four minutes.
+  const hasComeDown = async (page, id) => (await about(page, id)).y < dropSpot.y - 1;
+  for (let count = 0; count < 45 && !(await hasComeDown(a, droppedIds[0]) && await hasComeDown(b, droppedIds[1])); count++) await a.screenshot({ type: 'jpeg', quality: 5 });
   await pause(200);
   const dropped = { mode: await a.evaluate(() => window.lastReturnDebug.game.mode), from: dropSpot.y, host: await about(a, droppedIds[0]), other: await about(b, droppedIds[1]) };
   check('nor does it stop what lies loose: a crate let go of in the air while the host has the menu open comes down, in both games',
