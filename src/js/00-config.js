@@ -431,6 +431,9 @@ const TUNING = {
 
   // ---- The lift ------------------------------------------------------------
   liftArrivalSeconds: 40,           // how long you must survive after uploading the spools
+  // Down there with others the car stays at your level (see "The car that stays" in 11-game.js).
+  hollowLiftDoorDamagePerBout: 1,   // how much of the car's shut door one bout of pounding uses up. 1: after the first bout it finds the button and the door goes up. 0.5: after the second. 0: it never does, and the car is safe for good
+  liftDoorwayMetres: 0.8,           // somebody (or something) this close to the middle of the car's doorway is in it: the door never comes down on them
   liftArrivalSecondsWithoutHollow: 12 // the same wait on "Survey only", where nothing is coming
 };
 
@@ -503,12 +506,24 @@ const RADIO_MESSAGES = {
   liftArrived: 'The car is at your level. Get in quick.',
   // Said instead of uploadStarted and breakerClosed in a station where the car never went back up (no wait for
   // the lift: `liftWait` of QUEST_COMPLICATIONS in 09-quests.js). The key is the other line's, with CarWaiting.
+  // Down there with others the car stays at your level all along, with a door you can shut (11-game.js). What
+  // Dispatch says about the car is then said in these: each is the line of the same name without CarStays, as
+  // it has to be when the car never went anywhere. The two that end in Ready are for a station with no wait for
+  // the winch.
+  leftLiftCarStays: 'The car stays at your level this time, and its door has a button on either side. Mains is dead on your level. Find Generator 2 and get it running. It is off Pump Hall B.',
+  uploadStartedCarStays: 'Upload received. The winch needs forty seconds before it can lift the car. It is not a quiet machine.',
+  breakerClosedCarStays: 'Breaker is in. The winch needs forty seconds. Get back to the car.',
+  liftArrivedCarStays: 'The winch is ready. Everyone into the car.',
+  uploadStartedCarStaysReady: 'Upload received. The winch is ready. Everyone into the car.',
+  breakerClosedCarStaysReady: 'Breaker is in. The winch is ready. Everyone into the car.',
   uploadStartedCarWaiting: 'Upload received. The car never left your level. The doors are opening. Get in.',
   breakerClosedCarWaiting: 'Breaker is in. The car never left your level. The doors are opening. Get back to the lobby.'
 };
 
 // TWEAK: when Dispatch speaks. Each entry: something that happens (`when`), the line of RADIO_MESSAGES he says,
 // and how many seconds after it. `onlyWithHollow: true` leaves a line out on a threat level with no Hollow.
+// `ifCarLeaves: true` keeps a line for a descent where the car goes back up when you step out (alone), and
+// `ifCarStays: true` for one where it stays (down there with others).
 // `ifSpools: 3` keeps a line for stations with exactly that many survey spools, `unlessSpools: 3` for the others:
 // two of the recordings count ("two more", "That is two"), which is only true where there are three.
 // What can happen:
@@ -519,7 +534,8 @@ const RADIO_MESSAGES = {
 // code that does the thing itself: uploadStarted, breakerClosed and liftArrived (the lift, and their CarWaiting
 // forms where there is no wait for it), and doorBroken.
 const DISPATCH_CUES = [
-  { when: 'leftLift', line: 'leftLift', seconds: 3.0 },
+  { when: 'leftLift', line: 'leftLift', seconds: 3.0, ifCarLeaves: true },
+  { when: 'leftLift', line: 'leftLiftCarStays', seconds: 3.0, ifCarStays: true },
   { when: 'firstSpool', line: 'firstSpool', seconds: 1.5, ifSpools: 3 },
   { when: 'firstSpool', line: 'firstSpoolOfMany', seconds: 1.5, unlessSpools: 3 },
   { when: 'stillsWake', line: 'secondSpool', seconds: 1.5, ifSpools: 3 },
@@ -600,6 +616,7 @@ const CAPTIONS = {
   ambientKnocks: { text: '[knocking, far below]', level: 'sound', withinMetres: 13, seconds: 3.5, slot: 'station', rank: 0 },
   salvageBayPing: { text: '[a salvage bay pings]', level: 'sound', withinMetres: 45, seconds: 2.5, slot: 'salvageBay', rank: 0 },
   liftBell: { text: '[the lift bell rings]', level: 'sound', withinMetres: 50, seconds: 2.2 },
+  liftButtonPressed: { text: '[a button clicks outside the lift door]', level: 'tell', withinMetres: 20, seconds: 3 },
 
   // ---- you ----
   ownGlass: { text: '[glass crunches under your boots]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
@@ -714,7 +731,10 @@ const OBJECTIVE_TEXT = {
   fuelForGenerator: 'You are carrying a fuel can. One of the generators has an empty tank.',
   closeBreaker: 'The lift will not come. Close the winch breaker: it is marked on the map.',
   surviveLift: 'The lift is coming. Stay alive until it arrives.',
-  boardLift: 'Board the lift.'
+  boardLift: 'Board the lift.',
+  // The same two where the car never left (down there with others).
+  surviveWinch: 'The winch is taking up the slack. Stay alive until it is ready.',
+  boardLiftTogether: 'The winch is ready. Everyone into the lift car.'
 };
 
 // The "SIGNAL LOST" screen, one version per thing that can catch you.

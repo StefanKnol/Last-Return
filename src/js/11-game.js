@@ -37,6 +37,8 @@ const game = {
   hasShownVentHint: false,
   isDescentLost: false,          // down there with others: every one of you is down, and nobody is left to carry anybody back
   isLeftBehind: false,           // down there with others: the car has gone up with those on their feet, and you were not one of them
+  isCarStaying: false,           // this descent's car stays at your level, with a door that opens and shuts by its buttons ("The car that stays")
+  isLiftDoorWantedOpen: true,    // ... and how that door was last asked to stand
   actor: null,                   // somebody else whose action is being carried out here right now, or null: getActingPlayer
   hasShownNoisyFloorHint: false, // the first time something loose underfoot gives you away, you are told what it was
   attract: { yaw: -0.9, pitch: 0, timer: 0, sweepTimer: 4, sweepProgress: -1, rayBudget: 0, centerRange: -1 }
@@ -100,6 +102,7 @@ function isInteractableWantedNow(interactable) {
     return flags.powerOn && !flags.uploadStarted && getUnfinishedQuests('upload').length === 0 && !(flags.spoolsUploaded && getUnfinishedQuests('lift').length > 0);
   }
   if (objectId === OBJECT_LIFT_PANEL) return liftDoor.forcedState !== true && liftDoor.openFraction < 1; // only while the door is shut on you
+  if (objectId === OBJECT_LIFT_BUTTON) return game.isCarStaying && liftDoor.openFraction < 1; // only where there is a car behind it, and while its door is shut
   if (objectId === OBJECT_NOTE_SECURITY || objectId === OBJECT_NOTE_LOCKER || objectId === OBJECT_NOTE_LAB || objectId === OBJECT_NOTE_ARCHIVE) return false;
   return true; // spools and keycards are always worth going for
 }
@@ -110,6 +113,7 @@ function fireGameEvent(eventName) {
   for (const cue of DISPATCH_CUES) {
     if (cue.when !== eventName) continue;
     if (cue.onlyWithHollow && !game.difficulty.hollowEnabled) continue;
+    if ((cue.ifCarLeaves && game.isCarStaying) || (cue.ifCarStays && !game.isCarStaying)) continue;
     // (Two of the recordings count the spools, which is only true where there are three and they are what you
     // came for. On any other work order the station counts as one where that is not so.)
     const spoolsCounted = areSpoolsOnTheOrder() ? level.spoolCount : 0;
@@ -123,8 +127,8 @@ function fireGameEvent(eventName) {
 function refreshObjective() {
   const flags = game.flags;
   if (!flags.hasLeftLift) setObjective(OBJECTIVE_TEXT.leaveLift);
-  else if (flags.liftArrived) setObjective(OBJECTIVE_TEXT.boardLift);
-  else if (flags.uploadStarted) setObjective(OBJECTIVE_TEXT.surviveLift);
+  else if (flags.liftArrived) setObjective(game.isCarStaying ? OBJECTIVE_TEXT.boardLiftTogether : OBJECTIVE_TEXT.boardLift);
+  else if (flags.uploadStarted) setObjective(game.isCarStaying ? OBJECTIVE_TEXT.surviveWinch : OBJECTIVE_TEXT.surviveLift);
   else if (!flags.powerOn) setObjective(getMainsQuestObjective() || OBJECTIVE_TEXT.findGenerator);
   else if (flags.spoolsUploaded && getUnfinishedQuests('lift').length > 0) setObjective(fillQuestText(getUnfinishedQuests('lift')[0], 'objective'));
   else {
@@ -154,6 +158,8 @@ function resetWorldState() {
   game.hasShownHollowHint = false;
   game.isDescentLost = false;
   game.isLeftBehind = false;
+  game.isCarStaying = isWorldShared(); // decided as the descent begins, and kept if you end up down there alone
+  game.isLiftDoorWantedOpen = true;
   game.hasShownVentHint = false;
   game.hasShownNoisyFloorHint = false;
   noisyFloorCounts.byPlayer = 0; noisyFloorCounts.byPlayerCrouched = 0; noisyFloorCounts.byHollow = 0;
@@ -441,14 +447,20 @@ function useInteractable(interactable) {
       } else if (!flags.uploadStarted) {
         startLiftCall('uploadStarted');
       } else if (!flags.liftArrived) {
-        showMessage('LIFT CONTROL: car descending.', 3, 'info');
+        showMessage(game.isCarStaying ? 'LIFT CONTROL: winch taking up the slack.' : 'LIFT CONTROL: car descending.', 3, 'info');
       } else {
-        showMessage('LIFT CONTROL: car at this level. Doors open.', 3, 'info');
+        showMessage(game.isCarStaying ? 'LIFT CONTROL: winch ready. Everyone into the car.' : 'LIFT CONTROL: car at this level. Doors open.', 3, 'info');
       }
       break;
+    case OBJECT_LIFT_BUTTON:
+      // The button outside the car. Alone the car has gone up, and there is nothing behind the door to call.
+      if (!game.isCarStaying) { playDeniedSound(); showMessage('LIFT: the car is not at this level.', 3, 'warning'); break; }
+      useLiftDoorButton();
+      break;
     case OBJECT_LIFT_PANEL:
+      if (game.isCarStaying) { useLiftDoorButton(); break; }
       // The panel in the car. Its door comes down behind the last one out, and nobody should ever be behind it.
-      // If somebody is all the same (down there with others, say, having come down late), this opens it again.
+      // If somebody is all the same, this opens it again.
       // It then goes by the rule it always had: open while anybody is in the car or its doorway, down after.
       if (liftDoor.forcedState === true || liftDoor.openFraction >= 1) {
         showMessage('LIFT: door open.', 2.5, 'info');
@@ -513,16 +525,66 @@ function getIntroLines() {
   return introLines;
 }
 
+// ---------------------------------------------------------------------------
+// The car that stays
+//
+// Alone, the car goes back up when you step out of it, and comes down again when the work order is done.
+// Down there with others it stays at your level for the whole descent (game.isCarStaying), and it is the one
+// place of your own down there:
+//   - Its door stands open until somebody shuts it. There is a button on either side: the panel in the car and
+//     the button outside. Either opens or shuts it, for whoever presses. It never comes down on anybody (or
+//     anything) standing in the doorway: it waits, and goes up again if they step under it.
+//   - Shut, it keeps the Hollow out for a while and no longer. Shutting it is loud. If the Hollow is after
+//     somebody inside it pounds on the door like on any door it cannot open, and when it has had enough of that
+//     (TUNING.hollowLiftDoorDamagePerBout) it finds the button. Then the door goes up, and it can be shut again
+//     only once the doorway is clear.
+//   - A fallen scanner restarts in the car and nowhere else (11-together.js).
+//   - When the work order is done the terminal starts the winch instead of calling the car down: the same wait,
+//     where the station has one, and the car goes up once everyone who is on their feet is in it.
+// What Dispatch says about the car has its own lines for this (the ...CarStays lines in 00-config.js).
+// ---------------------------------------------------------------------------
+
+function isSomebodyInLiftDoorway() {
+  for (const one of players) if (distanceBetweenPoints(one.x, one.z, LIFT_POSITION.x, LIFT_POSITION.z) < TUNING.liftDoorwayMetres) return true;
+  return hollow.isActive && !isHollowInCrawlspace() && distanceBetweenPoints(hollow.figure.x, hollow.figure.z, LIFT_POSITION.x, LIFT_POSITION.z) < TUNING.liftDoorwayMetres + 0.2;
+}
+
+// Somebody has pressed the panel in the car or the button outside it. (Carried out in every game, like
+// anything done to the station: 11-together.js. Which way it goes is read off the door itself, which stands
+// the same in every game, and not off what was last asked for, which the Hollow may have changed since.)
+function useLiftDoorButton() {
+  const isOpenNow = liftDoor.openFraction > 0.5;
+  game.isLiftDoorWantedOpen = !isOpenNow;
+  playInterfaceBlip(isOpenNow ? 420 : 520);
+  showMessage(isOpenNow ? 'LIFT: door closing.' : 'LIFT: door opening.', 2.5, 'info');
+  emitNoise(LIFT_POSITION.x, LIFT_POSITION.z, TUNING.noiseRadiusDoor); // it is not a quiet door either way
+}
+
+// The Hollow has had enough of pounding on the car's door (updateHollowDoorBang, 08-crawlspace.js).
+function pressLiftButtonAsHollow() {
+  liftDoor.damage = 0; // (the next time it is shut on it, it pounds first again)
+  game.isLiftDoorWantedOpen = true;
+  showCaption('liftButtonPressed', LIFT_POSITION);
+}
+
+// One frame of the staying car's door: where it was asked to stand, but never down on anybody.
+function updateStayingCarDoor() {
+  if (game.isLiftDoorWantedOpen) liftDoor.forcedState = true;
+  else liftDoor.forcedState = liftDoor.openFraction > 0 && isSomebodyInLiftDoorway();
+}
+
 // `radioKey` is what dispatch says as the car starts down.
 function startLiftCall(radioKey) {
   const flags = game.flags;
   flags.uploadStarted = true;
+  // (Where the car has stayed, each line has a form of its own: see the top of this section.)
+  const carStays = game.isCarStaying ? 'CarStays' : '';
   if (!level.liftWaits) {
     // The car never went back up (no `liftWait` among this station's complications): the doors open at once,
     // and Dispatch says so in one line instead of two.
     saveCheckpoint();
     playPickupSound();
-    completeLiftArrival((radioKey || 'uploadStarted') + 'CarWaiting');
+    completeLiftArrival((radioKey || 'uploadStarted') + (carStays ? 'CarStaysReady' : 'CarWaiting'));
     return;
   }
   game.liftCountdown = game.difficulty.hollowEnabled ? TUNING.liftArrivalSeconds : TUNING.liftArrivalSecondsWithoutHollow;
@@ -530,7 +592,7 @@ function startLiftCall(radioKey) {
   refreshObjective();
   playPickupSound();
   setLiftMachinerySound(0.85);
-  playRadioLine(radioKey || 'uploadStarted');
+  playRadioLine((radioKey || 'uploadStarted') + carStays);
   if (hollow.isActive) {
     scheduleEvent(4, function () {
       if (game.flags.uploadStarted && !game.flags.liftArrived) hollow.knowsPlayerPositionAlways = true;
@@ -543,11 +605,12 @@ function completeLiftArrival(radioKey) {
   game.flags.liftArrived = true;
   game.liftCountdown = -1;
   liftDoor.forcedState = true;
+  game.isLiftDoorWantedOpen = true; // (where the car has stayed and its door was shut: it opens for the ride up)
   setLiftMachinerySound(0);
   playLiftBell();
   showCaption('liftBell', LIFT_POSITION);
   refreshObjective();
-  playRadioLine(radioKey || 'liftArrived');
+  playRadioLine(radioKey || (game.isCarStaying ? 'liftArrivedCarStays' : 'liftArrived'));
 }
 
 // ---------------------------------------------------------------------------
@@ -683,8 +746,8 @@ function notePlaceEntered(placeName) {
 function noteLiftLeft() {
   if (game.flags.hasLeftLift) return;
   game.flags.hasLeftLift = true;
-  liftDoor.forcedState = false;
-  game.isLiftDoorClosingBehindYou = true;
+  // Alone, the door comes down behind you and the car goes up. Where the car stays, its door stays as it is.
+  if (!game.isCarStaying) { liftDoor.forcedState = false; game.isLiftDoorClosingBehindYou = true; }
   saveCheckpoint();
   refreshObjective();
   fireGameEvent('leftLift'); // (the car is heard going up when its door is down: updateGameProgress)
@@ -695,6 +758,7 @@ function noteLiftLeft() {
 // their descent ends. (They used to be taken up with the rest: the ending, and a best time for it.)
 function beginAscent() {
   if (game.mode === 'ascending' || game.mode === 'ending' || game.mode === 'title') return;
+  game.isLiftDoorWantedOpen = false; // (where the car has stayed: its door comes down for the ride, for the one left behind to see too)
   if (isWorldShared() && (game.mode === 'dead' || game.mode === 'dying')) {
     game.isLeftBehind = true;
     if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // (still dying: it says so when that is over)
@@ -737,12 +801,10 @@ function updateGameProgress(dt) {
   // The car's door never comes down on you. Step out and dart back in while it is closing, and it goes up
   // again; it shuts when you are clear of it. (Once it is down it stays down: the car has gone up.)
   // A salvage bay's door keeps the same rule (updateHaulBays in 08-loose-objects.js).
-  if (game.isLiftDoorClosingBehindYou) {
+  if (game.isCarStaying) updateStayingCarDoor();
+  else if (game.isLiftDoorClosingBehindYou) {
     let isInTheWay = false; // somebody in the car, or in its doorway
     for (const one of players) if (distanceOutsideLiftCar(one.x, one.z) < 1.2) isInTheWay = true;
-    // Down there with others, somebody who came down with you and has not been heard from yet is in the car: their
-    // browser is still building the station. (The host could be out and the door down before they had arrived.)
-    if (isSomebodyStillOnTheirWayDown()) isInTheWay = true;
     if (isInTheWay && liftDoor.openFraction > 0) liftDoor.forcedState = true;
     else if (!isInTheWay) {
       liftDoor.forcedState = false;
@@ -1087,7 +1149,7 @@ function startApplication() {
     teleport: function (x, z, yaw) { player.x = x; player.z = z; if (yaw !== undefined) player.yaw = yaw; },
     grantPower: function () { game.flags.powerOn = true; refreshObjective(); },
     grantKeycard: function () { setKeycardLevel(3); },
-    keycardObjectIds: KEYCARD_OBJECT_IDS, liftPanelObjectId: OBJECT_LIFT_PANEL,
+    keycardObjectIds: KEYCARD_OBJECT_IDS, liftPanelObjectId: OBJECT_LIFT_PANEL, liftButtonObjectId: OBJECT_LIFT_BUTTON, liftPosition: LIFT_POSITION, liftCarBounds: LIFT_CAR_BOUNDS,
     // Whether the stations built from now on use what the workshop made (see isWorkshopContentUsed in 03-levelgen.js).
     setWorkshopContentUsed: function (isUsed) { isWorkshopContentUsed = isUsed !== false; },
     missionObjectIds: { fuelCan: OBJECT_FUEL_CAN, winchBreaker: OBJECT_WINCH_BREAKER, firstCore: OBJECT_CORE_FIRST, firstExtraGenerator: OBJECT_EXTRA_GENERATOR_FIRST, firstExtraFuelCan: OBJECT_EXTRA_FUEL_CAN_FIRST },

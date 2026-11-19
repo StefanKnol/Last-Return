@@ -611,14 +611,6 @@ function placeOwnBody() {
   updateFigureCapsules(figure);
 }
 
-// The host's game: has one of those who came down with you not said where they are yet? Then their browser is
-// still building the station, and they are in the lift car, where everyone starts. (The car's door waits for them.)
-function isSomebodyStillOnTheirWayDown() {
-  if (!isWorldYoursToShare()) return false;
-  for (const other of together.others) if (!other.hasBeenHeardFrom && !other.isDown) return true;
-  return false;
-}
-
 // Every frame, whatever the game is doing (11-game.js calls this).
 function updateTogether(dt) {
   if (!together.isInDescent) return;
@@ -970,8 +962,8 @@ function performAction(action) {
 // ---- Being caught, and being carried back ----
 //
 // Down there with others there are no checkpoints. Whoever is caught leaves their scanner where they fell: a
-// loose thing like any other, with its light still on. One of the others carries it to the lift (to within
-// TOGETHER_RESTART_METRES of the car) or into a salvage bay that stands open, and puts it down. When it has
+// loose thing like any other, with its light still on. One of the others carries it into the lift car, which
+// stays at your level down there with others ("The car that stays", 11-game.js), and puts it down. When it has
 // lain there for TOGETHER_RESTART_SECONDS it restarts, loudly, and its owner is on their feet where it lay.
 // It does not have to be one of you that brings it there. Kicked or flung there by the Hollow, knocked there by
 // a crate: lying there is what counts, and luck is welcome. What does not count is lying where its owner fell:
@@ -982,8 +974,7 @@ function performAction(action) {
 // A scanner lost down the shaft is lost, and so is its owner, for this descent. When every one of you is down,
 // nobody is left to carry anybody, and the descent is over.
 
-const TOGETHER_RESTART_METRES = 2.5; // TWEAK: how near the lift car counts as "at the lift"
-const TOGETHER_RESTART_SECONDS = 3;  // TWEAK: how long it lies there before it restarts
+const TOGETHER_RESTART_SECONDS = 8;  // TWEAK: how long it has to lie in the car before it restarts
 const TOGETHER_RESTART_MOVED_METRES = 1; // TWEAK: how far from where its owner fell it has to have been before it can restart at all
 
 function dropFallenScanner(action) {
@@ -1021,9 +1012,8 @@ function updateFallenScanners(dt) {
     // Moved from where its owner fell, by whoever or whatever: in somebody's beam, or a good step away from
     // there at any time since. (Once moved it stays moved, wherever it ends up.)
     if (object.wasHandled || distanceBetweenPoints(object.x, object.z, object.fellX, object.fellZ) > TOGETHER_RESTART_MOVED_METRES) object.hasBeenMoved = true;
-    let canRestart = object.hasBeenMoved && !object.heldById && distanceOutsideLiftCar(object.x, object.z) < TOGETHER_RESTART_METRES;
-    const bay = findOpenHaulBay();
-    if (object.hasBeenMoved && !object.heldById && bay && isLooseObjectInHaulBay(object, bay)) canRestart = true;
+    // In the car itself: on its floor, not in front of its door.
+    const canRestart = object.hasBeenMoved && !object.heldById && distanceOutsideLiftCar(object.x, object.z) === 0;
     object.restartSeconds = canRestart ? object.restartSeconds + dt : 0;
     if (object.restartSeconds >= TOGETHER_RESTART_SECONDS) { decideAction(together.myId, { what: 'restart', id: object.id }); return; }
   }

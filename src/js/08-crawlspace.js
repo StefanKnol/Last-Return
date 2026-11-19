@@ -284,6 +284,7 @@ function updateHollowInCrawlspace(dt) {
 // ---------------------------------------------------------------------------
 
 function isDoorBreakable(door) {
+  if (door === liftDoor) return game.isCarStaying && TUNING.hollowLiftDoorDamagePerBout > 0; // (it does not break: see updateHollowDoorBang)
   return door.kind === DOOR_KIND_KEYCARD && !door.isBroken;
 }
 
@@ -373,7 +374,8 @@ function updateHollowDoorBang(dt) {
     bang.hitTimer = TUNING.hollowDoorBangEverySeconds * (0.85 + Math.random() * 0.3);
     bang.hits++;
     // Every blow takes its share of what a bout does. Anger makes each one count for more; enraged, for twice as much.
-    const damagePerBlow = TUNING.hollowDoorDamagePerBout * (1 + TUNING.hollowDoorDamageAngerBonus * hollow.anger) * (isEnraged ? 2 : 1) / blowsInOneBout;
+    const damagePerBout = door === liftDoor ? TUNING.hollowLiftDoorDamagePerBout : TUNING.hollowDoorDamagePerBout;
+    const damagePerBlow = damagePerBout * (1 + TUNING.hollowDoorDamageAngerBonus * hollow.anger) * (isEnraged ? 2 : 1) / blowsInOneBout;
     door.damage = Math.min(1, door.damage + damagePerBlow);
     playDoorBang(door.centerX, door.centerZ, 0.8 + 0.3 * hollow.anger + 0.25 * door.damage);
     if (bang.hits === 1) {
@@ -383,6 +385,9 @@ function updateHollowDoorBang(dt) {
       bang.captionKey = willGoThisBout ? 'doorPoundedLast' : (damageBefore > 0.01 ? 'doorPoundedAgain' : 'doorPounded');
     }
     showCaption(bang.captionKey, { x: door.centerX, z: door.centerZ }); // every blow keeps the line up for as long as it goes on
+    // The car's door does not break. When it has had enough of pounding on it, it finds the button beside it.
+    // (0.999: six blows of a sixth each do not quite add up to one.)
+    if (door.damage >= 0.999 && door === liftDoor) { pressLiftButtonAsHollow(); hollow.doorBang = null; hollow.fieldTargetIndex = -1; return; }
     if (door.damage >= 1) { breakDoor(door); hollow.doorBang = null; hollow.fieldTargetIndex = -1; return; }
     if (bang.hits >= blowsInOneBout) {
       // The door held. It leaves it for now and goes round; what it did to the door stays done.

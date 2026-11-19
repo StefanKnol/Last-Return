@@ -40,6 +40,12 @@ A night-shift controller at the surface, talking to you over a poor radio link. 
 | `allSpools.mp3` | That is all of them. Go back to the lift lobby and upload them. | Relief he is trying not to show. (The recording made before this text changed says "all three".) |
 | `uploadStarted.mp3` | Upload received. The car is on its way down. Forty seconds. It is not a quiet machine. | Businesslike. The last sentence is a dry understatement. |
 | `liftArrived.mp3` | The car is at your level. Get in quick. | Urgent now, but still quiet. He does not raise his voice. |
+| `leftLiftCarStays.mp3` | The car stays at your level this time, and its door has a button on either side. Mains is dead on your level. Find Generator 2 and get it running. It is off Pump Hall B. | As leftLift, but the first sentence is new information and he knows it is good news: plain, a little surprised. Only down there with others, where the car stays. |
+| `uploadStartedCarStays.mp3` | Upload received. The winch needs forty seconds before it can lift the car. It is not a quiet machine. | Businesslike. The last sentence is a dry understatement. Only down there with others, in a station with the wait. |
+| `breakerClosedCarStays.mp3` | Breaker is in. The winch needs forty seconds. Get back to the car. | Fast and low. The last sentence is an order. Only down there with others, with the breaker job, in a station with the wait. |
+| `liftArrivedCarStays.mp3` | The winch is ready. Everyone into the car. | Urgent now, but still quiet. He does not raise his voice. Only down there with others. |
+| `uploadStartedCarStaysReady.mp3` | Upload received. The winch is ready. Everyone into the car. | Businesslike, then urgent on the last sentence. Only down there with others, in a station with no wait. |
+| `breakerClosedCarStaysReady.mp3` | Breaker is in. The winch is ready. Everyone into the car. | Fast and low, then urgent on the last sentence. Only down there with others, with the breaker job, in a station with no wait. |
 | `uploadStartedCarWaiting.mp3` | Upload received. The car never left your level. The doors are opening. Get in. | Businesslike, and a little surprised at his own board: this is good news and he does not trust it. Only in stations with no wait for the lift. |
 | `breakerClosedCarWaiting.mp3` | Breaker is in. The car never left your level. The doors are opening. Get back to the lobby. | Fast and low. The last sentence is an order. Only with the breaker job, in stations with no wait for the lift. |
 
