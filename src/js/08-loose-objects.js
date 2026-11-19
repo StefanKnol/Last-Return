@@ -1112,7 +1112,8 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius, i
   }
   // The others who are down here walk into things as you do. (What gives way to them is moved here; what they
   // carry is theirs.)
-  for (let index = 1; index < players.length; index++) {
+  // (All of the list: you are not always the first in it. The host of others is left out of it while dead.)
+  for (let index = 0; index < players.length; index++) {
     const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
     if (one === player || object.heldById === one.id) continue;
     addLooseContactWithWalker(false, getLooseShoveResistance(object.kind.mass), one.x, one.z, TUNING.playerRadius, floorY + stepOverHeight, floorY + (one.isCrouching ? TUNING.playerHeightCrouching : TUNING.playerHeight),
@@ -2817,8 +2818,10 @@ function throwVentCoverFromHollow(object, mouth, isHollowInTheRoom) {
   object.chaseUntil = undefined; object.chasedSince = game.time;
   looseState.statistics.coversThrown++;
   looseState.lastCoverThrown.x = object.x; looseState.lastCoverThrown.z = object.z; looseState.lastCoverThrown.towardsX = outX; looseState.lastCoverThrown.towardsZ = outZ; looseState.lastCoverThrown.time = game.time;
-  playLooseObjectFlingSound(object.x, object.y, object.z);
-  showCaption('hollowFling', { x: object.x, z: object.z });
+  shareWorldSoundsDuring(function () { // the Hollow's doing: everybody hears it (11-together.js)
+    playLooseObjectFlingSound(object.x, object.y, object.z);
+    showCaption('hollowFling', { x: object.x, z: object.z });
+  });
 }
 
 function updateHollowAfterKickedObjects() {
@@ -2873,8 +2876,10 @@ function flingLooseObjectFromHollow(object) {
   object.chaseUntil = undefined; object.chasedSince = game.time;
   looseState.statistics.flungBack++;
   looseState.lastFling.x = hollow.figure.x; looseState.lastFling.z = hollow.figure.z; looseState.lastFling.targetX = targetX; looseState.lastFling.targetZ = targetZ; looseState.lastFling.time = game.time; looseState.lastFling.id = object.id;
-  playLooseObjectFlingSound(hollow.figure.x, fromY, hollow.figure.z);
-  showCaption('hollowFling', { x: hollow.figure.x, z: hollow.figure.z });
+  shareWorldSoundsDuring(function () { // the Hollow's doing: everybody hears it (11-together.js)
+    playLooseObjectFlingSound(hollow.figure.x, fromY, hollow.figure.z);
+    showCaption('hollowFling', { x: hollow.figure.x, z: hollow.figure.z });
+  });
   return true;
 }
 
@@ -2986,9 +2991,13 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     if (isLooseObjectAnothers(object)) continue; // woken by its mover, where it is moved
     if (player.isMoving && isAtTheControls) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + TUNING.playerHeight);
     if (hollow.isActive) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
-    for (let index = 1; index < players.length; index++) {
+    for (let index = 0; index < players.length; index++) {
       const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
-      if (one !== player) wakeLooseObjectIfWalkedInto(object, one.x, one.z, TUNING.playerRadius, floorY, floorY + TUNING.playerHeight);
+      // (Walked into: one who only stands beside a thing does not wake it, any more than you do. It used to wake for
+      // as long as they stood there, so a crate set down at somebody's feet never came to rest in the host's game,
+      // and the host went on telling everybody where it was.)
+      const isWalking = Math.abs(one.velocityX) + Math.abs(one.velocityZ) > 0.05;
+      if (one !== player && isWalking) wakeLooseObjectIfWalkedInto(object, one.x, one.z, TUNING.playerRadius, floorY, floorY + TUNING.playerHeight);
     }
   }
 

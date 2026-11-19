@@ -15,8 +15,9 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
-    # The tests take about 25 minutes here and a slow runner adds a few. This is the limit for a run that hangs.
-    timeout-minutes: 45
+    # The tests take about half an hour here and a slow runner adds a few; a suite that fails is run a second
+    # time (tools/run-tests.js), which can add as much as that suite takes. This is the limit for a run that hangs.
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:

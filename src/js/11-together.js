@@ -36,6 +36,7 @@ const together = {
   myId: 0, hostId: 0,
   memberIds: [],         // everyone in the lobby, you included
   isRoundOn: false,      // the host is down in a station right now (with whoever went along)
+  isLocked: false,       // the host has locked the lobby: nobody else can join until it is opened again
   ownChoices: null,      // in somebody else's lobby: what you had chosen on the title screen yourself, to be put back when you leave
   ownFigure: null,       // your own body, which nobody sees: it is only in the way of the others' scanners (echoOtherScanner)
   hostMap: null,         // the number the host's station came to when it was built (level.mapFingerprint), once the host has said
@@ -85,12 +86,14 @@ function initializeTogether() {
   elements['button-host-lobby'].addEventListener('click', function () { openLobbySocket({ t: 'host', build: describeBuildForLobby() }); });
   const join = function () {
     const code = elements['together-code'].value.trim().toUpperCase();
-    if (code.length !== 4) { together.statusText = 'A lobby code is four letters.'; refreshTogetherControls(); return; }
+    if (code.length !== 5) { together.statusText = 'A lobby code is five letters and digits.'; refreshTogetherControls(); return; }
     openLobbySocket({ t: 'join', code: code, build: describeBuildForLobby() });
   };
   elements['button-join-lobby'].addEventListener('click', join);
   elements['together-code'].addEventListener('keydown', function (event) { if (event.key === 'Enter') join(); });
   elements['button-leave-lobby'].addEventListener('click', function () { leaveLobby(''); });
+  // The host's alone: with everyone in, nobody else gets in, whatever code they try. The server keeps it.
+  elements['button-lock-lobby'].addEventListener('click', function () { if (isLobbyHost()) sendToRelay({ t: 'lock', on: !together.isLocked }); });
   refreshTogetherControls();
 }
 
@@ -126,6 +129,8 @@ function refreshTogetherControls() {
   elements['together-apart'].hidden = isInLobby;
   elements['together-lobby'].hidden = !isInLobby;
   elements['together-lobby-code'].textContent = together.code;
+  elements['button-lock-lobby'].hidden = !isLobbyHost();
+  elements['button-lock-lobby'].textContent = together.isLocked ? 'Open it again' : 'Lock it';
   let status = together.statusText;
   begin.disabled = false;
   begin.textContent = 'Begin descent';
@@ -135,15 +140,15 @@ function refreshTogetherControls() {
   for (const group of document.querySelectorAll('#screen-title .title-block fieldset')) if (group !== elements['together-options']) group.disabled = isHostsToChoose;
   for (const control of elements['station-options'].querySelectorAll('select, input')) control.disabled = isHostsToChoose;
   if (isInLobby) {
-    const count = together.memberIds.length + ' of 4 in the lobby. ';
+    const count = together.isLocked ? together.memberIds.length + ' in the lobby, and it is locked: nobody else can join. ' : together.memberIds.length + ' of 4 in the lobby. ';
     if (!isLobbyHost() && together.isRoundOn) {
       begin.disabled = true;
       begin.textContent = 'Waiting for the others';
       status = count + (together.statusText ? together.statusText + ' ' : '') + 'The others are down there. You go down with them on the next descent.';
     } else if (isLobbyHost()) {
       begin.textContent = 'Begin descent together';
-      status = count + 'Give the others the code. When you begin, everyone goes down with you: into the station and the threat level chosen here, ' +
-        'with one Hollow and one work order between you.';
+      status = count + (together.isLocked ? '' : 'Give the others the code, and lock it when they are all in. ') +
+        'When you begin, everyone goes down with you: into the station and the threat level chosen here, with one Hollow and one work order between you.';
     } else {
       begin.disabled = true;
       begin.textContent = 'Waiting for the host';
@@ -196,7 +201,7 @@ function endLobby(statusText) {
   const wasInDescent = together.isInDescent;
   endDescentTogether();
   together.code = ''; together.myId = 0; together.hostId = 0; together.memberIds = [];
-  together.isRoundOn = false;
+  together.isRoundOn = false; together.isLocked = false;
   if (together.ownChoices) {
     // The title screen is yours again: back to what you had chosen yourself.
     Object.assign(settings, together.ownChoices);
@@ -218,6 +223,12 @@ function endDescentTogether() {
   for (const object of looseObjects) { object.ownerId = 0; if (!object.isHeld) object.heldById = 0; } // every loose thing is yours to move again
   players.length = 0; players.push(player);
   together.world = null;
+  // The scanners of the fallen were waiting to be carried back by somebody. Nobody is coming now.
+  for (const object of looseObjects.slice()) if (object.fallenPlayerId) removeLooseObject(object);
+  // Dead, and waiting for that: you are alone now, and it is as it is alone. The death screen says so again,
+  // with the way back from the last checkpoint if this threat level has one. (It used to go on saying that one
+  // of the others could carry your scanner back, with no button but the one to the title screen.)
+  if (game.mode === 'dead' && game.deathSequence) { game.isDescentLost = false; game.isLeftBehind = false; showDeathScreen(game.deathSequence.kind); }
   if (wasTheHosts) {
     // The station is yours from here: what walks in it takes up thinking where the host's left off.
     cancelHollowCrawl(); hollow.doorBang = null; hollow.fieldTargetIndex = -1;
@@ -282,14 +293,19 @@ const LOBBY_REFUSALS = {
   unknown: 'There is no lobby with that code.',
   full: 'That lobby is full.',
   build: 'That lobby is on another version of the game. Reload the page, and ask the host to do the same.',
-  busy: 'The server has no room for another lobby just now.'
+  busy: 'The server has no room for another lobby just now.',
+  locked: 'That lobby is locked. Ask the host to open it again.',
+  slow: 'Too many codes that were not right. Wait a minute before trying another.'
 };
 
 function hearRelay(message) {
   if (message.t === 'lobby' && Array.isArray(message.players)) {
     together.code = String(message.code); together.myId = message.you; together.hostId = message.host;
     together.memberIds = message.players.slice();
+    together.isLocked = message.locked === true;
     together.statusText = '';
+  } else if (message.t === 'locked') {
+    together.isLocked = message.on === true;
   } else if (message.t === 'refused') {
     leaveLobby(LOBBY_REFUSALS[message.why] || 'The lobby could not be joined.');
     return;
@@ -688,8 +704,16 @@ function wrapForTogether() {
   playDoorBang = shareWorldSound('playDoorBang', playDoorBang);
   playDoorBreak = shareWorldSound('playDoorBreak', playDoorBreak);
   playStinger = shareWorldSound('playStinger', playStinger);
+  // The Hollow treading on glass, cans or a loose plate, and flinging a thing: your warning, and so the others' too.
+  // (Shared only while the host's creatures are being run, like the rest: your own step on glass is your own.)
+  playNoisyFloorSound = shareWorldSound('playNoisyFloorSound', playNoisyFloorSound);
+  playLooseObjectFlingSound = shareWorldSound('playLooseObjectFlingSound', playLooseObjectFlingSound);
   showCaption = shareWorldSound('showCaption', showCaption);
-  showMessage = onlyForWhoeverActs(showMessage);
+  // (A line from Dispatch is for everybody, whoever did what he speaks of: it is let through. It used to be held
+  // back with the rest, so the others heard his radio click and read nothing, unless the line had a recording,
+  // which puts the words up again when the voice starts.)
+  const showMessageAsItWas = showMessage;
+  showMessage = function (text, seconds, kind) { return game.actor && kind !== 'radio' ? undefined : showMessageAsItWas.apply(null, arguments); };
   playPickupSound = onlyForWhoeverActs(playPickupSound);
   playDeniedSound = onlyForWhoeverActs(playDeniedSound);
   playInterfaceBlip = onlyForWhoeverActs(playInterfaceBlip);
@@ -1152,8 +1176,10 @@ function hearOfTheStation(id, data) {
     else if (data.k === 'back' && other) other.isDown = false;
     else if (data.k === 'ask') {
       const action = readAction(data.a);
-      // When the car goes up, when a scanner is restarted and when everyone is down are the host's game's to say.
-      if (action && action.what !== 'ascend' && action.what !== 'restart' && action.what !== 'allDown') decideAction(id, action);
+      // When the car goes up, when a scanner is restarted, when everyone is down, and what a salvage bay does and
+      // takes are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
+      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay'].indexOf(action.what) >= 0;
+      if (action && !isTheHostsToSay) decideAction(id, action);
     }
     return;
   }

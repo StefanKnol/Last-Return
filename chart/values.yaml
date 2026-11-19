@@ -16,11 +16,15 @@ imagePullSecrets: []
 # the old one go the lobbies that were open in it: whoever was down there together plays on alone.
 replicaCount: 1
 
-# "Descend together" on the title screen: players open a lobby, hand each other its four-letter code, and go down
+# "Descend together" on the title screen: players open a lobby, hand each other its five-character code, and go down
 # into the same station. The server only passes on what their browsers say to each other. Off, the game is
 # served to be played alone and the title screen does not mention it.
 lobbies:
   enabled: true
+  # How many proxies stand between the browsers and the pod, so that the server knows whose address is whose
+  # when it limits how often one address may guess at lobby codes. Left empty: 1 with the ingress on (the
+  # ingress controller), 0 without. Set it to 2 if something else is in front of the ingress as well (a CDN).
+  proxies:
 
 # What this server calls itself in the bug reports filed from the game: with "Official server", a report's
 # "How you played" reads "Official server · Online at <host>/". Empty, it gives the address alone.

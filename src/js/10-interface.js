@@ -45,7 +45,7 @@ function initializeInterface() {
     'button-ending-uncharted', 'station-options', 'work-order-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem',
     'title-build', 'link-report-problem-title',
     'together-options', 'together-apart', 'together-lobby', 'together-lobby-code', 'together-code', 'together-status',
-    'button-host-lobby', 'button-join-lobby', 'button-leave-lobby'
+    'button-host-lobby', 'button-join-lobby', 'button-leave-lobby', 'button-lock-lobby'
   ];
   for (const elementId of elementIds) interfaceState.elements[elementId] = getElement(elementId);
 
@@ -988,7 +988,8 @@ function showDeathScreen(kind) {
   const isForOthersToUndo = isWorldShared();
   if (isForOthersToUndo) {
     const paragraph = document.createElement('p');
-    paragraph.textContent = game.isDescentLost ? 'Nobody is left to carry anybody back. This descent is over.'
+    paragraph.textContent = game.isLeftBehind ? 'The car has gone up without you. Nobody carried your scanner back, and this descent is over for you.'
+      : game.isDescentLost ? 'Nobody is left to carry anybody back. This descent is over.'
       : 'Your scanner lies where you fell, still lit. If one of the others carries it to the lift, or into an open salvage bay, it restarts.';
     lines.appendChild(paragraph);
   } else if (!game.difficulty.checkpointsEnabled) {

@@ -36,6 +36,7 @@ const game = {
   hasShownHollowHint: false,
   hasShownVentHint: false,
   isDescentLost: false,          // down there with others: every one of you is down, and nobody is left to carry anybody back
+  isLeftBehind: false,           // down there with others: the car has gone up with those on their feet, and you were not one of them
   actor: null,                   // somebody else whose action is being carried out here right now, or null: getActingPlayer
   hasShownNoisyFloorHint: false, // the first time something loose underfoot gives you away, you are told what it was
   attract: { yaw: -0.9, pitch: 0, timer: 0, sweepTimer: 4, sweepProgress: -1, rayBudget: 0, centerRange: -1 }
@@ -152,6 +153,7 @@ function resetWorldState() {
   game.interference = 0; game.danger = 0;
   game.hasShownHollowHint = false;
   game.isDescentLost = false;
+  game.isLeftBehind = false;
   game.hasShownVentHint = false;
   game.hasShownNoisyFloorHint = false;
   noisyFloorCounts.byPlayer = 0; noisyFloorCounts.byPlayerCrouched = 0; noisyFloorCounts.byHollow = 0;
@@ -688,9 +690,16 @@ function noteLiftLeft() {
   fireGameEvent('leftLift'); // (the car is heard going up when its door is down: updateGameProgress)
 }
 
-// The car goes up.
+// The car goes up, with whoever is on their feet in it. Down there with others, somebody who is dead is not:
+// nobody carried their scanner back, and they are left behind. Their death screen says so, and that is where
+// their descent ends. (They used to be taken up with the rest: the ending, and a best time for it.)
 function beginAscent() {
   if (game.mode === 'ascending' || game.mode === 'ending' || game.mode === 'title') return;
+  if (isWorldShared() && (game.mode === 'dead' || game.mode === 'dying')) {
+    game.isLeftBehind = true;
+    if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // (still dying: it says so when that is over)
+    return;
+  }
   if (game.mode !== 'playing') { stopVoiceLine(); suspendAudio(false); showOnlyScreen(null); setHudVisible(true); } // whatever you were at
   game.mode = 'ascending';
   game.ascentTimer = 0;
@@ -752,7 +761,10 @@ function updateGameProgress(dt) {
 
   // The car goes up with everyone who is still on their feet in it. Alone, that is you. Down there with others
   // it waits for all of you, and it is the host's game that says when (the list of players is the host's).
-  if (flags.liftArrived && !isWorldTheHosts()) {
+  // (And not with nobody: when every one of you is down the list is you alone, so that it is never empty, and
+  // a host who lay dead in the car used to send it up.)
+  const isSomebodyOnTheirFeet = (game.mode !== 'dying' && game.mode !== 'dead') || players.some(function (one) { return one !== player; });
+  if (flags.liftArrived && !isWorldTheHosts() && isSomebodyOnTheirFeet) {
     let isEveryoneAboard = true;
     for (const one of players) {
       if (!(one.x > LIFT_CAR_BOUNDS.minimumX + 0.3 && one.x < LIFT_CAR_BOUNDS.maximumX - 0.3 &&
@@ -859,8 +871,8 @@ function updateAscending(dt) {
     setGeneratorSoundRunning(false);
     for (const definition of QUESTS) if (definition.reset) definition.reset(); // anything of a quest that is still making a noise
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
-    if (debugState.hasBeenUsedThisRun) {
-      game.statistics.bestTime = null; // a run with debug mode does not count
+    if (debugState.hasBeenUsedThisRun || isWorldShared()) {
+      game.statistics.bestTime = null; // a run with debug mode does not count, and neither does one with others: the best times are of descents made alone
     } else {
       try {
         // Best times are kept per threat level, and per station: a generated station only competes with itself.
@@ -1082,7 +1094,7 @@ function startApplication() {
     // Quests (09-quests.js): the descriptions, this station's, and the questions the game asks of them.
     quests: QUESTS, questItems: QUEST_ITEMS, findQuest: findQuest, isQuestUnfinished: isQuestUnfinished, getUnfinishedQuests: getUnfinishedQuests,
     getQuestChips: getQuestChips, fireGameEvent: fireGameEvent, dispatchCues: DISPATCH_CUES,
-    radioText: function (key) { return RADIO_MESSAGES[key]; }, clearMessages: clearMessages, closeReader: closeReader,
+    radioText: function (key) { return RADIO_MESSAGES[key]; }, clearMessages: clearMessages, showMessage: showMessage, updateGameProgress: updateGameProgress, playLooseObjectFlingSound: playLooseObjectFlingSound, closeReader: closeReader,
     // Does a quest the way a player would, thing by thing (fetching what a machine needs first), wherever the player stands.
     doQuest: function (key) {
       const instance = findQuest(key);
