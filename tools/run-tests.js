@@ -32,7 +32,8 @@ for (const name of givenNames) {
 const suitesToRun = givenNames.length > 0 ? SUITES.filter(function (name) { return givenNames.indexOf(name) >= 0; }) : SUITES;
 
 function formatSeconds(seconds) {
-  return seconds >= 90 ? Math.floor(seconds / 60) + ' min ' + Math.round(seconds % 60) + ' s' : Math.round(seconds) + ' s';
+  const whole = Math.round(seconds);
+  return whole >= 90 ? Math.floor(whole / 60) + ' min ' + (whole % 60) + ' s' : whole + ' s';
 }
 
 // Runs one suite, with what it says going straight to the screen. Returns whether it passed and how long it took.

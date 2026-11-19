@@ -973,6 +973,7 @@ function performAction(action) {
 // loose thing like any other, with its light still on. One of the others carries it to the lift (to within
 // TOGETHER_RESTART_METRES of the car) or into a salvage bay that stands open, and puts it down. When it has
 // lain there for TOGETHER_RESTART_SECONDS it restarts, loudly, and its owner is on their feet where it lay.
+// It has to have been carried: somebody must have had it in their beam. Falling at the lift is not a way back.
 // A scanner lost down the shaft is lost, and so is its owner, for this descent. When every one of you is down,
 // nobody is left to carry anybody, and the descent is over.
 
@@ -1010,9 +1011,11 @@ function updateFallenScanners(dt) {
   if (game.isDescentLost) return;
   for (const object of looseObjects) {
     if (!object.fallenPlayerId) continue;
-    let canRestart = !object.heldById && distanceOutsideLiftCar(object.x, object.z) < TOGETHER_RESTART_METRES;
+    // Carried there: one that somebody has had in their beam. A scanner that simply lies where its owner fell
+    // does not restart for lying near the lift, or dying within reach of the car would cost three seconds.
+    let canRestart = object.wasHandled && !object.heldById && distanceOutsideLiftCar(object.x, object.z) < TOGETHER_RESTART_METRES;
     const bay = findOpenHaulBay();
-    if (!object.heldById && bay && isLooseObjectInHaulBay(object, bay)) canRestart = true;
+    if (object.wasHandled && !object.heldById && bay && isLooseObjectInHaulBay(object, bay)) canRestart = true;
     object.restartSeconds = canRestart ? object.restartSeconds + dt : 0;
     if (object.restartSeconds >= TOGETHER_RESTART_SECONDS) { decideAction(together.myId, { what: 'restart', id: object.id }); return; }
   }
@@ -1047,9 +1050,16 @@ function performLooseAction(action) {
     if (object.heldById && isWorldShared()) return; // somebody was quicker
     object.heldById = actingId; object.ownerId = actingId;
     object.wasHandled = true; object.isIgnoredByHollow = false; object.lastHandledTime = game.time;
-    if (game.actor) wakeLooseObject(object);
+    // Somebody else's: awake here, and so is what rests on it, as when you take a thing yourself. What is in a
+    // crate has to be awake to go on riding in it: asleep, it is counted as riding for a fifth of a second and
+    // then left standing where it was, unless the crate's first move happened to arrive sooner than that. Between
+    // two windows on one machine it did; with a real distance between the two browsers it would not have.
+    if (game.actor) { wakeLooseObject(object); wakeLooseObjectsTouching(object); }
     else if (!pickUpLooseObjectNow(object, action.isByButton)) askToAct({ what: 'release', id: object.id }); // (your beam has something else by now)
     if (object.heldById) noteWhatRestsOnLooseObject(object); // what is in a crate goes where the crate goes, from now
+    // Yours, and with things in it that another browser moves: they are asked for now, while they count as
+    // riding, and not at the next turn of the clock that asks (claimWhatRidesInYourBeam).
+    if (!game.actor && object.heldById && isWorldShared()) claimWhatRidesInYourBeam();
   } else if (action.what === 'release') {
     if (object.heldById === actingId) object.heldById = 0;
   } else if (action.what === 'carry') {

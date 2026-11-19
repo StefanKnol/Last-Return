@@ -843,6 +843,21 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // One of you is dead and nobody carried their scanner back: the car goes up with those on their feet, and
   // the dead one is left behind. (They used to be taken up too: the ending, and a best time for it.)
   for (let count = 0; count < 40 && await b.evaluate(() => window.lastReturnDebug.game.mode !== 'dead'); count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  // They fell in the lift car, so their scanner lies where a carried one restarts. It has not been carried: it
+  // does not restart for lying there, however long. (All in one go in the host's game: on a slow machine the
+  // seconds would pass between two steps of this check anyway, and did, which is how this was found.)
+  await a.waitForFunction(() => window.lastReturnDebug.looseObjects.some((object) => object.fallenPlayerId), null, { timeout: 8000 }).catch(() => {});
+  const fellAtTheLift = await a.evaluate(() => {
+    const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.fallenPlayerId)[0], other = d.together.others[0];
+    if (!scanner) return null;
+    const result = { metresFromTheCar: Math.hypot(scanner.x - d.playerStart.x, scanner.z - d.playerStart.z), wasHandled: scanner.wasHandled };
+    d.hollow.isActive = false;
+    for (let count = 0; count < 12; count++) d.updateTogether(0.5); // six seconds; a carried one takes three
+    result.stillLies = d.looseObjects.indexOf(scanner) >= 0; result.ownerIsDown = other.isDown; result.restartSeconds = scanner.restartSeconds;
+    return result;
+  });
+  check('a scanner that lies at the lift because its owner fell there does not restart: it has to have been carried',
+    fellAtTheLift !== null && fellAtTheLift.metresFromTheCar < 2 && !fellAtTheLift.wasHandled && fellAtTheLift.stillLies && fellAtTheLift.ownerIsDown && fellAtTheLift.restartSeconds === 0, fellAtTheLift);
   await a.evaluate(() => {
     const d = window.lastReturnDebug;
     d.hollow.isActive = false;
