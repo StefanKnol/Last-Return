@@ -189,6 +189,8 @@ const SOUND_BOARD_ENTRIES = [
     stop: function () { setExtraGeneratorSoundRunning(0, false, 0, 0); } },
   { group: 'Doors and machinery', key: 'valve', level: 'valve', label: 'An isolation valve is driven shut', hint: 'The squeal of an actuator that has not turned in years, then the thud as the valve seats.', seconds: 2, hasPlace: true,
     play: function () { playValveSound(getSoundBoardListenerX(), getSoundBoardSourceZ()); } },
+  { group: 'Doors and machinery', key: 'fuelPour', level: 'fuelPour', label: 'A fuel can pours into a day tank', hint: 'Half a second of it, as it is heard again and again for as long as the can is held against a generator. This is with the tank half full: the glugs rise as it fills.', seconds: 0.8, hasPlace: true,
+    play: function () { playFuelPourSound(getSoundBoardListenerX(), getSoundBoardSourceZ(), 0.5); } },
   { group: 'Doors and machinery', key: 'liftMachinery', level: 'liftMachinery', label: 'Lift machinery, the car on its way down', seconds: 2, hasPlace: true,
     start: function () { setLiftMachinerySound(0.85); },
     stop: function () { setLiftMachinerySound(0); } },

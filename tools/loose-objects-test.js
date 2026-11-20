@@ -1614,7 +1614,7 @@ function installLab() {
         else entry.lowestSurface = Math.min(entry.lowestSurface, surface.maximumY - d.getFloorHeightAt(surface.centerX, surface.centerZ));
       });
       entry.lowestSurface = Math.round(entry.lowestSurface * 100) / 100;
-      const signature = JSON.stringify(d.stationLooseObjects);
+      const signature = JSON.stringify([d.stationLooseObjects, d.questLooseObjects]);
       // Wake every one of them: put down as it would lie, none of them should stir, and none should make a sound.
       const noises = []; d.debugHooks.recordNoise = function (x, z, radius) { noises.push(radius); };
       const before = d.looseObjects.map((object) => [object.x, object.y, object.z, object.orientationX, object.orientationY, object.orientationZ, object.orientationW]);
@@ -1633,7 +1633,7 @@ function installLab() {
       d.removeLooseObject(d.looseObjects[1]);
       d.simulate(0.5);
       d.loadStation.apply(null, station);
-      entry.sameAgain = JSON.stringify(d.stationLooseObjects) === signature && d.looseObjects.length === entry.total &&
+      entry.sameAgain = JSON.stringify([d.stationLooseObjects, d.questLooseObjects]) === signature && d.looseObjects.length === entry.total &&
         d.looseObjects.every((object, index) => object.isAsleep && Math.hypot(object.x - before[index][0], object.y - before[index][1], object.z - before[index][2]) < 1e-6);
       result[station.join(' ')] = entry;
     }

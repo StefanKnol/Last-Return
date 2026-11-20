@@ -55,6 +55,7 @@ const SOUND_LEVELS = {
   extraGeneratorStart: 1,   // one of the small generators (1, 3, 4): a pull of its starter and the catch
   extraGeneratorRunning: 1, // ... and its engine running, a higher and busier note than Generator 2
   valve: 1,                 // an isolation valve driven shut: the squeal of its actuator and the thud as it seats
+  fuelPour: 1,              // a fuel can running out into a day tank: the glug of it, and the can's own boom
   liftMachinery: 1,       // arriving, leaving, on its way down
   liftBell: 1,
 
@@ -1719,6 +1720,25 @@ function playValveSound(x, z) {
   // Seated.
   playNoiseBurst({ duration: 0.22, filterType: 'bandpass', frequency: 240, resonance: 2, gain: 1.3 * level, attack: 0.004, delay: 1.5, destination: panner });
   playTone({ waveform: 'triangle', frequency: 170, frequencyEnd: 110, duration: 0.3, gain: 0.6 * level, attack: 0.004, delay: 1.5, destination: panner });
+}
+
+// A fuel can running out into a day tank, half a second of it: two or three glugs of air going up into the
+// can, the splash of what comes down, and the can's own sheet metal booming as it empties. `tankShare` is how
+// full the tank is (0 to 1): the glugs rise in pitch as it fills, as a bottle does under a tap.
+function playFuelPourSound(x, z, tankShare) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.9, z);
+  if (!panner) return;
+  const level = SOUND_LEVELS.fuelPour, pitch = 1 + 0.7 * clampNumber(tankShare, 0, 1);
+  const glugs = 2 + (Math.random() < 0.5 ? 1 : 0);
+  for (let glug = 0; glug < glugs; glug++) {
+    const delay = glug * (0.5 / glugs) + Math.random() * 0.04, frequency = (95 + Math.random() * 30) * pitch;
+    // The bubble: a low note that jumps up as it breaks.
+    playTone({ waveform: 'sine', frequency: frequency, frequencyEnd: frequency * 1.9, duration: 0.11, gain: 0.85 * level, attack: 0.012, delay: delay, destination: panner });
+    // The can's side giving as the air goes in.
+    playTone({ waveform: 'triangle', frequency: 210 + Math.random() * 25, frequencyEnd: 150, duration: 0.09, gain: 0.3 * level, attack: 0.004, delay: delay + 0.02, destination: panner });
+  }
+  // What comes down into the tank.
+  playNoiseBurst({ duration: 0.5, filterType: 'bandpass', frequency: 700 * pitch, frequencyEnd: 900 * pitch, resonance: 1.4, gain: 0.32 * level, attack: 0.05, destination: panner });
 }
 
 // Sets one of the small generators running or not, without the starter (used when a descent is picked up again).

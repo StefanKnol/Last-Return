@@ -1,7 +1,8 @@
-// Checks the generators a station can have besides Generator 2 (Generator 1, 3 and 4), and where fuel cans go:
-// how many a station gets, that a can is near the generator it is for, that a small generator only starts with
-// the mains on and fuel in its tank, that starting one brings the Hollow, that the lift waits for all of them,
-// and that the map shows brightly only what can be acted on now.
+// Checks the generators a station can have besides Generator 2 (Generator 1, 3 and 4), and fuel: how many
+// generators a station gets, that a fuel can is near the generator it is for, that the can is a loose thing
+// which is carried to a generator and runs out into its tank while it is held there, that a small generator
+// only starts with the mains on and its tank full, that starting one brings the Hollow, that the lift waits
+// for all of them, and that the map shows brightly only what can be acted on now.
 const { openGame, startGame, drawFrames } = require('./browser-harness.js');
 
 const failures = [];
@@ -62,7 +63,7 @@ function check(description, condition, detail) {
     const layouts = ['tight', 'mixed', 'sprawling', 'sparse'];
     const describe = function () {
       return d.level.mission.extraGenerators.map((generator) => [generator.objectId, generator.x, generator.z, generator.needsFuel, generator.fuelCanId].join(':')).join(' ') + ' | ' +
-        d.interactables.filter((thing) => thing.mapLabel === 'FUEL').map((thing) => [thing.objectId, thing.x, thing.z].join(':')).join(' ');
+        d.questLooseObjects.filter((thing) => thing.kindKey === 'fuelCan').map((thing) => [thing.questObjectId, thing.x, thing.z].join(':')).join(' ');
     };
     for (const size of ['small', 'medium', 'large', 'massive']) {
       const counts = [];
@@ -82,7 +83,15 @@ function check(description, condition, detail) {
         const plannedTanks = plan.needsItem.map((empty) => (empty ? 'empty' : 'full')).join(), builtTanks = generators.map((generator) => (generator.needsFuel ? 'empty' : 'full')).join();
         if (generators.length !== plan.count || builtTanks !== plannedTanks) result.notAsPlanned.push(size + ' ' + seed + ': planned ' + plannedTanks + ', built ' + builtTanks);
         for (const generator of generators) {
-          if (generator.needsFuel) result.cans.push(howPlaced(generator.x, generator.z, d.findInteractable(generator.fuelCanId), size + ' ' + seed));
+          if (!generator.needsFuel) continue;
+          const can = d.findQuestItem(generator.fuelCanId), stand = d.findWalkableSpotNear(generator.x, generator.z);
+          d.teleport(stand.x, stand.z, 0);
+          result.canSteps.push(d.stepsFromPlayerTo(can.x, can.z));
+        }
+        if (d.level.mission.needsFuel) {
+          const can = d.findQuestItem(d.missionObjectIds.fuelCan), stand = d.findWalkableSpotNear(d.generator.x, d.generator.z);
+          d.teleport(stand.x, stand.z, 0);
+          result.mainCanSteps.push(d.stepsFromPlayerTo(can.x, can.z));
         }
         if (d.level.mission.needsFuel) result.mainCans.push(howPlaced(d.generator.x, d.generator.z, d.findInteractable(d.missionObjectIds.fuelCan), size + ' ' + seed));
       }
@@ -103,7 +112,7 @@ function check(description, condition, detail) {
     d.loadStation('generated', sameSeed, 'massive', 'mixed', 'two', undefined, ['restart']);
     result.sameSeedSame = describe() === first;
     d.loadStation('classic', 0);
-    result.classic = { generators: d.level.mission.extraGenerators.length, cans: d.interactables.filter((thing) => thing.mapLabel === 'FUEL').length,
+    result.classic = { generators: d.level.mission.extraGenerators.length, cans: d.looseObjects.filter((thing) => thing.kindKey === 'fuelCan').length + d.getFuelTanks().length,
       problems: d.auditLayout().concat(d.auditProgression()) };
     return result;
   });
@@ -153,21 +162,50 @@ function check(description, condition, detail) {
       const thirsty = found.generators.filter((generator) => generator.needsFuel)[0], ready = found.generators.filter((generator) => !generator.needsFuel)[0];
       const messages = () => Array.from(document.querySelectorAll('#hud-messages .hud-message')).map((element) => element.textContent).join(' | ');
       const wanted = (objectId) => d.isInteractableWantedNow(d.findInteractable(objectId));
+      // A can is on your map once your scanner has been on it (or you have had it in the beam), for as long as it
+      // has fuel in it; it shows brightly while some tank could take it.
+      const canOnMap = (questObjectId) => { const can = d.findQuestItem(questObjectId); d.noteLooseObjectScanned(can); return d.getQuestItemKeyOfLooseObject(can) === 'fuel' && d.isFuelWantedNow(); };
+      const noises = []; d.debugHooks.recordNoise = function (x, z, radius) { noises.push({ x: x, z: z, radius: radius }); };
       d.setDebugOption('invulnerable', true);
       d.hollow.isActive = false;
       flags.hasLeftLift = true;
 
       // Before the mains is on.
-      result.beforeMains = { wantedOnMap: { generator2: wanted(2), small: wanted(ready.objectId), ownCan: wanted(ids.fuelCan), terminal: wanted(1), spool: wanted(3) } };
+      const ownCan = d.findQuestItem(ids.fuelCan), otherCan = d.findQuestItem(thirsty.fuelCanId);
+      result.cans = { own: [ownCan.kindKey, ownCan.fuel, d.getLooseObjectLabel(ownCan), ownCan.isAsleep], other: [otherCan.kindKey, otherCan.fuel],
+        noThingToPress: d.findInteractable(ids.fuelCan) === null && d.findInteractable(thirsty.fuelCanId) === null,
+        unknownUntilScanned: d.getQuestItemKeyOfLooseObject(ownCan) === '' };
+      result.beforeMains = { wantedOnMap: { generator2: wanted(2), small: wanted(ready.objectId), ownCan: canOnMap(ids.fuelCan), terminal: wanted(1), spool: wanted(3) } };
       d.use(ready.objectId);
       result.beforeMains.refused = flags.extraGeneratorsRunning === 0 && /no control power/.test(messages());
-      // Any can fills any tank: the can meant for a small generator starts Generator 2, and you carry one at a time.
+      // Any can fills any tank: the can meant for a small generator is carried to Generator 2. Held against the
+      // set for two seconds and taken away again, part of it is in the tank and the rest still in the can; the
+      // generator will not start on that. Brought back, the rest goes in, and the can is an empty can.
       d.use(2);
-      result.generator2 = { refusedEmpty: !flags.powerOn };
-      d.use(thirsty.fuelCanId);
-      result.generator2.tookTheOtherCan = flags.hasFuel === true;
-      d.use(ids.fuelCan);
-      result.generator2.secondCanRefused = d.findInteractable(ids.fuelCan).isAvailable === true && /already carrying/.test(messages());
+      result.generator2 = { refusedEmpty: !flags.powerOn && /day tank empty/.test(messages()) };
+      const firstPour = d.carryFuelToTank(thirsty.fuelCanId, 0, 2);
+      // (The beam holds one thing: with a can in it, another is not taken.)
+      result.generator2.secondCanNotTaken = d.pickUpLooseObject(ownCan, false) === false && d.getHeldLooseObject() === otherCan;
+      const away = d.findWalkableSpotNear(ownCan.x, ownCan.z);
+      d.teleport(away.x, away.z, 0);
+      otherCan.x = d.player.x; otherCan.y = d.getPlayerEyeY() - 0.3; otherCan.z = d.player.z; otherCan.velocityX = 0; otherCan.velocityY = 0; otherCan.velocityZ = 0;
+      const tankOfGenerator2 = d.getFuelTanks().filter((tank) => tank.object.objectId === 0)[0];
+      d.simulate(1.5);
+      result.generator2.partly = { poured: firstPour, tankAfterwards: tankOfGenerator2.object.fuel, canAfterwards: otherCan.fuel, label: d.getLooseObjectLabel(otherCan), carrying: flags.hasFuel,
+        // (However many splashes went in, the screen has one line about it, with the number counting up in it.)
+        linesAboutFilling: Array.from(document.querySelectorAll('#hud-messages .hud-message')).filter((element) => /filling the day tank/.test(element.textContent)).length };
+      d.clearMessages();
+      d.use(2);
+      result.generator2.refusedPartly = !flags.powerOn && /day tank \d+ % full\. It will not start on that/.test(messages());
+      const noisesBefore = noises.length;
+      const secondPour = d.carryFuelToTank(thirsty.fuelCanId, 0);
+      result.generator2.filled = { poured: secondPour, quest: d.isQuestUnfinished('fuel'), objective: d.game.objectiveText, carrying: flags.hasFuel, said: /GENERATOR 2: day tank full\. The can is empty/.test(messages()),
+        noises: noises.slice(noisesBefore).map((noise) => [Math.round(Math.hypot(noise.x - tankOfGenerator2.x, noise.z - tankOfGenerator2.z) * 10) / 10, noise.radius]),
+        heardFromMetres: d.tuning.noiseRadiusFuelPour * d.game.difficulty.hearingFactor };
+      // The empty can is let go of: it stays where it falls, is nothing to any tank, and is off the map.
+      const emptied = d.releaseHeldLooseObject(0);
+      d.simulate(1);
+      result.generator2.emptyCan = { kind: emptied.kindKey, stillThere: d.looseObjects.indexOf(emptied) >= 0, mass: emptied.kind.mass, worth: emptied.kind.value, onMap: d.getQuestItemKeyOfLooseObject(emptied), tank: d.findFuelTankAt(emptied.x, emptied.y, emptied.z) };
       d.use(2);
       result.generator2.started = flags.powerOn === true && flags.hasFuel === false;
       d.hollow.isActive = false;
@@ -186,7 +224,7 @@ function check(description, condition, detail) {
       d.hollow.isActive = false;
 
       // With the mains on.
-      result.afterMains = { wantedOnMap: { generator2Gone: d.findInteractable(2).isAvailable === false, ready: wanted(ready.objectId), thirsty: wanted(thirsty.objectId), can: wanted(ids.fuelCan), terminal: wanted(1) } };
+      result.afterMains = { wantedOnMap: { generator2Gone: d.findInteractable(2).isAvailable === false, ready: wanted(ready.objectId), thirsty: wanted(thirsty.objectId), can: canOnMap(ids.fuelCan), terminal: wanted(1) } };
       d.use(thirsty.objectId);
       result.emptyTank = { refused: flags.extraGeneratorsRunning === 0 && /day tank empty/.test(messages()) };
       d.grantSpools();
@@ -215,22 +253,23 @@ function check(description, condition, detail) {
         hollowState: d.hollow.state, goesTo: [d.hollow.targetX, d.hollow.targetZ], generatorAt: [ready.x, ready.z],
         running: flags.extraGeneratorsRunning, gone: d.findInteractable(ready.objectId).isAvailable === false };
       d.hollow.isActive = false;
-      // Standing right at it, the Hollow knows where you are.
-      d.use(ids.fuelCan);
-      const near = d.findWalkableSpotNear(thirsty.x + 4, thirsty.z);
-      const stand2 = d.findWalkableSpotNear(thirsty.x, thirsty.z);
-      d.teleport(stand2.x, stand2.z, 0); d.simulate(0.1);
-      d.spawnHollow(near.x, near.z); d.hollow.graceTimer = 0; d.hollow.state = 0;
+      // The one with the empty tank gets the other can (Generator 2's own, which nothing has used). With it in the
+      // beam the objective says so and the generator shows brightly. Filled, it starts; standing right at it, with
+      // the Hollow four metres off, starting it is being found.
+      const pourForSmall = d.carryFuelToTank(ids.fuelCan, thirsty.objectId, 0.01);
       result.objectiveWithCan = d.game.objectiveText;
       result.thirstyWantedWithCan = wanted(thirsty.objectId);
+      const filledSmall = d.carryFuelToTank(ids.fuelCan, thirsty.objectId);
+      const near = d.findWalkableSpotNear(thirsty.x + 4, thirsty.z);
+      d.spawnHollow(near.x, near.z); d.hollow.graceTimer = 0; d.hollow.state = 0;
       d.use(thirsty.objectId);
-      result.close = { hollowMetres: Math.round(Math.hypot(near.x - thirsty.x, near.z - thirsty.z) * 10) / 10, hollowState: d.hollow.state, fuelUsed: flags.hasFuel === false, running: flags.extraGeneratorsRunning };
+      result.close = { hollowMetres: Math.round(Math.hypot(near.x - thirsty.x, near.z - thirsty.z) * 10) / 10, hollowState: d.hollow.state, fuelUsed: flags.hasFuel === false && filledSmall.isFull, running: flags.extraGeneratorsRunning,
+        inTheBeamAtFirst: pourForSmall.isInTheBeam };
       d.hollow.isActive = false;
 
       // The rest, then the lift.
-      for (const generator of found.generators) {
-        if (d.findInteractable(generator.objectId).isAvailable) { if (generator.needsFuel) d.use(generator.fuelCanId); d.use(generator.objectId); d.hollow.isActive = false; }
-      }
+      d.doQuest('generators');
+      d.hollow.isActive = false;
       result.all = { running: flags.extraGeneratorsRunning, of: found.generators.length, missing: d.areGeneratorsMissing(), objective: d.game.objectiveText, terminalWanted: wanted(1), said: /the winch has its power/.test(messages()) };
       d.use(1);
       result.liftCalled = flags.uploadStarted === true;
@@ -240,24 +279,44 @@ function check(description, condition, detail) {
     await drawFrames(page, 8); // the screen's text is brought up to date a few times a second, and only while frames are drawn
     const chip = await inGame(() => document.getElementById('chip-extra').textContent);
 
+    check('a fuel can is a loose thing standing on its crate, full, with nothing to press: it is not on the map until your scanner has been on it',
+      rules.cans.own[0] === 'fuelCan' && rules.cans.own[1] === 1 && rules.cans.own[2] === 'fuel can' && rules.cans.own[3] === true && rules.cans.other[0] === 'fuelCan' &&
+      rules.cans.noThingToPress && rules.cans.unknownUntilScanned, rules.cans);
     check('before the mains is on: a small generator will not start, and the map shows Generator 2 and its can brightly; the small one, the terminal and a spool (nobody asked for those on this order) dimly',
       rules.beforeMains.refused && rules.beforeMains.wantedOnMap.generator2 && rules.beforeMains.wantedOnMap.ownCan && !rules.beforeMains.wantedOnMap.spool &&
       !rules.beforeMains.wantedOnMap.small && !rules.beforeMains.wantedOnMap.terminal, rules.beforeMains);
-    check('any can fills any tank, and you carry one at a time: the can left for a small generator starts Generator 2, and a second can is refused meanwhile',
-      rules.generator2.refusedEmpty && rules.generator2.tookTheOtherCan && rules.generator2.secondCanRefused && rules.generator2.started, rules.generator2);
+    const partly = rules.generator2.partly, filled = rules.generator2.filled;
+    check('a full can is heavy, and you cannot run with it; with it in the beam the objective says where to take it, and the beam takes no second can',
+      partly.poured.isInTheBeam && partly.poured.carrySpeedFactor < 0.85 && partly.poured.canSprint === false && /hold it against/.test(partly.poured.objectiveWithCan) && rules.generator2.secondCanNotTaken, partly.poured);
+    check('held against Generator 2 for two seconds and taken away: part of it is in the tank, the rest is still in the can, nothing more goes in once it is away, and the generator will not start on that',
+      rules.generator2.refusedEmpty && partly.poured.tankAfter > 0.25 && partly.poured.tankAfter < 0.6 && Math.abs(partly.poured.tankAfter + partly.poured.fuelAfter - 1) < 0.001 &&
+      partly.tankAfterwards === partly.poured.tankAfter && partly.canAfterwards === partly.poured.fuelAfter && /fuel can, \d+ % full/.test(partly.label) && partly.carrying && rules.generator2.refusedPartly &&
+      partly.linesAboutFilling <= 1,
+      [partly, rules.generator2.refusedPartly]);
+    check('any can fills any tank: the can left for a small generator, brought back, fills Generator 2 (five seconds for a whole can), which says so; the objective is to start it',
+      filled.poured.isFull && filled.poured.tankAfter === 1 && filled.poured.fuelAfter === 0 && partly.poured.seconds + filled.poured.seconds >= 4 && partly.poured.seconds + filled.poured.seconds <= 6.5 &&
+      filled.quest === false && filled.said && /day tank is full\. Start Generator 2/.test(filled.objective) && !filled.carrying, filled);
+    // (Of the noises made meanwhile, those at the middle of the set: the can knocking against it as the beam
+    // brings it up is a knock like any other, heard from where it knocked.)
+    const pourNoises = filled.noises.filter((noise) => noise[0] < 0.01);
+    check('pouring is heard: once a second of it, at the generator, as far as a pour carries',
+      pourNoises.length >= 2 && pourNoises.length <= 4 && pourNoises.every((noise) => Math.abs(noise[1] - filled.heardFromMetres) < 0.01), [filled.noises, filled.heardFromMetres]);
+    check('the empty can does not vanish: it is an empty fuel can where it was let go of, a sixth of the weight, worth a little, off the map and nothing to any tank; and Generator 2 starts',
+      rules.generator2.emptyCan.kind === 'emptyFuelCan' && rules.generator2.emptyCan.stillThere && rules.generator2.emptyCan.mass < 2 && rules.generator2.emptyCan.worth > 0 &&
+      rules.generator2.emptyCan.onMap === '' && rules.generator2.emptyCan.tank === null && rules.generator2.started, rules.generator2.emptyCan);
     check('until Dispatch speaks the objective is the work order in its own words, with nothing counted or marked; some seconds after Generator 2 starts he says the lift needs the others and marks them, and the objective counts them',
       !rules.beforeTold.knows && !rules.beforeTold.marked && rules.beforeTold.objective === 'Get every generator running and shut the isolation valves.' &&
       rules.told.knows && rules.told.marked && rules.told.radio && /every generator running: 1 of/.test(rules.told.objective), [rules.beforeTold, rules.told]);
     check('with the mains on: the map shows the generator that can start and a can for the one that cannot, brightly; the empty one and the terminal dimly',
       rules.afterMains.wantedOnMap.generator2Gone && rules.afterMains.wantedOnMap.ready && rules.afterMains.wantedOnMap.can &&
       !rules.afterMains.wantedOnMap.thirsty && !rules.afterMains.wantedOnMap.terminal, rules.afterMains);
-    check('a small generator with an empty tank will not start without a can', rules.emptyTank.refused, rules.emptyTank);
+    check('a small generator with an empty tank will not start', rules.emptyTank.refused, rules.emptyTank);
     check('the lift terminal will not take the upload while a generator is not running, and says how many are', !rules.liftRefuses.started && !rules.liftRefuses.uploaded && rules.liftRefuses.said, rules.liftRefuses);
     check('starting one is loud: the Hollow twelve metres off, unaware, comes to look at that generator',
       rules.loud.running === 1 && rules.loud.gone && rules.loud.hollowMetres < rules.loud.heardFromMetres && rules.loud.hollowMetres > rules.loud.heardFromMetres * 0.3 &&
       rules.loud.hollowState === 1 && Math.hypot(rules.loud.goesTo[0] - rules.loud.generatorAt[0], rules.loud.goesTo[1] - rules.loud.generatorAt[1]) < 0.01, rules.loud);
-    check('carrying a can, the objective says so and the empty generator shows brightly; four metres from the Hollow, starting it is being found',
-      /carrying a fuel can/.test(rules.objectiveWithCan) && rules.thirstyWantedWithCan && rules.close.fuelUsed && rules.close.running === 2 && rules.close.hollowState === 2, [rules.objectiveWithCan, rules.close]);
+    check('carrying a can, the objective says so and the empty generator shows brightly; its tank filled, it starts, and four metres from the Hollow starting it is being found',
+      /carrying a fuel can/.test(rules.objectiveWithCan) && rules.thirstyWantedWithCan && rules.close.inTheBeamAtFirst && rules.close.fuelUsed && rules.close.running === 2 && rules.close.hollowState === 2, [rules.objectiveWithCan, rules.close]);
     check('with every generator running the winch has its power: the objective is the lift again, the terminal shows brightly, and it calls the lift',
       rules.all.running === rules.all.of && !rules.all.missing && rules.all.said && !/generator/i.test(rules.all.objective) && rules.all.terminalWanted && rules.liftCalled, rules.all);
     check('the screen counts them: GENERATORS ' + (found.generators.length + 1) + '/' + (found.generators.length + 1),
@@ -270,11 +329,46 @@ function check(description, condition, detail) {
       return { running: flags.extraGeneratorsRunning, knows: flags.knowsAboutGenerators, carrying: flags.hasFuel,
         available: found.generators.every((generator) => d.findInteractable(generator.objectId).isAvailable && !d.findInteractable(generator.objectId).isDiscovered),
         tanks: d.level.mission.extraGenerators.every((generator) => !generator.isRunning && !generator.isFilled),
-        cans: d.interactables.filter((thing) => thing.mapLabel === 'FUEL' && thing.isAvailable).length,
+        cans: d.looseObjects.filter((thing) => thing.kindKey === 'fuelCan' && thing.fuel === 1 && thing.isAsleep && Math.hypot(thing.x - thing.homeEntry.x, thing.z - thing.homeEntry.z) < 0.01).length,
+        emptyCans: d.looseObjects.filter((thing) => thing.kindKey === 'emptyFuelCan').length,
         cansWanted: found.generators.filter((generator) => generator.needsFuel).length + 1 };
     }, [found]);
-    check('a new descent: no generator running, every tank as it was, every can back, nothing marked',
-      again.running === 0 && !again.knows && !again.carrying && again.available && again.tanks && again.cans === again.cansWanted, again);
+    check('a new descent: no generator running, every tank empty as it was, every can full and back on its crate, nothing marked',
+      again.running === 0 && !again.knows && !again.carrying && again.available && again.tanks && again.cans === again.cansWanted && again.emptyCans === 0, again);
+
+    // --- a can pours where it is set down, with nothing in the beam; one that nobody has touched pours nowhere ---
+    const setDown = await inGame(() => {
+      const d = window.lastReturnDebug, ids = d.missionObjectIds, result = {};
+      d.hollow.isActive = false;
+      const can = d.findQuestItem(ids.fuelCan), tank = d.getFuelTanks().filter((candidate) => candidate.object.objectId === 0)[0];
+      // A place on the floor a hand's width from the set, on the side you can stand at.
+      const stand = d.findWalkableSpotNear(tank.x, tank.z);
+      const edgeX = Math.max(tank.minimumX, Math.min(stand.x, tank.maximumX)), edgeZ = Math.max(tank.minimumZ, Math.min(stand.z, tank.maximumZ));
+      const away = Math.hypot(stand.x - edgeX, stand.z - edgeZ) || 1;
+      const beside = { x: edgeX + (stand.x - edgeX) / away * 0.25, z: edgeZ + (stand.z - edgeZ) / away * 0.25 };
+      const putThere = function () {
+        can.x = beside.x; can.z = beside.z; can.y = d.getFloorHeightAt(stand.x, stand.z) + 0.22;
+        can.velocityX = 0; can.velocityY = 0; can.velocityZ = 0; d.setLooseObjectYaw(can, 0); d.wakeLooseObject(can);
+      };
+      // As if its crate stood right there: a can nobody has had in the beam pours nowhere.
+      d.teleport(stand.x, stand.z, 0);
+      putThere();
+      d.simulate(2);
+      result.untouched = { tank: tank.object.fuel, can: can.fuel, atTheSet: d.findFuelTankAt(can.x, can.y, can.z) === tank };
+      // Taken into the beam, let go of, and lying in the same place: it pours, and the beam is free meanwhile.
+      d.pickUpLooseObject(can, false);
+      d.releaseHeldLooseObject(0);
+      putThere();
+      let seconds = 0;
+      while (!tank.object.isSupplied && seconds < 9) { d.simulate(0.25); seconds += 0.25; }
+      result.setDown = { seconds: seconds, tank: tank.object.fuel, can: can.fuel, kind: can.kindKey, inTheBeam: d.getHeldLooseObject() !== null, stillThere: Math.hypot(can.x - beside.x, can.z - beside.z) < 0.5 };
+      return result;
+    });
+    check('a fuel can that nobody has had in the beam pours nowhere, even right beside a generator',
+      setDown.untouched.atTheSet && setDown.untouched.tank === 0 && setDown.untouched.can === 1, setDown.untouched);
+    check('taken once and set down against the generator, it runs out into the tank where it lies, with nothing in your beam, and lies there empty',
+      setDown.setDown.tank === 1 && setDown.setDown.can === 0 && setDown.setDown.kind === 'emptyFuelCan' && !setDown.setDown.inTheBeam && setDown.setDown.stillThere &&
+      setDown.setDown.seconds >= 4 && setDown.setDown.seconds <= 6.5, setDown.setDown);
 
     // --- the lift terminal tells you if Dispatch has not yet ---
     const told = await inGame(() => {

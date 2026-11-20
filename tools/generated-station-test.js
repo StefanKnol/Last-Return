@@ -1,6 +1,6 @@
 // Checks the generated stations: that many of them can be built and finished,
 // that a seed always gives the same station, and that one of them plays from lift to lift.
-const { openGame, startGame, drawFrames } = require('./browser-harness.js');
+const { openGame, startGame, drawFrames, carryFuelToTank } = require('./browser-harness.js');
 
 const failures = [];
 function check(description, condition, detail) {
@@ -329,10 +329,11 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     await standNear(2);
     await inGame(() => window.lastReturnDebug.use(2));
     const refused = await inGame(() => ({ powerOn: window.lastReturnDebug.game.flags.powerOn, objective: window.lastReturnDebug.game.objectiveText }));
-    await standNear(missionIds.fuelCan);
-    await inGame((id) => window.lastReturnDebug.use(id), missionIds.fuelCan);
-    check('the generator will not start without the fuel can, and says so', refused.powerOn === false && /fuel/i.test(refused.objective) &&
-      (await inGame(() => window.lastReturnDebug.game.flags.hasFuel)) === true, refused);
+    // The can is a loose thing on a crate: it is taken into the beam, carried to the set and held against it.
+    const fuelled = await carryFuelToTank(page, missionIds.fuelCan, 0);
+    check('the generator will not start with an empty day tank, and says so; the fuel can is in reach, is carried to it in the beam, and runs out into the tank in about five seconds',
+      refused.powerOn === false && /fuel/i.test(refused.objective) && fuelled.reachToCan < 2 && fuelled.isInTheBeam && /hold it against/.test(fuelled.objectiveWithCan) &&
+      fuelled.isFull && fuelled.seconds >= 4 && fuelled.seconds <= 6.5 && fuelled.canIsNow === 'empty fuel can' && fuelled.isStillInTheBeam, [refused, fuelled]);
   }
   await standNear(2);
   const hollowWalk = await inGame(() => {
@@ -385,17 +386,19 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     const refused = await inGame(() => ({ started: window.lastReturnDebug.game.flags.uploadStarted, uploaded: window.lastReturnDebug.game.flags.spoolsUploaded,
       objective: window.lastReturnDebug.game.objectiveText }));
     let furthestReach = 0;
+    const notFuelled = []; // every can that did not fill the tank it was carried to, with what happened
     for (const generator of mission.extraGenerators) {
       if (generator.needsFuel) {
-        furthestReach = Math.max(furthestReach, await standNear(generator.fuelCanId));
-        await inGame((id) => window.lastReturnDebug.use(id), generator.fuelCanId);
+        const fuelled = await carryFuelToTank(page, generator.fuelCanId, generator.objectId);
+        furthestReach = Math.max(furthestReach, fuelled.reachToCan);
+        if (!fuelled.isFull) notFuelled.push(fuelled);
       }
       furthestReach = Math.max(furthestReach, await standNear(generator.objectId));
       await inGame((id) => { window.lastReturnDebug.use(id); window.lastReturnDebug.hollow.isActive = false; }, generator.objectId);
     }
-    check('the terminal will not call the lift until every generator is running; each can be walked to and started',
-      !refused.started && !refused.uploaded && /generator/i.test(refused.objective) && furthestReach < 2 &&
-      (await inGame(() => window.lastReturnDebug.game.flags.extraGeneratorsRunning)) === mission.extraGenerators.length, { refused: refused, furthestReach: furthestReach });
+    check('the terminal will not call the lift until every generator is running; each can be walked to and started, one with an empty tank once its can has been carried to it',
+      !refused.started && !refused.uploaded && /generator/i.test(refused.objective) && furthestReach < 2 && notFuelled.length === 0 &&
+      (await inGame(() => window.lastReturnDebug.game.flags.extraGeneratorsRunning)) === mission.extraGenerators.length, { refused: refused, furthestReach: furthestReach, notFuelled: notFuelled });
   }
   // Whatever else this station asks for before the upload (quests added since the checks above were written):
   // the terminal refuses for each in turn, and each of its things can be walked to and used.

@@ -73,11 +73,12 @@ function addKeycard(x, y, z, cardLevel) {
 // ---- Things for the extra jobs. Each stands on a spot the planner has checked is clear all round. ----
 
 // A fuel can on a low crate. `objectId` is OBJECT_FUEL_CAN (the one for Generator 2) unless another is given.
+// The crate is part of the station. The can is a loose thing standing on it (LOOSE_OBJECT_KINDS.fuelCan,
+// 08-loose-objects.js): it is put out after the station's own loose things (questLooseObjects), and knows the
+// number its quest gave it.
 function addFuelCan(x, z, objectId) {
   addBoxBetween(x - 0.3, 0, z - 0.3, x + 0.3, 0.3, z + 0.3);
-  const body = addBoxProp(x, 0.3 + 0.19, z, 0.16, 0.19, 0.11, { yaw: 0.4, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  const spout = addBoxProp(x + 0.07, 0.3 + 0.42, z + 0.03, 0.03, 0.04, 0.03, { yaw: 0.4, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  registerInteractable(objectId || OBJECT_FUEL_CAN, x, 0.55, z, 'Take the fuel can', [body, spout], { removeWhenUsed: true, mapLabel: 'FUEL' });
+  addQuestLooseObject('fuelCan', x, (placement.offsetY || 0) + 0.3, z, 0.4, objectId || OBJECT_FUEL_CAN);
 }
 
 // One of the generators a station has besides Generator 2: a set on a skid, small enough to stand in any room.
@@ -389,6 +390,9 @@ function furnishPumpHall(random) {
 
 // Generator room.
 function furnishGeneratorRoom(random) {
+  // The floor the set stands on, for a fuel can held against it (09-quests.js, "Fuel").
+  const bodyFrom = placePoint(69.9, 46.7), bodyTo = placePoint(73.5, 48.3);
+  level.generatorBody = { minimumX: Math.min(bodyFrom[0], bodyTo[0]), maximumX: Math.max(bodyFrom[0], bodyTo[0]), minimumZ: Math.min(bodyFrom[1], bodyTo[1]), maximumZ: Math.max(bodyFrom[1], bodyTo[1]) };
   addBoxBetween(69.9, 0, 46.7, 73.1, 1.7, 48.3, { surfaceClass: SURFACE_METAL });
   addBoxBetween(73.1, 0.2, 46.9, 73.5, 1.6, 48.1, { surfaceClass: SURFACE_METAL });
   addVerticalPipe(72.5, 47.5, 1.7, 3.5, 0.12, false);
