@@ -47,6 +47,17 @@ function createSeededRandomGenerator(seed) {
   };
 }
 
+// A sequence of random numbers that belongs to one named thing in one station. The same seed and the same name
+// give the same numbers every time; another name gives other numbers, whatever else has been drawn in between.
+// This is how something that happens during play is drawn without leaving it to chance: the name says what is
+// happening and where ("vent cover 3 thrown out"), so the same situation gets the same draw.
+// (The quests draw theirs this way too: createQuestRandom in 09-quests.js.)
+function createNamedRandomGenerator(seed, name) {
+  let hash = 2166136261;
+  for (let index = 0; index < name.length; index++) hash = Math.imul(hash ^ name.charCodeAt(index), 16777619);
+  return createSeededRandomGenerator((Math.imul(seed + 1, 0x9e3779b1) ^ hash) >>> 0);
+}
+
 function randomBetween(minimum, maximum) {
   return minimum + Math.random() * (maximum - minimum);
 }

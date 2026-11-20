@@ -1276,6 +1276,8 @@ function startApplication() {
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
     stationLooseObjects: stationLooseObjects, questLooseObjects: questLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
+    // The Hollow and a vent's cover: which way it would throw one (and how much room that way has), and the throw itself.
+    chooseVentCoverThrow: chooseVentCoverThrow, throwVentCoverFromHollow: throwVentCoverFromHollow, measureRoomForLooseObject: measureRoomForLooseObject,
     haulState: haulState, getHaulProgress: getHaulProgress, fillHaulBays: fillHaulBays, isLooseObjectInHaulBay: isLooseObjectInHaulBay, getHaulBayValue: getHaulBayValue, getLooseObjectWorth: getLooseObjectWorth, getLooseObjectTopY: getLooseObjectTopY, getLooseObjectValue: getLooseObjectValue, addBrokenGlassAt: addBrokenGlassAt, removeBrokenGlassFromPlay: removeBrokenGlassFromPlay,
     startOver: function () { resetWorldState(); }, // a new descent into the station that is loaded, as "Begin descent" does it
 
