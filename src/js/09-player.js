@@ -32,12 +32,15 @@ const player = {
   scannerDriftRight: 0, scannerDriftBack: 0,     // how far it has been left behind by your steps, in metres: to your right, and toward you
   eyeHeight: (TUNING.playerHeight * TUNING.playerEyeHeightToBody), // eyes above the floor you stand on
   floorY: 0,                           // height of that floor: 0 on the lift's level, negative further down
+  fallSpeed: 0,                        // how fast you are going down a drop, in metres per second (0: you are not)
   velocityX: 0, velocityZ: 0,
   stamina: 1,
   isStaminaLocked: false,
   timeSinceSprint: 9,
   isCrouching: false,
   isInVent: false,
+  health: TUNING.playerMaxHealth, // what is left of you: 0 is dead (09-health.js)
+  hurtGraceSeconds: 0,            // just hit: nothing can hit you again until this has run out
   isSprinting: false,
   isMoving: false,
   audibleRadius: 2.6,
@@ -151,6 +154,7 @@ function resetPlayerToStart() {
   steadyHeldScanner();
   player.stamina = 1; player.isStaminaLocked = false;
   player.heat = 0; player.isOverheated = false;
+  resetPlayerHealth();
   player.sweepTimeRemaining = 0;
   player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
   player.floorY = getFloorHeightAt(player.x, player.z);
@@ -473,8 +477,19 @@ function updatePlayerMovement(dt) {
   // Follow the floor. Stairs are taken smoothly; anything bigger (a teleport, a checkpoint) lands at once.
   // TWEAK: 2.5 = how fast the view rises and falls on stairs, in metres per second. Lower feels floatier.
   const floorHere = getFloorHeightAt(player.x, player.z);
-  if (Math.abs(floorHere - player.floorY) > 1) player.floorY = floorHere;
-  else player.floorY = approachValue(player.floorY, floorHere, dt * 2.5);
+  const isOverADrop = floorHere < player.floorY - MAXIMUM_STEP_HEIGHT && (getTileFlagsAtPosition(player.x, player.z) & TILE_FLAG_DROP) !== 0;
+  if (isOverADrop || (player.fallSpeed > 0 && floorHere < player.floorY)) {
+    // Over the edge of a drop (a vent that goes down to the lower level): you fall, and it is heard when you land.
+    // (Once falling you fall to the floor that is under you, wherever your crawling on has taken you meanwhile.)
+    player.fallSpeed += TUNING.playerFallAcceleration * dt;
+    player.floorY = Math.max(floorHere, player.floorY - player.fallSpeed * dt);
+    if (player.floorY === floorHere) {
+      player.fallSpeed = 0;
+      playFootstepSound(false, true, 1.6);
+      emitNoise(player.x, player.z, TUNING.noiseRadiusDropLanding);
+    }
+  } else if (Math.abs(floorHere - player.floorY) > 1) { player.floorY = floorHere; player.fallSpeed = 0; }
+  else { player.floorY = approachValue(player.floorY, floorHere, dt * 2.5); player.fallSpeed = 0; }
   const movedDistance = distanceBetweenPoints(previousX, previousZ, player.x, player.z);
   player.isMoving = movedDistance > dt * 0.3;
   game.statistics.distanceWalked += movedDistance;
@@ -611,15 +626,22 @@ function markInteractableDiscovered(objectId) {
 
 // Where the light that is being fired comes from, on the plan. A creature that is lit takes note of it: that
 // is the place it comes to, which is you when it is your scanner and somewhere else when it is not.
-const scanSource = { x: 0, z: 0 };
+// `object` is the loose thing the light comes out of when it is one that scans by itself (a scanner tripod, a
+// fallen scanner: fireScanCone, 09-scan-cone.js), and null for everybody's own scanner and everything else.
+const scanSource = { x: 0, z: 0, object: null };
 
 // Notes what a pulse has just landed on (it is in `rayHit`): the scan point, and what the game makes of it.
 function recordScanHit(drawBeam) {
   let lifeCode = 0;
   const figure = rayHit.figure;
   if (figure !== null) {
-    figure.beamSourceX = scanSource.x; figure.beamSourceZ = scanSource.z;
-    figure.hitsThisFrame++;
+    // The light of a scanner that the Hollow has been up to, and knows for a thing, is nothing to it any more
+    // (letHollowKnowScanner, 08-entities.js). It still leaves its points.
+    if (!(figure === hollow.figure && scanSource.object !== null && scanSource.object.isIgnoredByHollow)) {
+      figure.beamSourceX = scanSource.x; figure.beamSourceZ = scanSource.z;
+      figure.beamSourceObject = scanSource.object;
+      figure.hitsThisFrame++;
+    }
     figure.totalHits++;
     figure.lastScannedTime = game.time;
     lifeCode = convertSecondsToPointLifeCode(TUNING[figure.imprintTuningKey]);

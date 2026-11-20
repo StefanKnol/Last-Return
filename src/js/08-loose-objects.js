@@ -78,7 +78,7 @@ const LOOSE_OBJECT_KINDS = {
   // A scan grenade: arm it (Q), throw it, and where it lands it scans the room for you, all round. The light
   // stuns the Hollow if enough of it lands on it, and the noise brings it to where the grenade went off.
   scanGrenade: {
-    label: 'scan grenade', mass: 0.6, value: 0, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.3, grip: 0.6,
+    label: 'scan grenade', mass: 0.6, value: 15, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.3, grip: 0.6,
     parts: [
       { shape: 'capsule', from: [0, -0.045, 0], to: [0, 0.045, 0], radius: 0.04 },
       { shape: 'box', center: [0.05, 0.02, 0], half: [0.02, 0.05, 0.02] }
@@ -86,15 +86,41 @@ const LOOSE_OBJECT_KINDS = {
     use: { prompt: 'Arm the scan grenade', button: 'ARM', activate: armScanGrenade },
     update: updateScanGrenade
   },
+  // A scanner tripod: a scanner on three legs. Q with it in the beam switches it on or off; on, it scans what
+  // is in front of it, a pulse of light every second and a half, from wherever it is and whichever way it has
+  // come to face ("Scanners that scan by themselves", further down, and fireScanCone in 09-scan-cone.js). In
+  // the beam it hangs upright and faces the way you do, so it is put down facing what you want watched. Its
+  // battery lasts so long and no longer. A station has one or two. It is worth something to Salvage too,
+  // charged: use it or sell it. The light on its head is lit for as long as there is charge in it, so that it
+  // can be found in the dark.
+  scannerTripod: {
+    label: 'scanner tripod', mass: 2.4, value: 60, material: 'metal', loud: 1, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.8,
+    parts: [
+      { shape: 'capsule', from: [0, 0.4, 0], to: [0, 0.03, 0.22], radius: 0.018 },
+      { shape: 'capsule', from: [0, 0.4, 0], to: [0.19, 0.03, -0.11], radius: 0.018 },
+      { shape: 'capsule', from: [0, 0.4, 0], to: [-0.19, 0.03, -0.11], radius: 0.018 },
+      { shape: 'box', center: [0, 0.46, 0], half: [0.05, 0.045, 0.08] },
+      { shape: 'ball', center: [0, 0.46, -0.085], radius: 0.035 }
+    ],
+    // Its lens is the ball on the front of its head, looking the way a thing faces that has not been turned.
+    scans: { name: 'tripod', hasBattery: true, lens: [0, 0.46, -0.125], forward: [0, 0, -1], light: [0, 0.525, 0], gripInTheBeam: [0, 0, 0, 1] },
+    use: { prompt: 'Switch the tripod on', promptFor: describeLooseScannerSwitch, button: 'SWITCH', activate: switchLooseScanner },
+    update: updateLooseScanner
+  },
   // A scanner: what is left of a player who was caught, down there with others (11-together.js). Its light stays
   // on. Carried back to the lift, or into an open salvage bay, it is restarted and they are on their feet again.
-  // Nothing puts one in a station: one lies where somebody fell.
+  // Nothing puts one in a station: one lies where somebody fell. Until it is carried back it is a scanner
+  // still: Q with it in the beam switches it on, and it scans the way it points as a tripod does, with no legs
+  // to stand on and no battery to run down. (Its lens is the end away from the grip.)
   scanner: {
     label: 'scanner', mass: 1.4, value: 0, material: 'case', loud: 1, lies: 'either', bulky: false, bounce: 0.15, grip: 0.6,
     parts: [
       { shape: 'box', center: [0, 0, 0], half: [0.16, 0.05, 0.05] },
       { shape: 'capsule', from: [0.22,-0.215,0], to: [0.155,0, 0], radius: 0.05 },
-    ]
+    ],
+    scans: { name: 'scanner', hasBattery: false, lens: [-0.2, 0, 0], forward: [-1, 0, 0], light: [0, 0.07, 0], gripInTheBeam: [0, -Math.SQRT1_2, 0, Math.SQRT1_2] },
+    use: { prompt: 'Switch the scanner on', promptFor: describeLooseScannerSwitch, button: 'SWITCH', activate: switchLooseScanner },
+    update: updateLooseScanner
   },
   // A fuel can: ten litres of diesel for a generator whose day tank is empty (09-quests.js, "Fuel"). Held
   // against the generator, or set down against it, it runs out into the tank: updateFuelCan below. Full, it is
@@ -105,6 +131,13 @@ const LOOSE_OBJECT_KINDS = {
     label: 'fuel can', mass: 9, value: 0, material: 'metal', loud: 1, lies: 'upright', bulky: true, bounce: 0.1, grip: 0.7,
     parts: FUEL_CAN_PARTS,
     update: updateFuelCan
+  },
+  // A first aid kit: what mends you (09-health.js). Q with it in the beam uses it up. A station has a few,
+  // lying on the floor out of the way (planStationLooseObjects).
+  firstAidKit: {
+    label: 'first aid kit', mass: 1.2, value: 20, fragile: 0.3, material: 'case', loud: 0.8, lies: 'onItsSide', bulky: false, bounce: 0.15, grip: 0.6,
+    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.13, 0.09, 0.045] }, { shape: 'capsule', from: [-0.04, 0.1, 0], to: [0.04, 0.1, 0], radius: 0.012 }],
+    use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit }
   },
   // ... and what is left when it has run out: the same can, a sixth of the weight, and as loud as an empty can
   // is. Nothing needs it any more. It is worth a little to Salvage, and it is something to throw.
@@ -486,12 +519,17 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     worth: kind.value,                  // what it is worth now: less than kind.value once it has been knocked about
     scanHits: 0, isAppraised: false,    // how many pulses have landed on it, and whether that was enough for the scanner to read what it is worth
     wasHandled: false,                  // you have had it in the beam (and the Hollow has not flung it back since): only such things interest it
-    isIgnoredByHollow: false,           // the Hollow flung it: it knows that noise, and pays it no heed until you handle the thing again
+    isIgnoredByHollow: false,           // the Hollow flung it, or (a scanner) has been up to it: it knows that noise, and that light, and pays it no heed until you handle the thing again
     timesThrownBack: 0,                 // how many times the Hollow has thrown it back at you: each time is drawn by itself (flingLooseObjectFromHollow)
     // Down there with others (11-together.js): whose browser moves it (0: the host's), who has it in their beam (0: nobody),
     // and whether it was moving when its mover last said where it is.
     ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
+    looterIndex: -1,                    // which looter has it in its arms (08-looter.js), or -1: then it goes where that looter goes
     fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
+    // A scanner that scans by itself (a tripod, a fallen scanner): whether it is on, how much of its battery is left, the count to its next pulse, how much
+    // of the pulse that is going out now is still to come, and what its light has fallen on since it was switched on.
+    isOn: false, batterySeconds: kindKey === 'scannerTripod' ? TUNING.tripodBatterySeconds : 0, pulseSeconds: 0, flashSeconds: 0, flashBudget: 0,
+    pulsesFired: 0, pulsesOnCreatures: 0, lastLitPlayerTime: -999,
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
     fuel: kindKey === 'fuelCan' ? 1 : 0, pourSeconds: 0, hasBeenTaken: false,
@@ -1572,6 +1610,8 @@ function multiplyLooseTurns(ax, ay, az, aw, bx, by, bz, bw) {
 
 // Notes how the object is turned compared with the way you face. The beam holds it like that from now on.
 function gripLooseObject(object) {
+  // (A thing that scans has a front: it is held the right way up with its lens the way you face.)
+  if (object.kind.scans) { const turn = object.kind.scans.gripInTheBeam; object.gripX = turn[0]; object.gripY = turn[1]; object.gripZ = turn[2]; object.gripW = turn[3]; return; }
   const grip = multiplyLooseTurns(0, -Math.sin(-player.yaw / 2), 0, Math.cos(-player.yaw / 2),
     object.orientationX, object.orientationY, object.orientationZ, object.orientationW);
   object.gripX = grip.x; object.gripY = grip.y; object.gripZ = grip.z; object.gripW = grip.w;
@@ -1935,6 +1975,7 @@ function pickUpLooseObject(object, isByButton) {
 
 function pickUpLooseObjectNow(object, isByButton) {
   if (looseState.held || !object || object.isRemoved) return false;
+  object.looterIndex = -1; // (out of a looter's arms, if it was in them: the looter finds out for itself)
   wakeLooseObject(object);
   wakeLooseObjectsTouching(object);
   object.isHeld = true;
@@ -2001,7 +2042,7 @@ function updateLooseCarryInput(dt) {
   if (input.wantsUseCarried) {
     input.wantsUseCarried = false;
     const carried = looseState.held;
-    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0) askToAct({ what: 'setOff', id: carried.id });
+    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0 && (!carried.kind.use.canUse || carried.kind.use.canUse(carried))) askToAct({ what: 'setOff', id: carried.id });
   }
   // The right mouse button: down on something in reach takes it into the beam, up lets it go as it is moving.
   if (input.isGrabHeld && !looseState.held && player.focusedLooseObject && !player.focusedLooseObject.isRemoved) {
@@ -2499,6 +2540,30 @@ function planStationLooseObjects() {
       isOnItsSide, lies === 'onItsSide' ? false : isTurnedTheOtherWay, 'floor');
     placed++;
   }
+  // First aid kits: a few to a station, on bare floor that is in nobody's way. They have numbers of their own,
+  // so that nothing else here is moved by how many of them there are.
+  const kitRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0xa1d417);
+  const kitsWanted = Math.max(1, Math.round(rooms * TUNING.firstAidKitsPerRoom));
+  let kits = 0;
+  for (; kits < kitsWanted && nextTile < tiles.length; nextTile++) {
+    if (tiles[nextTile][2] !== 1) continue;
+    const index = tiles[nextTile][1];
+    addStationLooseObject('firstAidKit', index % GRID_WIDTH + 0.3 + kitRandom() * 0.4, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.3 + kitRandom() * 0.4,
+      kitRandom() * TWO_PI, true, false, 'floor');
+    kits++;
+  }
+  level.firstAidKitCount = kits;
+  // Scanner tripods: one or two to a station, standing on bare floor that is in nobody's way. Numbers of their own again.
+  const tripodRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0x7217d0);
+  const tripodsWanted = Math.max(1, Math.round(rooms * TUNING.scannerTripodsPerRoom));
+  let tripods = 0;
+  for (; tripods < tripodsWanted && nextTile < tiles.length; nextTile++) {
+    if (tiles[nextTile][2] !== 1) continue;
+    const index = tiles[nextTile][1];
+    addStationLooseObject('scannerTripod', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, tripodRandom() * TWO_PI, false, false, 'floor');
+    tripods++;
+  }
+  level.scannerTripodCount = tripods;
   level.looseObjectCount = stationLooseObjects.length;
 }
 
@@ -2523,7 +2588,7 @@ function returnLooseObjectToWhereItStood(object) {
   changePointsOnLooseObject(object, 0); // the points on it stay where it was no longer
   wakeLooseObjectsTouching(object);
   if (looseState.held === object) { looseState.held = null; looseState.isLettingGo = false; looseState.lettingGoSeconds = 0; }
-  object.isHeld = false; object.heldById = 0; object.ownerId = 0; object.isLost = false; object.rideCrateId = 0;
+  object.isHeld = false; object.heldById = 0; object.ownerId = 0; object.isLost = false; object.rideCrateId = 0; object.looterIndex = -1;
   object.x = entry.x; object.y = entry.y; object.z = entry.z;
   setLooseObjectOrientation(object, entry.orientation[0], entry.orientation[1], entry.orientation[2], entry.orientation[3]);
   object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0;
@@ -2704,7 +2769,7 @@ function isPointInHaulBay(bay, x, z, margin) {
 }
 
 function isLooseObjectInHaulBay(object, bay) {
-  return !object.isHeld && !object.heldById && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
+  return !object.isHeld && !object.heldById && object.looterIndex < 0 && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
 }
 
 // What lies in a bay is worth this much.
@@ -3110,6 +3175,106 @@ function flingLooseObjectFromHollow(object) {
 }
 
 // ---------------------------------------------------------------------------
+// Scanners that scan by themselves: the scanner tripod, and the scanner of somebody who fell
+//
+// A kind with a `scans` is one: where its lens is and which way it looks (in the coordinates its parts are
+// given in), where the light on it is, how it is turned in the beam, and whether it has a battery. Both kinds
+// scan by the same numbers (TUNING.tripod...).
+// ---------------------------------------------------------------------------
+
+function describeLooseScannerSwitch(object) {
+  return 'Switch the ' + object.kind.scans.name + (object.isOn ? ' off' : ' on') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + '%' : '');
+}
+
+// Q, with it in the beam ('setOff', carried out in every browser): on, or off again.
+function switchLooseScanner(object) {
+  const name = object.kind.scans.name;
+  object.isOn = !object.isOn;
+  object.pulseSeconds = 0.5; object.flashSeconds = 0; object.flashBudget = 0;
+  if (object.isOn) { object.pulsesFired = 0; object.pulsesOnCreatures = 0; object.lastLitPlayerTime = -999; }
+  playTripodSound(object.isOn ? 'on' : 'off', object.x, object.y, object.z);
+  if (looseState.held === object) showMessage(object.isOn ? 'The ' + name + ' is on. Put it down facing what you want scanned.' : 'The ' + name + ' is off.', 4, 'info');
+}
+
+// A point of the object, given in the coordinates its parts are given in: where that is in the station now.
+function getLooseObjectPoint(object, point, into) {
+  const matrix = object.matrix, prepared = object.prepared;
+  const x = point[0] - prepared.centreX, y = point[1] - prepared.centreY, z = point[2] - prepared.centreZ;
+  into.x = object.x + matrix[0] * x + matrix[1] * y + matrix[2] * z;
+  into.y = object.y + matrix[3] * x + matrix[4] * y + matrix[5] * z;
+  into.z = object.z + matrix[6] * x + matrix[7] * y + matrix[8] * z;
+  return into;
+}
+
+// Where its light leaves it and which way, in the station, for how it stands or lies now. Fills `into`.
+function getLooseScannerLens(object, into) {
+  const matrix = object.matrix, forward = object.kind.scans.forward;
+  getLooseObjectPoint(object, object.kind.scans.lens, into);
+  into.directionX = matrix[0] * forward[0] + matrix[1] * forward[1] + matrix[2] * forward[2];
+  into.directionY = matrix[3] * forward[0] + matrix[4] * forward[1] + matrix[5] * forward[2];
+  into.directionZ = matrix[6] * forward[0] + matrix[7] * forward[1] + matrix[8] * forward[2];
+  return into;
+}
+const looseScannerScratch = { x: 0, y: 0, z: 0, directionX: 0, directionY: 0, directionZ: -1 };
+
+// Every frame, in every browser (the light is each game's own to draw, like your scanner's). On, it sends a
+// pulse of light out of its lens every so often: a cone of the scanner's pulses, spread over a fifth of a
+// second. Each pulse ticks, which is a noise (said by the game that moves the thing, so that it is one noise
+// however many of you there are). One with a battery counts it down while it is on, and is spent when it is flat.
+function updateLooseScanner(object, dt) {
+  if (!object.isOn || object.isSpent) return;
+  if (object.kind.scans.hasBattery) {
+    object.batterySeconds -= dt;
+    if (object.batterySeconds <= 0) {
+      object.batterySeconds = 0; object.isOn = false; object.isSpent = true;
+      object.worth = Math.min(object.worth, 10); // (flat, it is scrap)
+      playTripodSound('off', object.x, object.y, object.z);
+      if (looseState.held === object) showMessage('The ' + object.kind.scans.name + '\'s battery is flat.', 4, 'warning');
+      return;
+    }
+  }
+  // The Hollow, right up to it where it stands or lies: it finds out that this is a thing and not one of you,
+  // and from then on pays it no heed (letHollowKnowScanner, 08-entities.js). In somebody's beam it is theirs.
+  if (!object.isIgnoredByHollow && !isLooseObjectInABeam(object) && !isWorldTheHosts() && hollow.isActive && !isHollowInCrawlspace() &&
+      distanceBetweenPoints(hollow.figure.x, hollow.figure.z, object.x, object.z) < TUNING.hollowKnowsScannerMetres) letHollowKnowScanner(object);
+  object.pulseSeconds -= dt;
+  if (object.pulseSeconds <= 0) {
+    object.pulseSeconds += TUNING.tripodPulseEverySeconds;
+    object.flashSeconds = TUNING.tripodFlashSeconds;
+    playTripodSound('pulse', object.x, object.y, object.z);
+    showCaption('tripodPulse', { x: object.x, z: object.z });
+    if (!isLooseObjectAnothers(object)) emitNoise(object.x, object.z, TUNING.noiseRadiusTripodPulse);
+  }
+  if (object.flashSeconds <= 0) return;
+  object.flashBudget += TUNING.tripodPulseRays * Math.min(dt, object.flashSeconds) / TUNING.tripodFlashSeconds;
+  object.flashSeconds -= dt;
+  const pulses = Math.min(4000, Math.floor(object.flashBudget));
+  object.flashBudget -= pulses;
+  if (pulses <= 0) return;
+  const lens = getLooseScannerLens(object, looseScannerScratch);
+  const result = fireScanCone(lens.x, lens.y, lens.z, lens.directionX, lens.directionY, lens.directionZ, TUNING.tripodConeDegrees / 2, pulses, object);
+  object.pulsesFired += result.fired;
+  object.pulsesOnCreatures += result.onCreatures;
+  if (result.litPlayers.length > 0) object.lastLitPlayerTime = game.time;
+}
+
+// The light on every scanner that lies or stands about, or is being carried: the same light there is on the
+// scanner in another player's hand (SURFACE_SCANNER_LIGHT). It is not a return of anything: a few points that
+// last a quarter of a second, put down again every frame, so that a scanner can be found in the dark. A
+// tripod's is lit for as long as there is charge in it, on or off; a fallen scanner's always.
+const looseScannerLightScratch = { x: 0, y: 0, z: 0 };
+function showLooseScannerLights() {
+  for (const object of looseObjects) {
+    if (!object.kind.scans || object.isSpent || object.isRemoved) continue;
+    const light = getLooseObjectPoint(object, object.kind.scans.light, looseScannerLightScratch);
+    for (let count = 0; count < 3; count++) {
+      addScanPoint(light.x + (Math.random() - 0.5) * 0.03, light.y + (Math.random() - 0.5) * 0.02, light.z + (Math.random() - 0.5) * 0.03, 1, SURFACE_SCANNER_LIGHT, 1, true);
+    }
+    pointCloud.totalReturns -= 3;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The scan grenade
 // ---------------------------------------------------------------------------
 
@@ -3164,6 +3329,7 @@ function updateScanGrenade(object, dt) {
   object.burstSeconds += dt;
   if (object.burstSeconds >= TUNING.scanGrenadeBurstSeconds) {
     object.isSpent = true;
+    object.worth = Math.min(object.worth, 2); // (gone off, it is scrap)
     looseState.statistics.grenadesSpent++;
   }
 }
@@ -3211,6 +3377,7 @@ function sayNeededThingIsBack(object) {
 function getLooseObjectLabel(object) {
   if (object.kindKey === 'fuelCan' && object.fuel < 0.995) return object.kind.label + ', ' + Math.max(1, Math.round(object.fuel * 100)) + ' % full';
   if (object.isSpent) return 'spent ' + object.kind.label;
+  if (object.kind.scans) return object.kind.label + (object.isOn ? ', on' : '') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + ' % charged' : '');
   if (object.armedTime >= 0) return object.kind.label + ', armed';
   return object.kind.label;
 }
@@ -3234,6 +3401,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   const isAtTheControls = game.mode === 'playing';
   if (isAtTheControls) updateLooseCarryInput(dt);
   updateHaulBays(dt);
+  if (!isWorldShared() && game.mode !== 'intro') showLooseScannerLights(); // (down there with others: with the others' own lights, 11-together.js)
   if (looseObjects.length === 0) { rememberPlayerMovement(dt); return; }
   computeLooseHoldTarget(eyeX, eyeY, eyeZ);
   // How far you walked since the last frame, before anything you carry has had its say.

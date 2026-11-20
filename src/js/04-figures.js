@@ -23,12 +23,12 @@ const FIGURE_BOX_STRIDE = 15;    // centre (3), which way its own x, y and z poi
 // fingers on each hand. Standing hunched it is about 2.2 m tall; when it straightens up to listen, about 2.5 m.
 const FIGURE_PROPORTIONS_HOLLOW = {
   kind: 'hollow',
-  thigh: 0.66, shin: 0.735, footLength: 0.28, hipWidth: 0.265,
-  lowerSpine: 0.355, upperSpine: 0.415, shoulderWidth: 0.25,
-  neckLength: 0.3, headLength: 0.15, headRadius: 0.1, jawLength: 0.15,
-  upperArm: 0.56, foreArm: 0.5, handLength: 0.085,
-  fingerLengths: [0.17, 0.21, 0.21],   // outer, middle, inner finger
-  torsoRadius: 0.085, limbRadius: 0.04, legRadius: 0.085, fingerRadius: 0.005
+  thigh: 0.749, shin: 0.824, footLength: 0.275, hipWidth: 0.295,
+  lowerSpine: 0.396, upperSpine: 0.472, shoulderWidth: 0.28,
+  neckLength: 0.332, headLength: 0.175, headRadius: 0.105, jawLength: 0.175,
+  upperArm: 0.624, foreArm: 0.56, handLength: 0.09,
+  fingerLengths: [0.195, 0.239, 0.239],   // outer, middle, inner finger
+  torsoRadius: 0.09, limbRadius: 0.04, footRadius: 0.06, legRadius: 0.09, fingerRadius: 0.005
 };
 
 // The calibration dummy: an ordinary jointed shop mannequin, about 1.75 m tall.
@@ -36,7 +36,7 @@ const FIGURE_PROPORTIONS_DUMMY = {
   kind: 'dummy',
   torsoLength: 0.585, neckLength: 0.11, headRadius: 0.11, headLength: 0.05,
   shoulderWidth: 0.42, hipWidth: 0.205, upperArm: 0.31, foreArm: 0.285, handLength: 0.11,
-  thigh: 0.575, shin: 0.45, footLength: 0.2, torsoRadius: 0.145, limbRadius: 0.04, legRadius: 0.065, jointRadius: 0.06
+  thigh: 0.575, shin: 0.45, footLength: 0.15, footRadius: 0.045, torsoRadius: 0.145, limbRadius: 0.04, legRadius: 0.065, jointRadius: 0.06
 };
 
 // Player model
@@ -44,7 +44,7 @@ const FIGURE_PROPORTIONS_PLAYER = {
   kind: 'player',
   torsoLength: 0.255, neckLength: 0.15, headRadius: 0.135, headLength: 0,
   shoulderWidth: 0.465, hipWidth: 0.265, upperArm: 0.14, foreArm: 0.125, handLength: 0.045,
-  thigh: 0.2, shin: 0.2, footLength: 0.15, torsoRadius: 0.175, limbRadius: 0.055, legRadius: 0.08, jointRadius: 0.085
+  thigh: 0.23, shin: 0.12, footLength: 0.15, footRadius: 0.05, torsoRadius: 0.175, limbRadius: 0.055, legRadius: 0.08, jointRadius: 0.085
 };
 
 // ---------------------------------------------------------------------------
@@ -637,7 +637,7 @@ function buildHollowCapsules(figure) {
     const sideName = leg.side < 0 ? 'Left' : 'Right';
     add('thigh' + sideName, leg.hip, leg.knee, body.legRadius);
     add('shin' + sideName, leg.knee, leg.ankle, body.legRadius * 0.85);
-    add('foot' + sideName, leg.ankle, [leg.ankle[0] + leg.side * 0.03, 0.035, leg.ankle[2] + body.footLength * (1 - 2 * crawl)], 0.035); // crawling, the toes trail behind
+    add('foot' + sideName, leg.ankle, [leg.ankle[0] + leg.side * 0.03, 0.035, leg.ankle[2] + body.footLength * (1 - 2 * crawl)], body.footRadius); // crawling, the toes trail behind
   }
   return headTop[1] + body.headRadius;
 }
@@ -715,7 +715,7 @@ function buildPersonCapsules(figure) {
   for (const leg of legs) {
     add('thigh' + leg.sideName, leg.hip, leg.knee, body.legRadius);
     add('shin' + leg.sideName, leg.knee, leg.ankle, body.legRadius * 0.85);
-    add('foot' + leg.sideName, leg.ankle, [leg.ankle[0], 0.04, leg.ankle[2] + body.footLength], 0.04);
+    add('foot' + leg.sideName, leg.ankle, [leg.ankle[0], 0.04, leg.ankle[2] + body.footLength], body.footRadius);
     add('kneeJoint' + leg.sideName, leg.knee, leg.knee, body.jointRadius);
   }
   if (isPlayer) {

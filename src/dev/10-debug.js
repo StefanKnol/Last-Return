@@ -197,6 +197,29 @@ function debugRemoveHollow() {
   showMessage('Debug: the Hollow was removed.', 3, 'info');
 }
 
+// The looters go out now, whatever they were waiting for, and go for whatever they like best.
+function debugSendLootersOut() {
+  markDebugUsed();
+  if (looters.length === 0) { showMessage('Debug: this descent has no looters (none on this threat level, or the station has no vent for one to live in).', 5, 'info'); return; }
+  for (const looter of looters) { looter.ignored = {}; if (looter.state === LOOTER_STATE_NEST) looter.timer = 0; }
+  showMessage('Debug: the looters are on their way out.', 3, 'info');
+}
+
+// Your health, by hand: a hit of a quarter of it (which can be the death of you), and all of it back.
+function debugHurtMe() {
+  markDebugUsed();
+  const damage = TUNING.playerMaxHealth * 0.25;
+  if (player.health - damage < 0.5) { showMessage('Debug: that would kill you. Let something do it.', 3, 'info'); return; }
+  player.health -= damage; player.hurtFlash = 1; playHurt();
+  showMessage('Debug: hurt. ' + Math.round(player.health) + ' of ' + TUNING.playerMaxHealth + ' left.', 3, 'info');
+}
+
+function debugHealMe() {
+  markDebugUsed();
+  healPlayer(TUNING.playerMaxHealth);
+  showMessage('Debug: all of your health is back.', 3, 'info');
+}
+
 function debugWakeStills() {
   markDebugUsed();
   if (!game.difficulty.stillsEnabled) { showMessage('Debug: the Stills are switched off on this threat level.', 4, 'info'); return; }
@@ -412,6 +435,8 @@ function buildDebugFrameData() {
   data.lineVertexCount = 0;
 
   if (options.showCreatures) {
+    // (The kinds that say for themselves what there is to draw of them: 08-creatures.js.)
+    for (const kind of CREATURE_KINDS) if (kind.debugFigures) kind.debugFigures(data.figures);
     if (hollow.isActive) {
       const isHunting = hollow.state === HOLLOW_STATE_HUNT || hollow.enragedTimer > 0;
       data.figures.push({ figure: hollow.figure, red: 1.0, green: isHunting ? 0.05 : 0.3, blue: isHunting ? 0.05 : 0.25 });
@@ -463,6 +488,12 @@ function buildDebugFrameData() {
 function drawDebugMapMarkers(context, toCanvasX, toCanvasY, markerSize) {
   if (!debugState.options.creaturesOnMap) return;
   context.save();
+  const marks = [];
+  for (const kind of CREATURE_KINDS) if (kind.debugMarks) kind.debugMarks(marks);
+  for (const mark of marks) {
+    context.fillStyle = mark.color;
+    context.fillRect(toCanvasX(mark.x) - markerSize * 0.35, toCanvasY(mark.z) - markerSize * 0.35, markerSize * 0.7, markerSize * 0.7);
+  }
   for (const still of stills) {
     if (!still.isPresent) continue;
     context.fillStyle = stillsAreHunting ? '#ff8a1e' : '#ffd166';
@@ -602,6 +633,7 @@ function buildDebugReadout() {
     nearestStill = Math.min(nearestStill, distanceBetweenPoints(still.figure.x, still.figure.z, player.x, player.z));
   }
   lines.push('STILLS      ' + presentStills + (stillsAreHunting ? ' awake' : ' dormant') + '   nearest ' + (nearestStill < 999 ? nearestStill.toFixed(1) + ' m' : '-'));
+  for (const kind of CREATURE_KINDS) if (kind.debugLines) kind.debugLines(lines);
   if (game.liftCountdown > 0) lines.push('lift in     ' + game.liftCountdown.toFixed(1) + ' s');
   // Apparitions: how many chance ones this descent has had, why none may come now, and the one that is out.
   const holdReason = getPhantomHoldReason();
@@ -682,6 +714,9 @@ function initializeDebugMode() {
     ['debug-action-send-away', 'Send the Hollow away', debugSendHollowAway],
     ['debug-action-remove', 'Remove the Hollow', debugRemoveHollow],
     ['debug-action-stills', 'Wake the Stills', debugWakeStills],
+    ['debug-action-looters', 'Send the looters out', debugSendLootersOut],
+    ['debug-action-hurt', 'Hurt me (a quarter)', debugHurtMe],
+    ['debug-action-heal', 'Heal me', debugHealMe],
     ['debug-action-lift', 'Bring the lift now', debugBringLift],
     ['debug-action-map', 'Reveal the whole map', debugRevealMap],
     ['debug-action-clear', 'Clear the point cloud', debugClearPoints],

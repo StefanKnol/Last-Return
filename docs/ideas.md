@@ -5,11 +5,13 @@
 - Live game test option for people to test new features and provide feedback (github issue feedback instead of bug)
   - in game bug reporting or feedback instead of github issue, direct in game with screenshot of current location (no menu's)?
 
-- health system
-  - not instant death on being caught, monster gives chance to escape after attack
-  - health items to be found (physics based)
+- ~~health system~~ (in: 09-health.js)
+  - ~~not instant death on being caught, monster gives chance to escape after attack~~ (a hit, a moment of grace, and what hit you holds off)
+  - ~~health items to be found (physics based)~~ (first aid kits, a few to a station, used with Q)
+  - still open: hurt by a fall (the drop in a vent costs nothing but noise), hurt by what the Hollow throws back, a first aid kit to buy in the shop, the others seeing how hurt you are
 
 - shop in item collection mode (repo mode)
+  - what the tools sell for is set already and is meant to be far below what they cost: a scan grenade 15, a scanner tripod 60, a first aid kit 20
 
 - Even better models
   - player models (overdone and funny, only visible when scanning)
@@ -44,11 +46,28 @@
     - shop at collection points or between levels (vending machines with limited stock and items randomly as well?)
 
 - more monsters to vary threat or increase it
+  - what they share is in place (08-creatures.js: ways of getting around, walking, hearing, the list of kinds); each is its own file of behaviour
+  - a few of the harmless ones from the start of a descent, how many by threat level (left alone by the crew, in lore)
   - lidar monster produces dots around it on everything, but can see the player
-  - small monster 
-    - moves objects (including what you need, chaseable and interruptable to get item back)
+    - nearly 2 m: no vents, but the ceiling hatches. A cone of pulses from its face, more of them while it hunts
+    - hits once and runs off (wants the health system)
+  - ~~small monster (the looter)~~ (in: 08-looter.js. Still open below: summoning others, throwing things, being thrown)
+    - under a metre: walks through vents, cannot reach a hatch. Its nest is in a vent
+    - moves objects (including what you need, chaseable and interruptable to get item back): from an open bay, the fuel can
+    - out of your hands only if it can reach: held up high it tries and cannot
+    - scared off by sound (by how loud: startled first, backing away, and frightened by louder or by a second noise)
+    - ~~likes what you have handled or carry best, so it goes for the salvage bays~~ (in)
+    - ~~a thing taken back from it, it wants back: waits a moment, then comes for it again~~ (in)
+    - ~~mad, not scared, at whoever is in its vents~~ (in: it scolds, and then it bites)
     - makes noise to summon other monsters (hits objects, walks in vents, etc.)
     - throws things at the player when angered (throwing the small monster or hitting it with stuff)
+    - fetches a bigger monster if the player pisses it off enough?
+  - ~~more vents for it: more of them, T-junctions and crossings, dead ends~~ (done; a vent may lead round a lock now: slow, loud, and not everything fits)
+  - ~~one way down from the upper level to the lower~~ (done: a vent with a drop in it)
+    - temporary: a keycard door opens from its inner side without the card (`keycardDoorsOpenFromInside`), or the drop is a trap. To be replaced by a proper way back out
+    - the Hollow and the other creatures do not use the drop yet
+  - ~~the scanner tripod: an item to find (or buy in the shop later), set down and switched on, that scans what is in front of it in pulses. The same system the scanning monster will see by, and a way to try it first~~ (in: 08-loose-objects.js, and fireScanCone in 09-scan-cone.js)
+    - still open: to buy in the shop; a tripod that warns you when something walks into its light; the Hollow knocking over or breaking a tripod it has found out about (for now it only loses interest)
   - other types of blind monsters with different systems for it
   - kidnapping monster that moves a player somewhere else
 

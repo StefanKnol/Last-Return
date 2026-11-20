@@ -226,9 +226,9 @@ function installLab() {
       // within all that too, so nothing of it is further from that centre than that space is across.
       const limits = d.designedObjectLimits, furthestCorner = Math.sqrt(3) * (limits.reach + Math.max(limits.maximumHalf, limits.maximumRadius));
       if (!(prepared.boundsRadius >= prepared.smallestRadius && prepared.boundsRadius <= 2 * furthestCorner) || !(prepared.smallestRadius >= limits.minimumRadius)) wrong.push(kindKey + ': size');
-      // (A scan grenade is a tool, a scanner is what is left of a player, and a fuel can with fuel in it is for a
-      // generator: none of them is salvage.)
-      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scanner is what is left of a player, and a fuel can with fuel in it is for a generator: neither is
+      // salvage. A tool is: a scan grenade and a scanner tripod are worth something unused.)
+      if (kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length, ofTheGame: Object.keys(d.looseObjectKinds).filter((kindKey) => testKinds.indexOf(kindKey) < 0).length };
@@ -1598,7 +1598,7 @@ function installLab() {
       // (What a quest puts out, a fuel can, is counted with them: it lies about the station like the rest.)
       const entry = { total: d.stationLooseObjects.length + d.questLooseObjects.length, fromQuests: d.questLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
         counts: {}, value: 0, onSurfaces: 0, lowestSurface: 9, cansInHeaps: d.noisyFloorCanHeaps.reduce((sum, heap) => sum + heap.cans.length, 0), problems: d.auditStationLooseObjects(),
-        mouths: d.level.ventMouths.length, wanted: { litter: Math.round(rooms * d.tuning.looseLitterPerRoom), valuables: Math.round(rooms * d.tuning.looseValuablesPerRoom) }, notOnASurface: [] };
+        mouths: d.level.ventMouths.length, wanted: { litter: Math.round(rooms * d.tuning.looseLitterPerRoom), valuables: Math.round(rooms * d.tuning.looseValuablesPerRoom), firstAidKits: Math.max(1, Math.round(rooms * d.tuning.firstAidKitsPerRoom)), tripods: Math.max(1, Math.round(rooms * d.tuning.scannerTripodsPerRoom)) }, notOnASurface: [] };
       // At most this many of the valuables go on tables and shelves (as the game rounds it).
       entry.wanted.onSurfacesAtMost = Math.round(entry.wanted.valuables * d.tuning.looseValuablesShareOnSurfaces);
       d.stationLooseObjects.forEach((item, index) => {
@@ -1651,11 +1651,13 @@ function installLab() {
     // when it runs out of floor: these stations have plenty). Of the valuables no more than their share on tables
     // and shelves, and each of those really lies on the top of one, 35 cm high or more (findStationSurfaces).
     // (Which kinds they are is the game's draw, from its tables: that is not looked at here.)
-    const litterAndValuables = entry.total - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0);
+    const litterAndValuables = entry.total - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0) - (entry.counts.firstAidKit || 0) - (entry.counts.scannerTripod || 0);
     entry.shortOfWhatTheRoomsAskFor = entry.wanted.litter + entry.wanted.valuables - litterAndValuables;
     check(stationName + ': cans where the draw put cans, litter, and things worth carrying out, as many as its rooms ask for in a station with floor enough, and no more than their share on tables and shelves, each lying on one',
       entry.counts.can >= entry.cansInHeaps && (entry.counts.ventCover || 0) <= entry.mouths && entry.shortOfWhatTheRoomsAskFor === 0 &&
       entry.onSurfaces <= entry.wanted.onSurfacesAtMost && entry.notOnASurface.length === 0 && (entry.onSurfaces === 0 || entry.lowestSurface >= 0.35), entry);
+    check(stationName + ': and the first aid kits and the scanner tripods its rooms ask for, never fewer than one of either', entry.counts.firstAidKit === entry.wanted.firstAidKits && entry.wanted.firstAidKits >= 1 &&
+      entry.counts.scannerTripod === entry.wanted.tripods && entry.wanted.tripods >= 1, [entry.counts.firstAidKit, entry.counts.scannerTripod, entry.wanted]);
     check(stationName + ': woken, none of them stirs or makes a sound, and they are at rest again', entry.stirred === 0 && entry.noises === 0 && entry.asleepAgain === entry.total, entry);
     check(stationName + ': the same station has the same things in the same places, and a new descent puts them back', entry.sameAgain, entry);
   }
@@ -1800,7 +1802,7 @@ function installLab() {
         d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
         d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
         all = d.stationLooseObjects.map((item, index) => ({ item: item, object: d.looseObjects[index] })).filter((entry) => entry.item.kindKey === 'ventCover');
-        counts = { station: size, seed: seed, vents: d.level.ventCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length };
+        counts = { station: size, seed: seed, vents: d.level.ventCount, branches: d.level.ventBranchCount, mouths: d.level.ventMouths.length, covers: all.length, standing: all.filter((entry) => entry.item.on === 'vent').length };
         wrong = [];
         for (const entry of all) {
           const object = entry.object, mouth = mouthOf(object), fromMouth = Math.hypot(mouth.faceX - object.x, mouth.faceZ - object.z), up = Math.abs(object.matrix[4]);
@@ -1881,19 +1883,59 @@ function installLab() {
     const outSpread = d.tuning.hollowThrowsCoverOutSpread, asideFrom = d.tuning.hollowThrowsCoverAsideFrom, asideTo = d.tuning.hollowThrowsCoverAsideTo;
     // Of the covers that stand: one with room somewhere out of its duct, and another with room along the wall
     // on both sides (so that there is another side to throw to when something is put on one). Or null.
+    // (The second also has to have floor for the box that is stood beside it, on either side: where the box goes
+    // (see "Something heavy standing beside the mouth" below) there is plain floor, and nothing stands or
+    // lies on it within the box's reach.)
+    const hasFloorForABoxBeside = function (cover) {
+      const mouth = mouthOf(cover);
+      for (const side of [-1, 1]) {
+        const boxX = cover.x + mouth.outwardZ * side * 0.95 - mouth.outwardX * 0.2, boxZ = cover.z - mouth.outwardX * side * 0.95 - mouth.outwardZ * 0.2;
+        const spot = d.findWalkableSpotNear(boxX, boxZ);
+        if (!spot || spot.x !== Math.floor(boxX) + 0.5 || spot.z !== Math.floor(boxZ) + 0.5 || d.getTileFlagsAt(boxX, boxZ) !== 0) return false;
+        if (!d.isSpaceOpenAt(boxX, mouth.floorY + 0.24, boxZ) || Math.abs(d.getFloorHeightAt(boxX, boxZ) - mouth.floorY) > 0.01) return false;
+        if (d.looseObjects.some((other) => other !== cover && Math.hypot(other.x - boxX, other.z - boxZ) < 1)) return false;
+        // Nothing of the station's stands or lies where the box will: litter is low and stops nobody, but a
+        // box put down on it slides off. (Its own reach and a little more: the frame of the mouth is just outside that.)
+        for (const prop of d.worldProps) {
+          if (prop.isRemoved || prop.minimumY > mouth.floorY + 0.6 || prop.maximumY < mouth.floorY + 0.005) continue;
+          const halfX = prop.boundsHalfX !== undefined ? prop.boundsHalfX : (prop.radius || 0), halfZ = prop.boundsHalfZ !== undefined ? prop.boundsHalfZ : (prop.radius || 0);
+          if (Math.abs(prop.centerX - boxX) < halfX + 0.3 && Math.abs(prop.centerZ - boxZ) < halfZ + 0.3) return false;
+        }
+      }
+      return true;
+    };
     const roomyPair = function (standingCovers) {
       for (const outward of standingCovers.filter((cover) => hasStretchWithRoom(cover, -outSpread, outSpread))) {
-        const aside = standingCovers.find((cover) => cover !== outward && hasStretchWithRoom(cover, asideFrom, asideTo) && hasStretchWithRoom(cover, -asideTo, -asideFrom));
+        const aside = standingCovers.find((cover) => cover !== outward && hasStretchWithRoom(cover, asideFrom, asideTo) && hasStretchWithRoom(cover, -asideTo, -asideFrom) && hasFloorForABoxBeside(cover));
         if (aside) return { outward: outward, aside: aside };
       }
       return null;
     };
-    let standing = survey('massive', (all) => { const standingCovers = all.filter((entry) => entry.item.on === 'vent').map((entry) => entry.object); return standingCovers.length >= 5 && roomyPair(standingCovers) !== null; })
+    // And one more with bare floor straight out of its mouth, to be crawled out through: pushed over, it has to
+    // land on the floor, and not on a heap of cans or a low crate that happens to lie there. (Bare: nothing in
+    // the way at any height, and nothing lying on the floor either, as far out as a cover falls.)
+    const hasBareFloorOut = function (cover) {
+      if (!hasRoomAlong(cover, 0)) return false;
+      const mouth = mouthOf(cover);
+      for (const alongTheWall of [-0.5, 0, 0.5]) {
+        const fromX = cover.x - mouth.outwardX * 0.2 + mouth.outwardZ * alongTheWall, fromZ = cover.z - mouth.outwardZ * 0.2 - mouth.outwardX * alongTheWall;
+        if (d.castScannerRay(fromX, mouth.floorY + 0.06, fromZ, -mouth.outwardX, 0, -mouth.outwardZ, 1.9) && d.rayHit.distance < 1.9) return false;
+      }
+      return true;
+    };
+    const bareOf = function (standingCovers) {
+      const pair = roomyPair(standingCovers);
+      return pair ? standingCovers.find((cover) => cover !== pair.outward && cover !== pair.aside && hasBareFloorOut(cover)) : undefined;
+    };
+    let standing = survey('massive', (all) => { const standingCovers = all.filter((entry) => entry.item.on === 'vent').map((entry) => entry.object); return standingCovers.length >= 5 && roomyPair(standingCovers) !== null && bareOf(standingCovers) !== undefined; })
       .filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
-    const roomy = roomyPair(standing);
-    if (standing.length < 5 || !roomy) { result.notFound = 'no massive station among the first forty seeds has five covers standing, among them one with room somewhere out of its duct and another with room along the wall on both sides'; return result; }
-    // (Those two last: the fourth for the Hollow coming out, the fifth for the Hollow going in.)
-    standing = standing.filter((cover) => cover !== roomy.outward && cover !== roomy.aside).concat([roomy.outward, roomy.aside]);
+    const roomy = roomyPair(standing), bare = bareOf(standing);
+    if (standing.length < 5 || !roomy || !bare) { result.notFound = 'no massive station among the first forty seeds has five covers standing, among them one with room somewhere out of its duct, another with room along the wall on both sides and floor there for a box, and a third with bare floor in front of it'; return result; }
+    // (In the order the checks below take them: two of the others; third the one with bare floor, to be crawled
+    // out through; fourth and fifth the roomy two, for the Hollow coming out and for the Hollow going in. Then
+    // whatever else stands in that station, which may be a good many.)
+    const others = standing.filter((cover) => cover !== roomy.outward && cover !== roomy.aside && cover !== bare);
+    standing = others.slice(0, 2).concat([bare, roomy.outward, roomy.aside], others.slice(2));
 
     // The rule itself, asked of every cover that stands in that station, both ways through its mouth: the ways
     // it looks along run from one end of the fan to the other and nowhere else, about as far apart as the game
@@ -2043,8 +2085,9 @@ function installLab() {
   });
   check('there are stations with the covers these checks need, among forty massive stations for each', !covers.notFound, covers.notFound || covers.counts);
   check('every cover belongs to a vent mouth: standing upright in front of it, out in the room, or lying flat on the floor nearby; no station has more covers than mouths; a cover is bigger than the mouth, and worth something',
-    // (Each vent has a mouth at either end. A mouth may have no cover, where there is room neither to stand one nor to lay one down.)
-    covers.counts.length === 2 && covers.counts.every((station) => station.mouths === station.vents * 2 && station.covers <= station.mouths) &&
+    // (Each vent has a mouth at either end, but for one that ends on another vent: that has one. A mouth may have no
+    // cover, where there is room neither to stand one nor to lay one down.)
+    covers.counts.length === 2 && covers.counts.every((station) => station.mouths === station.vents * 2 - station.branches && station.covers <= station.mouths) &&
     covers.counts[0].standing >= 1 && covers.counts[0].standing < covers.counts[0].covers && covers.counts[1].standing >= 5 &&
     covers.size.width > 1 && covers.size.height > covers.size.mouthHeight && covers.size.worth > 0 && covers.wrong.length === 0, [covers.counts, covers.size, covers.wrong]);
   check('a cover that lies flat on the floor is walked over: it stays where it is, without a sound, and so a scan does not show it in the warning colour',

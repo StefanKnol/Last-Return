@@ -144,6 +144,7 @@ function installTestStations(testStations) {
       if (!value) return;
       if (testStations.areFromCodeAlone && value.setWorkshopContentUsed) value.setWorkshopContentUsed(false);
       if (testStations.areArrivalsHeld && value.debugState) value.debugState.areArrivalsHeld = true;
+      if (!testStations.hasLooters && value.setLootersWanted) value.setLootersWanted(false);
       if (testStations.otherStations && value.loadStation) {
         const loadStationAsAsked = value.loadStation;
         value.loadStation = function (kind, seed) {
@@ -165,8 +166,10 @@ function readOtherStations() {
 
 // `workshopContent: true` leaves the stations as the game builds them, with what the workshop made.
 // `arrivals: true` lets the Hollow come by itself, as it does in the game.
+// `looters: true` leaves the looters in the stations (src/js/08-looter.js). Without it a station has none: what a
+// looter carries off is chance, and the checks that are about something else are not to have their things taken.
 async function openGame(options) {
-  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false, arrivals: false }, options || {});
+  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false, arrivals: false, looters: false }, options || {});
   const browser = await launchBrowser();
   const context = await browser.newContext({
     viewport: { width: settings.width, height: settings.height },
@@ -181,7 +184,7 @@ async function openGame(options) {
   });
   page.on('pageerror', (error) => problems.push('page error: ' + error.message));
   await page.addInitScript(installLetTheBrowserCatchUp);
-  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations(), areArrivalsHeld: !settings.arrivals });
+  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations(), areArrivalsHeld: !settings.arrivals, hasLooters: settings.looters });
   // `address` opens the game where a server has it (together-test.js); otherwise it is opened from its file.
   await page.goto(settings.address || 'file://' + (settings.dev ? devPagePath : gamePagePath));
   await page.waitForFunction((needsDebugMode) => Boolean(window.lastReturnDebug && (!needsDebugMode || window.lastReturnDebug.setDebugOption)), settings.dev);

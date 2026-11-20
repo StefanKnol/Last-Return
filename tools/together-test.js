@@ -413,13 +413,27 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('noise the other makes is heard by the host\'s Hollow, which hunts them', heard.host.state === 2 && heard.host.at < 2.5, heard);
   check('and the other hears it roar', heard.roars >= 1, heard);
 
-  // It reaches them. That is their death, in their own game; the host plays on, and the Hollow is sent away.
-  await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.hollow.figure.x = other.x + 0.3; d.hollow.figure.z = other.z; d.hollow.graceTimer = 0; });
+  // It reaches them. That is a hit, in their own game: it takes some of their health, they are still on their
+  // feet, and the host's Hollow stands where it struck. (09-health.js)
+  const reach = () => a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.hollow.figure.x = other.x + 0.3; d.hollow.figure.z = other.z; d.hollow.graceTimer = 0; d.hollow.recoverSeconds = 0; });
+  const healthBefore = await b.evaluate(() => { const d = window.lastReturnDebug; d.player.hurtGraceSeconds = 0; return d.player.health; });
+  await reach();
+  await both(0.6);
+  const hit = { other: await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, health: d.player.health, of: d.tuning.playerMaxHealth, takes: d.getHitDamage('hollow') * d.game.difficulty.damageFactor }; }),
+    host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, health: d.player.health, isDown: other.isDown, standsFor: d.hollow.recoverSeconds, of: d.tuning.hollowAfterHitSeconds,
+      metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
+  check('the host\'s Hollow reaching the other is a hit, worked out in the other\'s own game: it takes what a hit takes off their health and nobody else\'s, they are still on their feet and still hunted, and the Hollow stands where it struck',
+    healthBefore === hit.other.of && hit.other.mode === 'playing' && Math.abs(hit.other.health - (healthBefore - hit.other.takes)) < 0.01 && hit.other.takes < hit.other.of &&
+    hit.host.mode === 'playing' && hit.host.health === hit.other.of && !hit.host.isDown && hit.host.standsFor > 0 && hit.host.standsFor <= hit.host.of && hit.host.metresAway < 1, hit);
+  // The hit that takes the last of it is their death, in their own game; the host plays on, and then the Hollow is sent away.
+  await b.evaluate(() => { window.lastReturnDebug.player.hurtGraceSeconds = 0; });
+  await reach();
   await play(a, 0.2);
   await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 5000 }).catch(() => {});
+  await both(0.6); // (their game says they are down, and the host's sends it off)
   const caught = { other: await b.evaluate(() => window.lastReturnDebug.game.mode),
     host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, isDown: other.isDown, players: d.players.length, metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
-  check('the host\'s Hollow catching the other is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
+  check('the hit that takes the last of their health is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
   check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
   await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
   // The station does not stop for the dead, and there is no checkpoint to come back from.
@@ -842,6 +856,77 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await b.evaluate(() => { const d = window.lastReturnDebug; if (d.getHeldLooseObject()) d.releaseHeldLooseObject(0); });
   await fine(0.6);
   for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, can = d.looseObjects.filter((object) => object.id === id)[0]; if (can) d.removeLooseObject(can); d.getFuelTanks().splice(d.getFuelTanks().indexOf(window.testTank), 1); }, fuelCanIds[0]);
+
+  // ---- The looters are the host's too: where one stands, and what it has in its arms, is the same in every game ----
+  // (This suite's pages have no looters: see browser-harness.js. For this check the host's game is given them
+  // back, in whatever nests this station has, or in one made up where the host stands if it has none. They are
+  // kept at home, but for the first, which is put beside a thing of this check's own: a test weight, put down
+  // in both games in the same place, so that it has the same number in both.)
+  const looterSpot = await a.evaluate(() => {
+    const d = window.lastReturnDebug, p = d.player;
+    for (const step of [[1.6, 0], [-1.6, 0], [0, 1.6], [0, -1.6]]) {
+      const spot = d.findWalkableSpotNear(p.x + step[0], p.z + step[1]);
+      if (spot && Math.hypot(spot.x - p.x, spot.z - p.z) > 1 && Math.abs(d.getFloorHeightAt(spot.x, spot.z) - p.floorY) < 0.01) return { x: spot.x, y: p.floorY + 0.15, z: spot.z };
+    }
+    return null;
+  });
+  const lootIds = [];
+  for (const page of [a, b]) await installTogetherTestObjectKinds(page); // (a descent begun since the last time has the game's own kinds only)
+  if (looterSpot) for (const page of [a, b]) lootIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('testWeight', spot.x, spot.y, spot.z, 0).id, looterSpot));
+  await fine(1);
+  const lootId = lootIds[0];
+  await a.evaluate(([spot, id]) => {
+    const d = window.lastReturnDebug;
+    if (d.level.ventNests.length === 0) d.level.ventNests.push({ x: d.player.x, z: d.player.z, floorY: d.player.floorY, isPocket: false });
+    d.setLootersWanted(true); d.createLooters(); d.setLootersWanted(false);
+    for (const looter of d.looters) looter.timer = 9999;
+    const looter = d.looters[0], thing = d.looseObjects.filter((object) => object.id === id)[0];
+    looter.figure.x = spot.x + 0.5; looter.figure.z = spot.z;
+    looter.wanted = thing; looter.state = 1; // after a thing
+  }, [looterSpot, lootId]);
+  await fine(1.5);
+  const looterIn = (page, id) => page.evaluate((id) => {
+    const d = window.lastReturnDebug, looter = d.looters[0], thing = d.looseObjects.filter((object) => object.id === id)[0];
+    if (!looter || !thing) return { looters: d.looters.length, hasThing: Boolean(thing) };
+    return { looters: d.looters.length, x: Math.round(looter.figure.x * 10) / 10, z: Math.round(looter.figure.z * 10) / 10, state: d.looterStates[looter.state],
+      hasIt: looter.carried === thing, inItsArms: thing.looterIndex, thingMetresFromIt: Math.round(Math.hypot(thing.x - looter.figure.x, thing.z - looter.figure.z) * 10) / 10,
+      thingAt: [Math.round(thing.x * 10) / 10, Math.round(thing.z * 10) / 10], thingLiesStill: thing.isAsleep };
+  }, id);
+  const looterTook = [await looterIn(a, lootId), await looterIn(b, lootId)];
+  check('the host\'s looters are shown in the other game where the host has them; one that takes a thing has it in its arms in both games, and there it is where the looter is',
+    Boolean(looterSpot) && lootIds.length === 2 && lootIds[0] === lootIds[1] && looterTook[0].looters >= 1 && looterTook[1].looters === looterTook[0].looters &&
+    Math.hypot(looterTook[0].x - looterTook[1].x, looterTook[0].z - looterTook[1].z) < 1 && looterTook[0].state === 'carrying a thing home' && looterTook[1].state === looterTook[0].state &&
+    looterTook[0].hasIt && looterTook[1].hasIt && looterTook[0].inItsArms === 0 && looterTook[1].inItsArms === 0 && looterTook[0].thingMetresFromIt < 0.7 && looterTook[1].thingMetresFromIt < 0.7, looterTook);
+  // Frightened, it lets the thing fall: in both games it lies where it fell, nobody's.
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.frightenLooter(d.looters[0]); });
+  await fine(1.5);
+  const looterDropped = [await looterIn(a, lootId), await looterIn(b, lootId)];
+  check('frightened, it lets the thing fall and runs: in both games the thing is out of its arms and lies in the same place',
+    looterDropped[0].state === 'frightened' && looterDropped[1].state === 'frightened' && !looterDropped[0].hasIt && !looterDropped[1].hasIt && looterDropped[0].inItsArms === -1 && looterDropped[1].inItsArms === -1 &&
+    Math.hypot(looterDropped[0].thingAt[0] - looterDropped[1].thingAt[0], looterDropped[0].thingAt[1] - looterDropped[1].thingAt[1]) < 0.3, looterDropped);
+  // (And away with them again: the checks that follow are about other things.)
+  await a.evaluate(() => { const d = window.lastReturnDebug; for (const looter of d.looters) d.setFigureRaycastable(looter.figure, false); d.looters.length = 0; });
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, thing = d.looseObjects.filter((object) => object.id === id)[0]; if (thing) d.removeLooseObject(thing); }, lootId);
+  await fine(0.6);
+  check('with the host\'s looters gone they are gone from the other game', (await b.evaluate(() => window.lastReturnDebug.looters.length)) === 0);
+
+  // ---- A scanner tripod is switched on and off for everybody, and each game draws its light for itself ----
+  // (One of this check's own, put down in both games in the same place, so that it has the same number in both.)
+  const tripodIds = [];
+  if (looterSpot) for (const page of [a, b]) tripodIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('scannerTripod', spot.x, spot.y + 0.2, spot.z, 0).id, looterSpot));
+  await fine(1);
+  const tripodIn = (page) => page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; return tripod ? { isOn: tripod.isOn, fired: tripod.pulsesFired } : null; }, tripodIds[0]);
+  const switchTripodFrom = (page) => page.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'setOff', id: id }), tripodIds[0]);
+  await switchTripodFrom(b);
+  await fine(2.4);
+  const tripodOn = [await tripodIn(a), await tripodIn(b)];
+  await switchTripodFrom(a);
+  await fine(0.8);
+  const tripodOff = [await tripodIn(a), await tripodIn(b)];
+  check('a scanner tripod that one of you switches on is on in every game, each of which sends out its light for itself; switched off by another, it is off in every game',
+    tripodIds.length === 2 && tripodIds[0] === tripodIds[1] && tripodOn.every((tripod) => tripod !== null && tripod.isOn && tripod.fired > 0) && tripodOff.every((tripod) => tripod !== null && !tripod.isOn), [tripodOn, tripodOff]);
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; if (tripod) d.removeLooseObject(tripod); }, tripodIds[0]);
+  await fine(0.3);
 
   // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
   // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.

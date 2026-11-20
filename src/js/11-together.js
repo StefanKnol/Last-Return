@@ -20,7 +20,8 @@
 //     the car going up) is done in every browser, in one order: the host's. A browser asks ('ask'), the host
 //     says what was done and by whom ('did'), and each carries it out when it hears that, the one who asked
 //     included. So the work order, the mains, the keycards and the lift are everybody's.
-//   - Being caught is the host's to say ('caught'), and your own game's to carry out.
+//   - Being hit is the host's to say ('caught'), and your own game's to carry out: your health is your own
+//     (09-health.js). You answer 'back' if you are still on your feet.
 //   - What lies loose has one place: each thing is moved by one browser, which tells the others ("Things that
 //     lie loose", further down).
 //   - A fuel can is one of those loose things, and the fuel in the tanks is everybody's: a can pouring is
@@ -422,6 +423,7 @@ function createOtherPlayer(id) {
     isCrouching: false,
     velocityX: 0, velocityZ: 0, audibleRadius: 0, // what the host's Hollow goes by, as they say it
     isDown: false,      // caught, and not back on their feet: nothing hunts them (the host's game keeps this)
+    caughtBy: '',       // what hit them last ('hollow', 'still', 'looter'), until they say what came of it (the host's game keeps this)
     isFallen: false,    // dead, as they say themselves: their body is gone and their scanner lies where they fell
     spreadDegrees: 0,   // how wide their scanner is firing, or 0 when it is not
     walkPhase: 0, stride: 0, armRaise: 0.1,
@@ -481,6 +483,8 @@ function hearOtherPlayer(id, data) {
   other.isCrouching = data.c === 1;
   other.spreadDegrees = clampNumber(data.s, 0, 60);
   if (other.hasBeenHeardFrom && (data.d === 1) !== other.isFallen) setFigureRaycastable(other.figure, data.d !== 1);
+  // The hit killed them: what did it does not stand over them while the others play on.
+  if (data.d === 1 && !other.isFallen && other.caughtBy !== '') { sendCreaturesAwayAfterCatch(other.caughtBy); other.caughtBy = ''; }
   other.isFallen = data.d === 1;
   if (!other.hasBeenHeardFrom) {
     // The first word from them: they are simply there, not on their way from nowhere.
@@ -543,7 +547,7 @@ function advanceOtherPlayer(other, dt) {
 const scannerLight = { x: 0, y: 0, z: 0 };
 function showScannerLight(other) {
   if (!other.hasBeenHeardFrom) return;
-  if (other.isFallen) return; // their scanner is a thing that lies somewhere now, and is lit there (showFallenScannerLights)
+  if (other.isFallen) return; // their scanner is a thing that lies somewhere now, and is lit there (showLooseScannerLights, 08-loose-objects.js)
   getFigureScannerLight(other.figure, scannerLight);
   // A few points that last a quarter of a second, put down again every frame. They are not returns of anything.
   for (let count = 0; count < 3; count++) {
@@ -551,17 +555,6 @@ function showScannerLight(other) {
       1, SURFACE_SCANNER_LIGHT, 1, true);
   }
   pointCloud.totalReturns -= 3;
-}
-
-// The scanners of the fallen, wherever they lie or are being carried: lit.
-function showFallenScannerLights() {
-  for (const object of looseObjects) {
-    if (!object.fallenPlayerId) continue;
-    for (let count = 0; count < 3; count++) {
-      addScanPoint(object.x + (Math.random() - 0.5) * 0.03, object.y + 0.07 + (Math.random() - 0.5) * 0.02, object.z + (Math.random() - 0.5) * 0.03, 1, SURFACE_SCANNER_LIGHT, 1, true);
-    }
-    pointCloud.totalReturns -= 3;
-  }
 }
 
 // One of the others, for one frame: where they are now, their light, and what their scanner shows.
@@ -628,7 +621,7 @@ function updateTogether(dt) {
     sayWhereLooseThingsAre();
   }
   placeOwnBody();
-  if (game.mode !== 'intro') showFallenScannerLights();
+  if (game.mode !== 'intro') showLooseScannerLights(); // every scanner that lies or stands about: a fallen one, a tripod
   for (const other of together.others) {
     // What their scanners light up is lit here whatever you are doing yourself: with the menu open, reading a
     // page, or dead. It goes onto your map, and the host's creatures feel their light. (It used to stop for
@@ -698,6 +691,10 @@ function wrapForTogether() {
   playDoorBang = shareWorldSound('playDoorBang', playDoorBang);
   playDoorBreak = shareWorldSound('playDoorBreak', playDoorBreak);
   playStinger = shareWorldSound('playStinger', playStinger);
+  // The looters (08-looter.js): their voices. (Their feet each game sounds for itself: soundLooterSteps.)
+  playLooterChitter = shareWorldSound('playLooterChitter', playLooterChitter);
+  playLooterChirp = shareWorldSound('playLooterChirp', playLooterChirp);
+  playLooterSqueal = shareWorldSound('playLooterSqueal', playLooterSqueal);
   // The Hollow treading on glass, cans or a loose plate, and flinging a thing: your warning, and so the others' too.
   // (Shared only while the host's creatures are being run, like the rest: your own step on glass is your own.)
   playNoisyFloorSound = shareWorldSound('playNoisyFloorSound', playNoisyFloorSound);
@@ -786,6 +783,9 @@ function describeWorld() {
   }
   for (const door of doors) world.d += door.isBroken ? 'b' : (door.isWantedOpen ? '1' : '0');
   for (const hatch of hollowHatches) world.c += hatch.isOpen ? '1' : '0';
+  // Every other kind of creature says for itself how it stands, in numbers (`describe`, 08-creatures.js): `x`, by kind.
+  world.x = {};
+  for (const kind of CREATURE_KINDS) if (kind.describe) world.x[kind.key] = kind.describe();
   return world;
 }
 
@@ -796,6 +796,12 @@ function hearWorld(data) {
   if (!isNumbers(data.s, 1 + stills.length * WORLD_STILL_NUMBERS)) return;
   if (typeof data.d !== 'string' || data.d.length !== doors.length || typeof data.c !== 'string' || data.c.length !== hollowHatches.length) return;
   if (data.h !== null && (!Number.isInteger(data.h[0]) || data.h[0] < HOLLOW_STATE_ROAM || data.h[0] > HOLLOW_STATE_LISTEN)) return;
+  // What the other kinds of creature say of themselves: numbers and nothing else, for a kind this game knows.
+  if (!data.x || typeof data.x !== 'object' || Array.isArray(data.x)) return;
+  for (const key in data.x) {
+    const kind = findCreatureKind(key);
+    if (!kind || !kind.followHost || !Array.isArray(data.x[key]) || data.x[key].length > 400 || !data.x[key].every(Number.isFinite)) return;
+  }
   // The Hollow is shown on its way from where it is shown now to where the host says it is.
   together.hollowFrom = describeFigure(hollow.figure, []);
   together.world = data;
@@ -858,6 +864,9 @@ function followHostStation(dt) {
     }
   }
 
+  // The other kinds of creature are shown as they say they stand (`followHost`, 08-creatures.js).
+  for (const kind of CREATURE_KINDS) if (kind.followHost) kind.followHost(world.x[kind.key] || null, together.worldBlend, dt);
+
   // The apparitions are your own, and ask how far things are from you on foot. Alone the Hollow's director keeps that up.
   playerDistanceFieldAge += dt;
   if (playerDistanceFieldAge > 0.5) refreshPlayerDistanceField();
@@ -868,20 +877,24 @@ function followHostStation(dt) {
 // The host's game: something of its has got hold of one of the others (catchPlayer, 11-game.js).
 function catchOtherPlayer(caught, kind, figure) {
   if (!isWorldYoursToShare() || caught.isDown) return;
-  caught.isDown = true; // nothing hunts them until they say they are back on their feet
-  let stillIndex = -1;
-  for (let index = 0; index < stills.length; index++) if (stills[index].figure === figure) stillIndex = index;
-  sayToOthers({ k: 'caught', p: caught.id, kind: kind, s: stillIndex });
-  sendCreaturesAwayAfterCatch(kind);
+  caught.isDown = true; // nothing hunts them until they say they are still on their feet ('back'), or are again
+  caught.caughtBy = kind;
+  // Which of its kind it was: the number of the Still, or of the looter.
+  let which = -1;
+  if (kind === 'still') { for (let index = 0; index < stills.length; index++) if (stills[index].figure === figure) which = index; }
+  else if (kind === 'looter') { for (let index = 0; index < looters.length; index++) if (looters[index].figure === figure) which = index; }
+  sayToOthers({ k: 'caught', p: caught.id, kind: kind, s: which });
+  // It holds off as it does after any hit. If the hit killed them, their game says so, and it is sent away then.
+  recoilAfterHit(kind, figure);
 }
 
-// The host's game, when somebody has been caught: what caught them does not stand over them while the others
+// The host's game, when a hit has killed somebody: what did it does not stand over them while the others
 // play on. The Hollow is sent far off, with a breather, as it is when you come back from a checkpoint alone;
 // the Stills go back to where they stood.
 function sendCreaturesAwayAfterCatch(kind) {
   if (!isWorldYoursToShare()) return;
   if (kind === 'hollow') relocateHollowAwayFromPlayer(12);
-  else if (stillsAreHunting) resetStillsToHomePositions();
+  else if (kind === 'still' && stillsAreHunting) resetStillsToHomePositions();
 }
 
 // ---- What is done to the station, in one order ----
@@ -928,6 +941,11 @@ function readAction(data) {
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
     return { what: 'shatter', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
   }
+  // A looter takes hold of a thing, and lets go of it (the host's to decide: 08-looter.js).
+  if (data.what === 'looterTake' && Number.isInteger(data.id) && Number.isInteger(data.looter)) return { what: 'looterTake', id: data.id, looter: data.looter };
+  if (data.what === 'looterDrop' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
+    return { what: 'looterDrop', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH), isSetDown: data.isSetDown === true };
+  }
   if (data.what === 'bayState' && Number.isInteger(data.index) && (data.state === 'open' || data.state === 'sealing')) return { what: 'bayState', index: data.index, state: data.state };
   if (data.what === 'sealBay' && Number.isInteger(data.index) && Array.isArray(data.ids) && data.ids.length <= 400 && data.ids.every(Number.isInteger) && Number.isFinite(data.value)) {
     return { what: 'sealBay', index: data.index, ids: data.ids, value: data.value };
@@ -939,7 +957,8 @@ function readAction(data) {
 // stand, and what is only for the one who did it (see wrapForTogether) is left out.
 function performActionFor(actorId, action) {
   // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
-  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour' || action.what === 'arrive';
+  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour' || action.what === 'arrive' ||
+    action.what === 'looterTake' || action.what === 'looterDrop';
   const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z }); // (gone since: it is still done)
   game.actor = other;
   together.isCarryingOut = true;
@@ -1049,8 +1068,11 @@ function performLooseAction(action) {
   }
   const object = findLooseObjectById(action.id);
   if (!object) return; // gone already
+  if (action.what === 'looterTake') { takeLooseObjectAsLooter(object, action.looter); return; }
+  if (action.what === 'looterDrop') { dropLooseObjectFromLooter(object, action); return; }
   if (action.what === 'take') {
     if (object.heldById && isWorldShared()) return; // somebody was quicker
+    object.looterIndex = -1; // (out of a looter's arms, if it was in them)
     object.heldById = actingId; object.ownerId = actingId;
     object.wasHandled = true; object.isIgnoredByHollow = false; object.lastHandledTime = game.time;
     object.hasBeenTaken = true; // (a fuel can pours from now on: updateFuelCan, 08-loose-objects.js)
@@ -1260,12 +1282,12 @@ function hearOfTheStation(id, data) {
     // What the others say to the host.
     if (data.k === 'noise' && Number.isFinite(data.x) && Number.isFinite(data.z) && Number.isFinite(data.r)) emitNoise(data.x, data.z, clampNumber(data.r, 0, 80));
     else if (data.k === 'stun' && Number.isFinite(data.s)) stunHollow(clampNumber(data.s, 0, 20));
-    else if (data.k === 'back' && other) other.isDown = false;
+    else if (data.k === 'back' && other) { other.isDown = false; other.caughtBy = ''; }
     else if (data.k === 'ask') {
       const action = readAction(data.a);
       // When the car goes up, when a scanner is restarted, when everyone is down, what a salvage bay does and
       // takes, and a fuel can pouring are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
-      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive'].indexOf(action.what) >= 0;
+      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive', 'looterTake', 'looterDrop'].indexOf(action.what) >= 0;
       if (action && !isTheHostsToSay) decideAction(id, action);
     }
     return;
@@ -1278,8 +1300,10 @@ function hearOfTheStation(id, data) {
     const action = readAction(data.a);
     if (action && Number.isInteger(data.p)) performActionFor(data.p, action);
   } else if (data.k === 'caught' && data.p === together.myId) {
-    const figure = data.kind === 'still' ? (stills[data.s] ? stills[data.s].figure : null) : hollow.figure;
-    // If it does not kill you after all (you cannot be caught just now), the host is told you are still on your feet.
-    if (!figure || !triggerPlayerDeath(data.kind === 'still' ? 'still' : 'hollow', figure)) sayToOthers({ k: 'back' });
+    const kind = data.kind === 'still' ? 'still' : (data.kind === 'looter' ? 'looter' : 'hollow');
+    const figure = kind === 'still' ? (stills[data.s] ? stills[data.s].figure : null) : (kind === 'looter' ? (looters[data.s] ? looters[data.s].figure : null) : hollow.figure);
+    // What the hit does to you is your own game's to say (09-health.js). Unless it kills you, the host is
+    // told you are still on your feet.
+    if (!figure || hitPlayer(kind, figure) !== 'dead') sayToOthers({ k: 'back' });
   }
 }

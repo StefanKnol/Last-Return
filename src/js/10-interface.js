@@ -32,7 +32,7 @@ function getElement(elementId) {
 function initializeInterface() {
   const elementIds = [
     'hud', 'hud-objective', 'chip-spools', 'chip-power', 'chip-keycard', 'chip-extra', 'chip-carrying', 'minimap-canvas', 'hud-location',
-    'readout-range', 'readout-flight', 'readout-returns', 'readout-heading', 'bar-heat', 'bar-stamina',
+    'readout-range', 'readout-flight', 'readout-returns', 'readout-heading', 'bar-heat', 'bar-stamina', 'bar-health', 'meter-health',
     'bar-interference', 'meter-agitation', 'bar-agitation', 'hud-stance', 'hud-block-objective', 'hud-block-map', 'hud-block-instruments', 'hud-readouts',
     'meter-heat', 'meter-stamina', 'meter-interference', 'map-objective', 'map-status', 'reticle-ring', 'hud-prompt', 'hud-countdown', 'hud-messages', 'hud-caption',
     'touch-controls', 'map-overlay', 'map-canvas', 'map-close', 'screen-title', 'screen-intro', 'screen-pause',
@@ -816,17 +816,21 @@ function updateHud(realDt) {
   setShown('hud-readouts', !isQuiet);               // range, time of flight, returns, heading
   setShown('meter-heat', !isQuiet || player.heat > 0.3 || player.isOverheated);
   setShown('meter-stamina', !isQuiet || player.stamina < 0.97);
+  const healthShare = clampNumber(player.health / TUNING.playerMaxHealth, 0, 1);
+  setShown('meter-health', !isQuiet || healthShare < 1); // (hurt, it stays on the screen)
   setShown('meter-interference', !isQuiet);         // you can hear and see interference
   setShown('hud-stance', !isQuiet || player.isInVent);
   // The panel they sit in goes too when none of them is showing, so no empty box is left on screen.
   const hasMetHollowYet = hollow.isActive && hollow.figure.totalHits > 0;
-  setShown('hud-block-instruments', !isQuiet || player.heat > 0.3 || player.isOverheated || player.stamina < 0.97 || player.isInVent ||
+  setShown('hud-block-instruments', !isQuiet || player.heat > 0.3 || player.isOverheated || player.stamina < 0.97 || player.isInVent || healthShare < 1 ||
     (hasMetHollowYet && hollow.anger >= 0.04));
 
   elements['bar-heat'].style.width = (player.heat * 100).toFixed(1) + '%';
   elements['bar-heat'].classList.toggle('is-critical', player.isOverheated || player.heat > 0.8);
   elements['bar-stamina'].style.width = (player.stamina * 100).toFixed(1) + '%';
   elements['bar-stamina'].classList.toggle('is-critical', player.isStaminaLocked);
+  elements['bar-health'].style.width = (healthShare * 100).toFixed(1) + '%';
+  elements['bar-health'].classList.toggle('is-critical', healthShare <= TUNING.healthCriticalShare);
   elements['bar-interference'].style.width = (Math.min(1, game.interference) * 100).toFixed(1) + '%';
   // The agitation bar appears the first time the beam touches the Hollow. It is the Hollow's anger:
   // amber while a touch only makes it turn, red once the beam is giving your position away.
@@ -936,7 +940,7 @@ function updateHud(realDt) {
     } else if (canSetOffCarried) {
       // In the beam, and it does something: say which key, or which button.
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? (heldLooseObject.kind.use.button || 'USE IT') + ' · ' : '[Q]  ') + heldLooseObject.kind.use.prompt;
+      prompt.textContent = (input.isTouchDevice ? (heldLooseObject.kind.use.button || 'USE IT') + ' · ' : '[Q]  ') + (heldLooseObject.kind.use.promptFor ? heldLooseObject.kind.use.promptFor(heldLooseObject) : heldLooseObject.kind.use.prompt);
     } else if (game.mode === 'playing' && !input.isPointerLocked && !input.useDragLook && !input.isTouchDevice) {
       prompt.hidden = false;
       prompt.textContent = 'Click to take control of the scanner';

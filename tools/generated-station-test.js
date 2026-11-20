@@ -54,6 +54,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
 
   // --- many stations: every one must be buildable and finishable in the intended order ---
   const jobTotals = { fuel: 0, cores: 0, breaker: 0, generators: 0 };
+  const ventTotals = { stations: 0, junctions: 0, crossings: 0, pockets: 0, roundALock: 0, branches: 0, twoLevels: 0, withADrop: 0, dropsOnOneLevel: 0 };
   for (const sizeKey of ['small', 'medium', 'large']) {
     const result = await inGame(([size, seedCount]) => {
       const debug = window.lastReturnDebug;
@@ -61,10 +62,21 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
       const bad = [];
       let roomTotal = 0, loopTotal = 0, stairTotal = 0, twoLevelCount = 0, ventTotal = 0, withVent = 0;
       const jobs = { fuel: 0, cores: 0, breaker: 0, generators: 0 };
+      const vents = { stations: 0, junctions: 0, crossings: 0, pockets: 0, roundALock: 0, branches: 0, twoLevels: 0, withADrop: 0, dropsOnOneLevel: 0 };
       for (let seed = 1; seed <= seedCount; seed++) {
         const layout = layouts[seed % 3], levels = seed % 2 === 0 ? 'two' : 'one';
         const wasBuilt = debug.loadStation('generated', seed, size, layout, levels);
-        const found = wasBuilt ? debug.auditLayout().concat(debug.auditProgression()).concat(debug.auditHollowRoutes()).concat(debug.auditNoisyFloor()) : ['no plan could be made'];
+        const found = wasBuilt ? debug.auditLayout().concat(debug.auditProgression()).concat(debug.auditHollowRoutes()).concat(debug.auditNoisyFloor()).concat(debug.auditVents()) : ['no plan could be made'];
+        if (wasBuilt) {
+          // What its vents come to: where three or four ways meet, dead ends, and whether one leads round a lock.
+          const measured = debug.measureVents();
+          vents.stations++; vents.junctions += measured.junctions; vents.crossings += measured.crossings;
+          vents.pockets += debug.level.ventPockets.length; vents.branches += debug.level.ventBranchCount;
+          if (measured.floorThroughVents > measured.floorOnFoot) vents.roundALock++;
+          // A vent that goes down to the lower level, one way: only where there is a lower level.
+          if (levels === 'two') { vents.twoLevels++; if (debug.level.ventDrops.length > 0) vents.withADrop++; }
+          else vents.dropsOnOneLevel += debug.level.ventDrops.length;
+        }
         // A two-level station must have its shaft a flight of stairs down; a one-level station must be flat.
         const shaftFloor = debug.getFloorHeightAt(debug.findInteractable(5).x, debug.findInteractable(5).z);
         if (wasBuilt && levels === 'two' && !(shaftFloor < 0 && debug.level.stairCount >= 1)) found.push('two levels were asked for but the shaft is at ' + shaftFloor);
@@ -80,13 +92,23 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
       }
       return { bad: bad, averageRooms: Math.round(roomTotal / seedCount), averageLoops: Math.round(loopTotal / seedCount * 10) / 10,
         averageStairs: Math.round(stairTotal / Math.max(1, twoLevelCount) * 10) / 10,
-        averageVents: Math.round(ventTotal / seedCount * 10) / 10, withVent: withVent, jobs: jobs };
+        averageVents: Math.round(ventTotal / seedCount * 10) / 10, withVent: withVent, jobs: jobs, vents: vents };
     }, [sizeKey, SEEDS_PER_SIZE]);
     check(SEEDS_PER_SIZE + ' ' + sizeKey + ' stations, half of them with two levels: all can be built, walked and finished in order (about ' +
       result.averageRooms + ' rooms and corridors, ' + result.averageLoops + ' extra ducts, ' + result.averageVents + ' vents, ' + result.averageStairs + ' stairs each)', result.bad.length === 0, result.bad.slice(0, 3));
     check('at least three in four ' + sizeKey + ' stations have a vent', result.withVent >= SEEDS_PER_SIZE * 0.75, result.withVent + ' of ' + SEEDS_PER_SIZE);
     jobTotals.fuel += result.jobs.fuel; jobTotals.cores += result.jobs.cores; jobTotals.breaker += result.jobs.breaker; jobTotals.generators += result.jobs.generators;
+    for (const key in ventTotals) ventTotals[key] += result.vents[key];
   }
+
+  // (Every one of those stations was also checked vent by vent: a tile wide, crawl height, the mouths it should
+  // have, dead ends that are dead ends, all of it reachable. And every one can be finished in order on foot,
+  // with every vent shut: nothing hangs on a vent. What is asked here is that the vents are more than tunnels
+  // from one room to another.)
+  check('across those stations vents meet (one ends on another, so that three ways meet there), some have a dead end off their side, and in some a vent leads round a lock: floor you could not walk to with every lock shut',
+    ventTotals.branches >= 10 && ventTotals.junctions >= ventTotals.branches + ventTotals.pockets && ventTotals.pockets >= 10 && ventTotals.roundALock >= 5, ventTotals);
+  check('at least one in four of the stations with two levels has a vent that goes down to the lower one, and no station with one level has such a thing',
+    ventTotals.withADrop >= ventTotals.twoLevels / 4 && ventTotals.dropsOnOneLevel === 0, ventTotals);
 
   check('across those stations every kind of extra job turns up (fuel, core samples, winch breaker, more generators)',
     jobTotals.fuel > 5 && jobTotals.cores > 5 && jobTotals.breaker > 5 && jobTotals.generators > 5, jobTotals);
@@ -304,6 +326,8 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     const debug = window.lastReturnDebug;
     const door = debug.doors.find((candidate) => candidate.kind === doorKind);
     for (const step of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      // (At its outer side: from its inner side a keycard door opens without the card, which has a check of its own.)
+      if (door.insideStepX === step[0] && door.insideStepZ === step[1]) continue;
       const spot = debug.findWalkableSpotNear(door.tileX + 0.5 + step[0], door.tileZ + 0.5 + step[1]);
       if (spot && Math.abs(spot.x - door.tileX - 0.5 - step[0]) < 0.01 && Math.abs(spot.z - door.tileZ - 0.5 - step[1]) < 0.01) {
         debug.teleport(spot.x, spot.z, 0);
@@ -476,6 +500,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     const doorOfCard = (cardLevel) => debug.doors.find((door) => door.kind === 2 && door.cardLevel === cardLevel);
     const tryDoor = (door) => {
       for (const step of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (door.insideStepX === step[0] && door.insideStepZ === step[1]) continue; // (at its outer side, where the card is asked for)
         const spot = debug.findWalkableSpotNear(door.tileX + 0.5 + step[0], door.tileZ + 0.5 + step[1]);
         if (spot && Math.abs(spot.x - door.tileX - 0.5 - step[0]) < 0.01 && Math.abs(spot.z - door.tileZ - 0.5 - step[1]) < 0.01) {
           debug.teleport(spot.x, spot.z, 0); debug.simulate(1.5); return door.openFraction;
@@ -570,6 +595,66 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     return { bad: bad, wrongCardCounts: wrongCardCounts, sizeSays: debug.sizePresets.massive.keycards };
   });
   check('8 massive stations: all can be built and finished in order, each with as many keycards as its size says', massive.bad.length === 0 && massive.wrongCardCounts.length === 0, massive);
+
+  // --- a vent that goes down: over the edge, down to the lower level, and no way back up it ---
+  const drop = await inGame(() => {
+    const debug = window.lastReturnDebug, p = debug.player, result = { found: false };
+    for (let seed = 1; seed <= 60 && !result.found; seed++) {
+      if (!debug.loadStation('generated', seed, 'medium', 'mixed', 'two') || debug.level.ventDrops.length === 0) continue;
+      const foot = debug.level.ventDrops[0];
+      // The edge: the tile of the vent beside the foot that is on the upper floor.
+      const step = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter((way) => debug.isVentAt(foot.x + way[0], foot.z + way[1]) && Math.abs(debug.getFloorHeightAt(foot.x + way[0], foot.z + way[1]) - foot.topY) < 0.01)[0];
+      if (!step) continue;
+      result.found = true; result.seed = seed; result.deep = Math.round((foot.topY - foot.bottomY) * 100) / 100;
+      debug.game.flags.hasLeftLift = true;
+      // From the edge (the tile of the vent before the drop), crouched, on and over it.
+      const noises = []; debug.debugHooks.recordNoise = function (x, z, radius) { noises.push(radius); };
+      debug.input.keysDown.add('KeyC');
+      debug.teleport(foot.x + step[0] * 1.2, foot.z + step[1] * 1.2, Math.atan2(-step[0], step[1]));
+      p.velocityX = 0; p.velocityZ = 0;
+      debug.simulate(0.8);
+      result.startedOnTheUpperFloor = Math.abs(p.floorY - foot.topY) < 0.01 && debug.isVentAt(p.x, p.z);
+      debug.input.keysDown.add('KeyW');
+      let seconds = 0, wasFalling = false;
+      while (seconds < 12 && Math.abs(p.floorY - foot.bottomY) > 0.01) { debug.simulate(1 / 30); seconds += 1 / 30; if (p.fallSpeed > 0) wasFalling = true; }
+      result.cameDown = Math.abs(p.floorY - foot.bottomY) < 0.01; result.secondsToTheBottom = Math.round(seconds * 10) / 10;
+      result.fell = wasFalling; result.loudest = Math.max.apply(null, noises.concat([0]));
+      // (What is recorded is how far a noise carries to the Hollow's ears on this threat level.)
+      result.landingWasHeard = result.loudest >= debug.tuning.noiseRadiusDropLanding * debug.game.difficulty.hearingFactor * 0.99;
+      // And back: turned round at the foot, walking at the edge above for three seconds.
+      debug.input.keysDown.delete('KeyW');
+      debug.teleport(foot.x, foot.z, Math.atan2(step[0], -step[1]));
+      p.velocityX = 0; p.velocityZ = 0;
+      debug.simulate(0.3);
+      debug.input.keysDown.add('KeyW');
+      debug.simulate(3);
+      debug.input.keysDown.clear();
+      result.stayedDown = Math.abs(p.floorY - foot.bottomY) < 0.01 && Math.abs(p.x - foot.x) < 0.5 && Math.abs(p.z - foot.z) < 0.5;
+      // Down there every door back up wants the last keycard. From its inner side a keycard door opens without
+      // one, and without the mains (a temporary rule: TUNING.keycardDoorsOpenFromInside); from outside it does not.
+      const door = debug.doors.filter((one) => one.kind === debug.doorKinds.keycard && one.insideStepX !== undefined)[0];
+      result.hasADoorWithAnInside = Boolean(door);
+      if (door) {
+        debug.game.flags.powerOn = false; debug.game.flags.keycardLevel = 0;
+        debug.teleport(door.centerX + door.insideStepX * 1.2, door.centerZ + door.insideStepZ * 1.2, 0);
+        debug.simulate(1.5);
+        result.fromInside = Math.round(door.openFraction * 100) / 100;
+        debug.teleport(debug.playerStart.x, debug.playerStart.z, 0);
+        debug.simulate(4);
+        result.shutAgain = door.openFraction;
+        debug.game.flags.powerOn = true;
+        debug.teleport(door.centerX - door.insideStepX * 1.2, door.centerZ - door.insideStepZ * 1.2, 0);
+        debug.simulate(1.5);
+        result.fromOutside = door.openFraction;
+      }
+      debug.debugHooks.recordNoise = null;
+    }
+    return result;
+  });
+  check('a vent with a drop in it: crawled along from the upper level you go over the edge and come down on the lower one, which is heard; and from the foot there is no way back up',
+    drop.found && drop.deep > 1 && drop.startedOnTheUpperFloor && drop.fell && drop.cameDown && drop.secondsToTheBottom < 8 && drop.landingWasHeard && drop.stayedDown, drop);
+  check('a keycard door opens from its inner side without the card and without the mains, shuts behind you, and from outside stays shut without the card',
+    drop.hasADoorWithAnInside && drop.fromInside > 0.9 && drop.shutAgain === 0 && drop.fromOutside === 0, drop);
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();

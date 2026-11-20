@@ -33,6 +33,8 @@ const game = {
   deathSequence: null,
   ascentTimer: 0,
   hasShownHollowHint: false,
+  hasShownLooterHint: false,
+  hasShownLooterMadHint: false,
   hasShownVentHint: false,
   isDescentLost: false,          // down there with others: every one of you is down, and nobody is left to carry anybody back
   isLeftBehind: false,           // down there with others: the car has gone up with those on their feet, and you were not one of them
@@ -79,6 +81,7 @@ function getActingPlayer() {
 function saveCheckpoint() {
   if (game.actor) return; // somebody else's doing: it is not your place to come back to
   game.checkpoint.x = player.x; game.checkpoint.z = player.z; game.checkpoint.yaw = player.yaw;
+  game.checkpoint.health = player.health;
 }
 
 function setKeycardLevel(cardLevel) {
@@ -157,6 +160,8 @@ function resetWorldState() {
   game.statistics.elapsed = 0; game.statistics.distanceWalked = 0; game.statistics.deaths = 0;
   game.interference = 0; game.danger = 0;
   game.hasShownHollowHint = false;
+  game.hasShownLooterHint = false;
+  game.hasShownLooterMadHint = false;
   game.isDescentLost = false;
   game.isLeftBehind = false;
   game.isCarStaying = isWorldShared(); // decided as the descent begins, and kept if you end up down there alone
@@ -181,12 +186,11 @@ function resetWorldState() {
   liftDoor.openFraction = 1;
   shutHollowHatches(); // the ceiling hatches are shut again until it has been through them
   raycastableFigures.length = 0;
-  deactivateHollow();
-  hollow.knowsPlayerPositionAlways = false;
-  createStills();
+  resetCreatures(); // the Hollow is not in the station, the Stills stand in their store (CREATURE_KINDS, 08-creatures.js)
   createPhantoms();
   resetPlayerToStart();
   game.checkpoint.x = PLAYER_START.x; game.checkpoint.z = PLAYER_START.z; game.checkpoint.yaw = PLAYER_START.yaw;
+  game.checkpoint.health = TUNING.playerMaxHealth;
   clearAllPoints();
   clearMap();
   clearMessages();
@@ -613,14 +617,24 @@ function completeLiftArrival(radioKey) {
 // Death and retry
 // ---------------------------------------------------------------------------
 
-// Something has got hold of one of `players`. If that is you, it is your death. Anybody else is not this
-// game's to kill.
+// Something has got hold of one of `players`: `kind` is what ('hollow', 'still', 'looter'). That is a hit
+// (09-health.js). If it is you, your game says what the hit does; anybody else is told, and it is their game
+// that hurts or kills them (11-together.js).
 function catchPlayer(caught, kind, figure) {
-  if (caught === player) triggerPlayerDeath(kind, figure);
-  else catchOtherPlayer(caught, kind, figure); // 11-together.js: they are told, and it is their game that kills them
+  if (caught !== player) { catchOtherPlayer(caught, kind, figure); return; }
+  if (hitPlayer(kind, figure) === 'hurt') recoilAfterHit(kind, figure);
 }
 
-// Returns whether you died of it.
+// What has just hit somebody who is still on their feet holds off for a moment: the Hollow stands where it
+// struck, a Still does not move again for a while. (In the game that runs the creatures. A looter bites again
+// in its own time: 08-looter.js.)
+function recoilAfterHit(kind, figure) {
+  if (isWorldTheHosts()) return;
+  if (kind === 'hollow') hollow.recoverSeconds = TUNING.hollowAfterHitSeconds;
+  else if (kind === 'still') { for (const still of stills) if (still.figure === figure) still.restSeconds = TUNING.stillAfterHitSeconds; }
+}
+
+// The hit that took the last of your health (hitPlayer, 09-health.js). Returns whether you died of it.
 function triggerPlayerDeath(kind, figure) {
   // Down there with others the station does not wait while you read or have the menu open, and neither does this.
   const isAway = isWorldShared() && (game.mode === 'paused' || game.mode === 'reading');
@@ -681,6 +695,7 @@ function standUpAgainAt(x, z) {
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
   steadyHeldScanner();
   player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
+  player.health = TUNING.playerRetryHealth; player.hurtGraceSeconds = 0; player.hurtFlash = 0;
   player.sweepTimeRemaining = 0;
   input.keysDown.clear();
   game.interference = 0; game.danger = 0; game.fade = 0;
@@ -700,6 +715,8 @@ function retryFromCheckpoint() {
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
   steadyHeldScanner();
   player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
+  // As hurt as you were when you passed the checkpoint, and never worse than half.
+  player.health = Math.max(game.checkpoint.health || 0, TUNING.playerRetryHealth); player.hurtGraceSeconds = 0; player.hurtFlash = 0;
   player.sweepTimeRemaining = 0;
   input.keysDown.clear();
   releaseHeldLooseObject(0); // whatever you were carrying lies where you fell
@@ -831,6 +848,16 @@ function updateGameProgress(dt) {
     if (isEveryoneAboard) askToAct({ what: 'ascend' });
   }
 
+  // The first looter your scanner finds: what it is, said once.
+  if (!game.hasShownLooterHint && looters.some(function (looter) { return looter.figure.totalHits > 25; })) {
+    game.hasShownLooterHint = true;
+    showMessage('Something small. It is after what lies loose, not after you. Noise startles it; enough of it frightens it off.', 7, 'info');
+  }
+  // The first time one is mad at you, in a vent: why, said once.
+  if (!game.hasShownLooterMadHint && player.isInVent && looters.some(function (looter) { return looter.state === LOOTER_STATE_MAD && distanceBetweenPoints(looter.figure.x, looter.figure.z, player.x, player.z) < 3; })) {
+    game.hasShownLooterMadHint = true;
+    showMessage('The vents are theirs. In here it is not afraid of you, or of any noise you make.', 7, 'warning');
+  }
   if (hollow.isActive && !game.hasShownHollowHint && hollow.figure.totalHits > 30) {
     game.hasShownHollowHint = true;
     showMessage('The beam slows it and angers it. Hold it too long and it knows exactly where you are.', 7, 'warning');
@@ -851,6 +878,7 @@ function updateAtmosphere(dt) {
   game.interference = approachValue(game.interference, pressure, dt * 1.8);
   const isCloseHunt = hollow.isActive && hollow.state === HOLLOW_STATE_HUNT;
   game.danger = approachValue(game.danger, isCloseHunt ? clampNumber(1 - hollowDistance / 7, 0, 1) : 0, dt * 1.5);
+  updatePlayerHealth(dt); // (here, so that it also runs while you have the menu open down there with others)
   if (game.fade < 1) game.fade = Math.min(1, game.fade + dt * 0.9);
 
   updateAudioListener(player.x, getPlayerEyeY(), player.z, player.yaw);
@@ -892,10 +920,10 @@ function updateStation(dt) {
   // (While it has hold of you, it has no mind for anything else. Alone that is the whole of the station
   // standing still; as the host of others it is only this, for the moment it takes.)
   if (debugState.options.freezeCreatures || game.mode === 'dying') {
-    hollow.figure.hitsThisFrame = 0;
+    holdCreaturesStill();
   } else {
     updateArrivals(dt); // what is not here yet may come now (08-arrivals.js)
-    shareWorldSoundsDuring(function () { updateHollow(dt); updateStills(dt); });
+    shareWorldSoundsDuring(function () { updateCreatures(dt); }); // every kind there is (08-creatures.js)
   }
 }
 
@@ -1041,7 +1069,7 @@ function runFrame(timestamp) {
   frameState.time = game.time;
   frameState.realTime = game.realTime;
   frameState.interference = game.interference;
-  frameState.danger = game.danger;
+  frameState.danger = Math.max(game.danger, player.hurtFlash); // (a hit is a flash of the same red)
   frameState.fade = game.mode === 'intro' || game.mode === 'dead' || game.mode === 'ending' ? 0 : game.fade;
   frameState.powerOn = game.flags.powerOn;
   frameState.hasKeycard = game.flags.hasKeycard;
@@ -1101,7 +1129,7 @@ function startApplication() {
     beamLines: beamLines,
     viewmodelLensCenter: [VIEWMODEL_LENS_CENTER_X * VIEWMODEL_MODEL_SCALE, VIEWMODEL_LENS_CENTER_Y * VIEWMODEL_MODEL_SCALE, VIEWMODEL_LENS_CENTER_Z * VIEWMODEL_MODEL_SCALE],
     auditLayout: auditFacilityLayout,
-    auditProgression: auditLevelProgression,
+    auditProgression: auditLevelProgression, auditVents: auditVents, measureVents: measureVents,
     level: level, interactables: interactables, zoneNames: ZONE_NAMES,
     loadStation: function (kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders) { const result = loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders); resetWorldState(); return result; },
     workOrders: WORK_ORDERS, questComplications: QUEST_COMPLICATIONS, rankWorkOrders: rankWorkOrders, getWorkOrderProgressShare: getWorkOrderProgressShare, getDirectorPaceFactor: getDirectorPaceFactor, areSpoolsOnTheOrder: areSpoolsOnTheOrder, describeUploadManifest: describeUploadManifest, getIntroLines: getIntroLines, areStillsHunting: function () { return stillsAreHunting; }, getAllowedWorkOrders: getAllowedWorkOrders,
@@ -1226,7 +1254,15 @@ function startApplication() {
     arrivals: arrivals, creatureArrivals: CREATURE_ARRIVALS, getSecondsUntilArrival: getSecondsUntilArrival, resetArrivals: resetArrivals,
     doCreaturesArriveByThemselves: doCreaturesArriveByThemselves, findUnpoweredStartTiles: findUnpoweredStartTiles, hollowSpawn: HOLLOW_SPAWN_POSITION,
     // The Hollow and locked doors: its ceiling hatches, what is shut to it right now, and its way round.
-    hollowHatches: hollowHatches, tileBlocksHollow: tileBlocksHollow, auditHollowRoutes: auditHollowRoutes,
+    hollowHatches: hollowHatches, tileBlocksHollow: HOLLOW_WAY.tileBlocks, auditHollowRoutes: auditHollowRoutes,
+    // What the creatures have in common (08-creatures.js): the kinds, their ways of getting around, and the path finding of a way.
+    roamingWaypoints: roamingWaypoints,
+    setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
+    hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
+    looters: looters, looterStates: LOOTER_STATE_NAMES, frightenLooter: frightenLooter, chooseLooterOuting: chooseLooterOuting, isLootable: isLootable,
+    creatureKinds: CREATURE_KINDS, creatureWays: CREATURE_WAYS, createCreatureWay: createCreatureWay, createCreatureLegs: createCreatureLegs,
+    computeWayDistanceField: computeWayDistanceField, refreshCreatureDoorBlocks: refreshCreatureDoorBlocks, moveCreatureToward: moveCreatureToward,
+    findNearestWalkableTileIndex: findNearestWalkableTileIndex,
     gridWidth: GRID_WIDTH, // tiles in one row of the map: a tile's place in tileBlocksHollow is z * gridWidth + x
     findDoorWorthBreaking: findDoorWorthBreaking, breakDoor: breakDoor, mendDoor: mendDoor, getDoorSides: getDoorSides,
     playDoorBang: playDoorBang, playDoorBreak: playDoorBreak,
@@ -1239,7 +1275,7 @@ function startApplication() {
     getHollowStepsTo: function (x, z) {
       // How far the Hollow has to go from where it is to (x, z), in steps, crawlspace included.
       const field = borrowTileField('hollowStepsTo');
-      computeHollowDistanceField(field, findNearestWalkableTileIndex(x, z), true);
+      computeWayDistanceField(HOLLOW_WAY, field, findNearestWalkableTileIndex(x, z), true);
       return field[findNearestWalkableTileIndex(hollow.figure.x, hollow.figure.z)];
     },
     playHollowCeilingStep: playHollowCeilingStep, playHatchRattle: playHatchRattle, playHatchBurst: playHatchBurst,
@@ -1284,6 +1320,7 @@ function startApplication() {
 
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
     wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
+    fireScanCone: fireScanCone, scanConeResult: scanConeResult, isBodyInScanPulse: isBodyInScanPulse, getLooseScannerLens: getLooseScannerLens, showLooseScannerLights: showLooseScannerLights, getLooseObjectPoint: getLooseObjectPoint, surfaceScannerLight: SURFACE_SCANNER_LIGHT,
     fireScanPulse: fireScanPulse, fireScanPulseBeyond: fireScanPulseBeyond, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateHeldScannerLag: updateHeldScannerLag, steadyHeldScanner: steadyHeldScanner, computeHeldScannerBasis: computeHeldScannerBasis, computeHeldScannerInView: computeHeldScannerInView, updateScanEmitterAtEye: updateScanEmitterAtEye, castScannerPulse: castScannerPulse, castRayAgainstThings: castRayAgainstThings,
     getPlayFieldOfViewDegrees: getPlayFieldOfViewDegrees, beginLettingGo: beginLettingGo,
     castScannerRay: castScannerRay, rayHit: rayHit, scannerBasis: scannerBasis, computeScannerBasis: computeScannerBasis,

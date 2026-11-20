@@ -450,15 +450,17 @@ function check(description, condition, detail) {
     result.bell = count('liftBell');
 
     // In a station that has a vent, the Hollow crawling through it. The first seed whose station has a straight
-    // stretch of vent three tiles long is used: what a seed builds changes with every new room.
+    // stretch of vent four tiles long is used: what a seed builds changes with every new room. (Four, to be sent
+    // three along: it calls itself arrived a metre and a half short of where it is sent, and what is asked for
+    // here is a step, which it takes every metre and a third or so.)
     let vent = null;
     for (let seed = 1; seed <= 60 && !vent; seed++) {
       if (!d.loadStation('generated', seed, 'medium', 'mixed', 'one')) continue;
       if (d.level.ventCount === 0) continue;
       for (let z = d.level.boundsMinimumZ; z < d.level.boundsMaximumZ && !vent; z++) {
         for (let x = d.level.boundsMinimumX; x < d.level.boundsMaximumX && !vent; x++) {
-          if (d.isVentAt(x + 0.5, z + 0.5) && d.isVentAt(x + 1.5, z + 0.5) && d.isVentAt(x + 2.5, z + 0.5)) vent = { x: x + 0.5, z: z + 0.5, stepX: 1, stepZ: 0, seed: seed };
-          else if (d.isVentAt(x + 0.5, z + 0.5) && d.isVentAt(x + 0.5, z + 1.5) && d.isVentAt(x + 0.5, z + 2.5)) vent = { x: x + 0.5, z: z + 0.5, stepX: 0, stepZ: 1, seed: seed };
+          if (d.isVentAt(x + 0.5, z + 0.5) && d.isVentAt(x + 1.5, z + 0.5) && d.isVentAt(x + 2.5, z + 0.5) && d.isVentAt(x + 3.5, z + 0.5)) vent = { x: x + 0.5, z: z + 0.5, stepX: 1, stepZ: 0, seed: seed };
+          else if (d.isVentAt(x + 0.5, z + 0.5) && d.isVentAt(x + 0.5, z + 1.5) && d.isVentAt(x + 0.5, z + 2.5) && d.isVentAt(x + 0.5, z + 3.5)) vent = { x: x + 0.5, z: z + 0.5, stepX: 0, stepZ: 1, seed: seed };
         }
       }
     }
@@ -470,7 +472,7 @@ function check(description, condition, detail) {
       const near = d.findWalkableSpotNear(vent.x + 3, vent.z + 3);
       d.teleport(near.x, near.z, 0);
       d.spawnHollow(vent.x, vent.z); d.hollow.graceTimer = 999;
-      for (let time = 0; time < 4; time += 0.1) { d.hollow.state = 0; d.hollow.targetX = vent.x + vent.stepX * 2; d.hollow.targetZ = vent.z + vent.stepZ * 2; d.simulate(0.1); }
+      for (let time = 0; time < 5; time += 0.1) { d.hollow.state = 0; d.hollow.targetX = vent.x + vent.stepX * 3; d.hollow.targetZ = vent.z + vent.stepZ * 3; d.simulate(0.1); }
       result.ventSteps = { captions: count('hollowVentSteps'), metresAway: Math.round(Math.hypot(near.x - vent.x, near.z - vent.z) * 10) / 10 };
       d.hollow.isActive = false;
       d.setDebugOption('creaturesIgnorePlayer', false);
