@@ -53,6 +53,7 @@ function connect(host, origin, forwardedFor) {
   });
 }
 
+const WINDOW_WIDTH = 640, WINDOW_HEIGHT = 360; // the browsers of this suite: see where the first two are opened
 const pause = function (milliseconds) { return new Promise(function (resolve) { setTimeout(resolve, milliseconds); }); };
 
 (async () => {
@@ -187,8 +188,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // ---- Two browsers ----
   const address = 'http://' + named.host + '/';
-  const first = await openGame({ address: address });
-  const second = await openGame({ address: address });
+  // (In small windows. Nothing in this suite looks at what is drawn: a page is only asked for a picture to make
+  // it draw a frame, which is what runs its game. The browsers here draw in software, two and three of them at
+  // once, and how long a frame takes goes by how many dots of screen it has. At the usual 1280 by 720, with three
+  // browsers open, a frame of a page that is playing was measured at four to nineteen seconds; on the slower of
+  // GitHub's machines a single picture then took longer than the thirty seconds it is given.)
+  const first = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
+  const second = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
   const a = first.page, b = second.page;
 
   check('the title screen offers a lobby when the page comes from the server', await a.isVisible('#button-host-lobby'));
@@ -626,6 +632,17 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   };
   const crateFilled = { atRest: await crateAtRest(8), host: await crateIn(a), other: await crateIn(b) };
   // The other takes the crate into their beam, lifts it, walks six strides with it, stops, and stands.
+  // And over a slow line: everything the host says reaches the other six tenths of a second late. So the host's
+  // word that the things in the crate are the other's to move ('carry') comes when their beam has long lifted
+  // the crate clear of where it stood, and where the host says those things are is where the crate was more than
+  // half a second ago. (Between two windows on one machine the answer comes at once, and what this is about
+  // hardly showed: on a slow machine, or with any real distance between two browsers, the things were left
+  // standing where the crate had been.)
+  await a.evaluate(() => {
+    const socket = window.lastReturnDebug.together.socket, send = socket.send.bind(socket);
+    window.undoSlowLine = () => { socket.send = send; };
+    socket.send = (text) => { setTimeout(() => send(text), 600); }; // (all of it by the same wait, so in the order it was said)
+  });
   await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.3; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
   await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, crateIds[0][0]);
   await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
@@ -652,6 +669,9 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const crateWeight = crateFilled.host ? crateFilled.host.things.reduce((sum, thing) => sum + (thing.mass || 0), 0) : 0;
   check('a crate with two cans and something heavy in it is the same crate in both games, with the same things in it',
     lane !== null && crateIds[0].length === 4 && crateIds[0].join() === crateIds[1].join() && crateFilled.atRest && crateFilled.host.inIt === 3 && crateFilled.other.inIt === 3, [lane, crateIds, crateFilled]);
+  check('over a slow line, what is in the crate is kept in it until the host has said it is the other\'s: lifted, all of it is in the crate in both games, and theirs to move',
+    crateLifted.other.inIt === 3 && crateLifted.host.inIt === 3 && crateLifted.other.things.every((thing) => thing.ownerId === ids.other) && crateLifted.host.things.every((thing) => thing.ownerId === ids.other),
+    [crateLifted.other.things.map((thing) => [thing.isInIt, thing.ownerId]), crateLifted.host.things.map((thing) => [thing.isInIt, thing.ownerId])]);
   check('the other carries it: in the host\'s game, where what is in it is the host\'s to move, all of it stays in the crate and goes where the crate goes, and none of it comes to rest on the way',
     crateLifted.host.heldById === ids.other && crateLifted.host.inIt === 3 && crateCarried.fewestInItForHost === 3 && crateCarried.mostAsleepForHost === 0 &&
     Math.hypot(crateCarried.host.x - crateFilled.host.x, crateCarried.host.z - crateFilled.host.z) > 2 && Math.hypot(crateCarried.host.x - crateCarried.other.x, crateCarried.host.z - crateCarried.other.z) < 0.3,
@@ -663,6 +683,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     crateSetDown.atRest && crateSetDown.host.inIt === 3 && crateSetDown.other.inIt === 3 && crateSetDown.host.ownerId === ids.host && crateSetDown.host.heldById === 0 &&
     crateSetDown.host.things.every((thing, index) => Math.hypot(thing.x - crateSetDown.other.things[index].x, thing.y - crateSetDown.other.things[index].y, thing.z - crateSetDown.other.things[index].z) < 0.03) &&
     Math.hypot(crateSetDown.host.x - crateSetDown.other.x, crateSetDown.host.y - crateSetDown.other.y, crateSetDown.host.z - crateSetDown.other.z) < 0.03, crateSetDown);
+  await a.evaluate(() => window.undoSlowLine());
+  await pause(800); // (what was still on its way has arrived)
   for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } delete d.looseObjectKinds.testCrate; delete d.looseObjectKinds.testWeight; }, crateIds[0]);
 
   // Something breaks: it is gone from both games.
@@ -972,7 +994,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // ---- A lobby lasts longer than one descent ----
   // A third joins while the two are down. They wait at the title screen.
-  const third = await openGame({ address: address });
+  const third = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
   const c = third.page;
   await c.fill('#together-code', code);
   await c.click('#button-join-lobby');
@@ -1030,15 +1052,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // The one who is still down there is caught, and waits for somebody to carry their scanner back.
   // (Well away from the host first: it catches everyone within its reach, and both stood in the car. The host's
-  // page draws nothing by now, so it is asked on a timer whether it has heard where they went.)
+  // page draws nothing by now, so it is asked on a timer whether it has heard where they went.
+  // And they say where they are themselves, at once. Where you are is said from a frame of your game, and with
+  // three browsers drawing in software a page that is playing draws one every few seconds: on a slow machine
+  // not one in the time the host waited. The Hollow was then put where they had been, not where they were, and
+  // had not caught them when this went on.)
   await c.evaluate(() => {
     const d = window.lastReturnDebug;
-    for (let step = 6; step < 20; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+    findSpot: for (let step = 6; step < 20; step++) for (const way of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
       const spot = d.findWalkableSpotNear(d.playerStart.x + way[0], d.playerStart.z + way[1]);
-      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 5) { d.teleport(spot.x, spot.z, 0); return; }
+      if (spot && Math.hypot(spot.x - d.playerStart.x, spot.z - d.playerStart.z) > 5) { d.teleport(spot.x, spot.z, 0); break findSpot; }
     }
+    for (let count = 0; count < 3; count++) d.updateTogether(0.1);
   });
-  await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 8000 }).catch(() => {});
+  const hasHostHeard = await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 20000 }).then(() => true, () => false);
   await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.spawnHollow(other.x + 0.3, other.z); d.hollow.graceTimer = 0; });
   await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
   await drawUntilDead(c);
@@ -1046,6 +1073,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // (Shown when the check fails: whether the host's game caught them at all, and where its Hollow went.)
   waitingDead.asTheHostHasIt = await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, others: d.together.others.length, players: d.players.length, isDown: other && other.isDown, hasBeenHeardFrom: other && other.hasBeenHeardFrom,
     metresToHost: other ? Math.hypot(other.x - d.player.x, other.z - d.player.z) : null, hollow: { isActive: d.hollow.isActive, state: d.hollow.state, metresToThem: other ? Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) : null, graceTimer: d.hollow.graceTimer } }; }).catch(() => null);
+  // Being caught is the host's to say, and is heard when it is said, drawn or not. Dying is their own game's to
+  // carry out, a second and a half of it, and that takes frames: so their page is drawn until they are dead.
+  // (Only once they are dying. A picture of a page that is still playing is the slowest there is, and has been
+  // seen to take longer than the thirty seconds a picture is given, which ended the suite then and there.)
+  const isCaught = await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 30000 }).then(() => true, () => false);
+  if (isCaught) await drawUntilDead(c);
+  const waitingDead = await c.evaluate((heard) => ({ hasHostHeardWhereTheyWent: heard[0], isCaught: heard[1], mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }), [hasHostHeard, isCaught]);
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
   await first.browser.close();
