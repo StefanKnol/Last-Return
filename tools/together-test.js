@@ -1079,7 +1079,6 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // seen to take longer than the thirty seconds a picture is given, which ended the suite then and there.)
   const isCaught = await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 30000 }).then(() => true, () => false);
   if (isCaught) await drawUntilDead(c);
-  const waitingDead = await c.evaluate((heard) => ({ hasHostHeardWhereTheyWent: heard[0], isCaught: heard[1], mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }), [hasHostHeard, isCaught]);
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
   await first.browser.close();
