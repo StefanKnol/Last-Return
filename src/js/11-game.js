@@ -680,6 +680,7 @@ function updateDying(dt) {
     game.mode = 'dead';
     game.fade = 0;
     sendCreaturesAwayAfterCatch(sequence.kind); // down there with others, as their host: it does not stand over you while the others play on
+    spillOwnPockets(); // what was in your pockets lies where you fell (08-pockets.js)
     if (isWorldShared()) askToAct({ what: 'fall', x: player.x, y: getFloorHeightAt(player.x, player.z) + 0.25, z: player.z }); // your scanner lies where you fell
     silenceGameplaySounds();
     if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
@@ -1239,6 +1240,9 @@ function startApplication() {
       result.canIsNow = getLooseObjectLabel(can); result.isStillInTheBeam = looseState.held === can;
       return result;
     },
+    // Pockets (08-pockets.js): whose hold what, what fits, and the things done to them.
+    pocketsByPlayer: pocketsByPlayer, getOwnPockets: getOwnPockets, getPocketsOf: getPocketsOf, canLooseObjectBePocketed: canLooseObjectBePocketed,
+    listPocketedObjects: listPocketedObjects, getPocketMass: getPocketMass, canSprintWhileCarrying: canSprintWhileCarrying, findPocketedObject: findPocketedObject, spillOwnPockets: spillOwnPockets,
     // Fuel (09-quests.js): the empty tanks, the can a quest put out (by the number the quest gave it), and the rules.
     getFuelTanks: function () { return level.fuelTanks; }, findFuelTankAt: findFuelTankAt, pourFuelIntoTank: pourFuelIntoTank,
     findQuestItem: function (questObjectId) { return looseObjects.filter(function (object) { return object.questObjectId === questObjectId; })[0] || null; },

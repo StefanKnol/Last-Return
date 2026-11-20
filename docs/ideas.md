@@ -10,6 +10,10 @@
   - ~~health items to be found (physics based)~~ (first aid kits, a few to a station, used with Q)
   - still open: hurt by a fall (the drop in a vent costs nothing but noise), hurt by what the Hollow throws back, a first aid kit to buy in the shop, the others seeing how hurt you are
 
+- inventory
+  - ~~pockets for the tools: four of them, for scan grenades and first aid kits; R puts away, 4 to 7 take out; dropped where you die~~ (in: 08-pockets.js)
+  - still open: the survey spools (and core samples, crew badges) as things you carry or pocket and bring to the lift
+
 - shop in item collection mode (repo mode)
   - what the tools sell for is set already and is meant to be far below what they cost: a scan grenade 15, a scanner tripod 60, a first aid kit 20
 

@@ -936,6 +936,12 @@ function readAction(data) {
   if ((data.what === 'take' || data.what === 'release' || data.what === 'carry' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
   // What lives down there arrives (the host's to decide, likewise: 08-arrivals.js).
   if (data.what === 'arrive' && findCreatureArrival(data.key) && (data.cause === 'time' || data.cause === 'noise' || data.cause === 'mains')) return { what: 'arrive', key: data.key, cause: data.cause };
+  // Pockets (08-pockets.js): a thing put into one, taken out of one, and all of them emptied where somebody fell.
+  if (data.what === 'stow' && Number.isInteger(data.id) && Number.isInteger(data.slot) && data.slot >= 0 && data.slot < TUNING.pocketCount) return { what: 'stow', id: data.id, slot: data.slot };
+  if (data.what === 'unstow' && Number.isInteger(data.id)) return { what: 'unstow', id: data.id };
+  if (data.what === 'spill' && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
+    return { what: 'spill', x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
+  }
   // A splash from a fuel can into a tank (the host's to decide: see hearOfTheStation, which lets nobody else ask).
   if (data.what === 'pour' && Number.isInteger(data.id) && Number.isInteger(data.tank)) return { what: 'pour', id: data.id, tank: data.tank };
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
@@ -980,6 +986,7 @@ function performAction(action) {
     game.isDescentLost = true;
     if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // it says so
   }
+  else if (isPocketAction(action.what)) performPocketAction(action);
   else performLooseAction(action);
 }
 
@@ -1268,6 +1275,9 @@ function hearWhereLooseThingsAre(id, data) {
 
 // One of the others is no longer down here: what was theirs to move, or in their beam, is the host's.
 function handBackLooseThingsOf(id) {
+  // What they had in their pockets lies where they last stood.
+  const leaving = findOtherPlayer(id);
+  if (leaving) spillPocketsOf(id, leaving.x, getFloorHeightAt(leaving.x, leaving.z) + 0.3, leaving.z);
   for (const object of looseObjects) {
     if (object.heldById === id) object.heldById = 0;
     if (object.ownerId === id) { object.ownerId = together.hostId; if (isLobbyHost()) wakeLooseObject(object); }

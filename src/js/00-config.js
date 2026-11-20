@@ -268,6 +268,7 @@ const TUNING = {
   looseHoldStopSpeed: 3,            // ... by up to this many metres a second: enough to stop a walk (2.5), not a run (4.6)
   looseHoldBreakDistance: 0.9,      // caught on something and further than this from where the beam wants it ...
   looseHoldBreakSeconds: 0.25,      // ... for this long, and the beam loses it. (Not caught on anything, it has to be two and a half times as far.)
+  pocketCount: 4,                   // how many pockets you have: one thing to a pocket, and only the kinds marked `pocket` (08-pockets.js)
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
   // The scan grenade (a loose object that does something: see `use` in LOOSE_OBJECT_KINDS).
   // The scanner tripod (08-loose-objects.js): switched on with Q, it scans what is in front of it in pulses.
