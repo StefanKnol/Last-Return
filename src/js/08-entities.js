@@ -10,7 +10,12 @@ const HOLLOW_STATE_SEARCH = 3;
 const HOLLOW_STATE_LISTEN = 4;   // standing still, listening harder than usual
 
 
-const hollow = {
+// How the Hollow gets around (08-creatures.js): it goes down on knees and hands to get through a vent, it uses
+// the ceiling hatches, and only some doors open for it (canHollowOpenDoor, 08-crawlspace.js).
+const HOLLOW_WAY = createCreatureWay({ key: 'hollow', canOpenDoor: canHollowOpenDoor, fitsVents: true, usesHatches: true });
+
+// (createCreatureLegs gives it what it walks by: its way, and how far it is to where it is going.)
+const hollow = Object.assign(createCreatureLegs(HOLLOW_WAY), {
   figure: createFigureOfKind('hollow'),
   isActive: false,
   state: HOLLOW_STATE_ROAM,
@@ -41,16 +46,14 @@ const hollow = {
   graceTimer: 0,
   stingerCooldown: 0,
   armRaise: 0,
-  distanceField: new Int16Array(TILE_COUNT),
-  fieldTargetIndex: -1,
-  fieldVersion: -1,           // the value of hollowNavigationVersion its way was last worked out for
-  isTargetOutOfReach: false,  // where it was last sent is behind a door it cannot pass, with no way round
+  climbIntoHatch: beginHollowCrawl,           // under a hatch that is its shortest way on (moveCreatureToward)
+  waitsBeforeHatch: chooseDoorBeforeCrawling, // ... unless there is a door it would rather go at first
   crawlspace: null,           // while it is going through the crawlspace: where from, where to, how far along (08-crawlspace.js)
   doorBang: null,             // while it is going at a door: which door, which side it stands on, how far along
   doorCheckTimer: 0,          // it looks for a door worth breaking a few times a second, not every frame
   currentSpeed: 0,
   knowsPlayerPositionAlways: false
-};
+});
 
 const playerDistanceField = new Int16Array(TILE_COUNT);
 let playerDistanceFieldAge = 99;
@@ -82,7 +85,7 @@ function findPlayerTileIndexes(among) {
 }
 
 // ---------------------------------------------------------------------------
-// Noise: anything loud the player does is reported here
+// Noise: what the Hollow hears
 // ---------------------------------------------------------------------------
 
 // How much better than normal the Hollow hears right now: anger sharpens it, and so does standing still to listen.
@@ -92,14 +95,8 @@ function getHollowHearingBoost() {
     (hollow.state === HOLLOW_STATE_LISTEN ? TUNING.hollowListenHearingFactor : 1);
 }
 
-function emitNoise(x, z, radius) {
-  // Down there with others, in the host's station: the Hollow that hears this is the host's (11-together.js).
-  if (isWorldTheHosts()) { tellHostOfNoise(x, z, radius); return; }
-  shareWorldSoundsDuring(function () { hearNoise(x, z, radius); }); // what it sounds like when it hears this is everybody's
-}
-
-function hearNoise(x, z, radius) {
-  noteNoiseForArrivals(x, z, radius); // what is not here yet comes sooner for it (08-arrivals.js)
+// What the Hollow makes of a noise (emitNoise and hearNoise are in 08-creatures.js: every kind of creature is told).
+function hearNoiseAsHollow(x, z, radius) {
   const effectiveRadius = radius * game.difficulty.hearingFactor * getHollowHearingBoost();
   if (debugHooks.recordNoise) debugHooks.recordNoise(x, z, effectiveRadius);
   if (!hollow.isActive || hollow.graceTimer > 0 || debugState.options.creaturesIgnorePlayer) return;
@@ -174,6 +171,7 @@ function tellPlayerOfShutDoor(door, dt) {
 }
 
 function updateDoors(dt) {
+  const walkers = findCreatureWalkers(); // every creature that is on its feet in the station (08-creatures.js)
   for (const door of doors) {
     door.bangCooldown = Math.max(0, door.bangCooldown - dt);
     if (door.isBroken) continue; // broken down: it stays as it fell
@@ -190,12 +188,13 @@ function updateDoors(dt) {
       const isSomeoneNear = distanceBetweenPoints(nearestPlayer.x, nearestPlayer.z, door.centerX, door.centerZ) < 1.9;
       if (isSomeoneNear && canPlayerOpenDoor(door)) { wantsOpen = true; openedByPlayer = true; }
       tellPlayerOfShutDoor(door, dt);
-      // The Hollow: a door opens for it only if it is one it can open (not a keycard door: see 08-crawlspace.js).
-      // A door that is already open for someone else never closes on it.
-      if (hollow.isActive && !isHollowInCrawlspace()) {
-        const hollowDistance = distanceBetweenPoints(hollow.figure.x, hollow.figure.z, door.centerX, door.centerZ);
-        if (hollowDistance < 1.8 && canHollowOpenDoor(door)) wantsOpen = true;
-        else if (hollowDistance < 1.0 && door.openFraction > 0) wantsOpen = true;
+      // What walks down there: a door opens for one of them only if its way of getting around says so (for the
+      // Hollow, not a keycard door: see 08-crawlspace.js). A door that is already open for someone else never
+      // closes on one.
+      for (const walker of walkers) {
+        const walkerDistance = distanceBetweenPoints(walker.figure.x, walker.figure.z, door.centerX, door.centerZ);
+        if (walkerDistance < 1.8 && walker.way.canOpenDoor(door)) wantsOpen = true;
+        else if (walkerDistance < 1.0 && door.openFraction > 0) wantsOpen = true;
       }
       if (stillsAreHunting && !wantsOpen) {
         for (const still of stills) {
@@ -209,7 +208,7 @@ function updateDoors(dt) {
     if (!wantsOpen && door.forcedState === null && door.openFraction > 0 && isLooseObjectInDoorway(door)) wantsOpen = true;
     moveDoor(door, wantsOpen, openedByPlayer, 1.3, dt);
   }
-  refreshHollowDoorBlocks();
+  refreshCreatureDoorBlocks();
 }
 
 // One frame of a door going where it is wanted: up while `wantsOpen`, and down again `holdSeconds` after it
@@ -473,87 +472,13 @@ function beginHollowHunt(x, z) {
   }
 }
 
-function moveHollowToward(targetX, targetZ, speed, dt) {
-  const figure = hollow.figure;
-  const targetIndex = findNearestWalkableTileIndex(targetX, targetZ);
-  // Its way is worked out again when it is sent somewhere else, and when a door opens or closes to it.
-  if (targetIndex !== hollow.fieldTargetIndex || hollow.fieldVersion !== hollowNavigationVersion) {
-    computeHollowDistanceField(hollow.distanceField, targetIndex, true);
-    hollow.fieldTargetIndex = targetIndex;
-    hollow.fieldVersion = hollowNavigationVersion;
-  }
-  hollow.isTargetOutOfReach = false;
-  let goalX = targetX, goalZ = targetZ;
-  const directDistance = distanceBetweenPoints(figure.x, figure.z, targetX, targetZ);
-  const canWalkStraight = directDistance < 8 && hasClearHollowWalkingLine(figure.x, figure.z, targetX, targetZ) &&
-    getZoneAtPosition(targetX, targetZ) !== level.storeZone;
-  if (!canWalkStraight) {
-    const tileX = Math.floor(figure.x), tileZ = Math.floor(figure.z);
-    const currentIndex = isInsideGrid(tileX, tileZ) ? tileIndexAt(tileX, tileZ) : -1;
-    const field = hollow.distanceField;
-    if (currentIndex < 0 || field[currentIndex] >= NAVIGATION_UNREACHABLE) {
-      // Standing somewhere it cannot path from: drift to the nearest tile it can.
-      let bestIndex = -1, bestDistance = Infinity;
-      for (let offsetZ = -3; offsetZ <= 3; offsetZ++) {
-        for (let offsetX = -3; offsetX <= 3; offsetX++) {
-          const nearX = tileX + offsetX, nearZ = tileZ + offsetZ;
-          if (!isInsideGrid(nearX, nearZ)) continue;
-          const nearIndex = tileIndexAt(nearX, nearZ);
-          if (field[nearIndex] >= NAVIGATION_UNREACHABLE) continue;
-          // Not one on the far side of a wall or of a door that is shut to it: it would drift straight through.
-          if (!isOpenGroundBetween(figure.x, figure.z, nearX + 0.5, nearZ + 0.5)) continue;
-          const nearDistance = distanceBetweenPoints(figure.x, figure.z, nearX + 0.5, nearZ + 0.5);
-          if (nearDistance < bestDistance) { bestDistance = nearDistance; bestIndex = nearIndex; }
-        }
-      }
-      if (bestIndex < 0) { hollow.isTargetOutOfReach = true; return 0; } // behind a door it cannot pass, with no way round
-      goalX = bestIndex % GRID_WIDTH + 0.5; goalZ = Math.floor(bestIndex / GRID_WIDTH) + 0.5;
-    } else if (field[currentIndex] > 0 && findHollowHatchAtTile(currentIndex) && findHollowCrawlFrom(findHollowHatchAtTile(currentIndex), field)) {
-      // Under a ceiling hatch, and the shortest way on is up through it: stand right under it, then climb in.
-      const hatch = findHollowHatchAtTile(currentIndex);
-      if (chooseDoorBeforeCrawling()) return 0; // (hunting, with a door in its face: the door first. 08-crawlspace.js)
-      if (distanceBetweenPoints(figure.x, figure.z, hatch.x, hatch.z) < 0.25) {
-        beginHollowCrawl(hatch, findHollowCrawlFrom(hatch, field));
-        return 0;
-      }
-      goalX = hatch.x; goalZ = hatch.z;
-    } else if (field[currentIndex] > 0) {
-      let bestValue = field[currentIndex], bestX = tileX, bestZ = tileZ, bestIsDiagonal = false;
-      for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
-        for (let offsetX = -1; offsetX <= 1; offsetX++) {
-          if (offsetX === 0 && offsetZ === 0) continue;
-          const nearX = tileX + offsetX, nearZ = tileZ + offsetZ;
-          if (!isInsideGrid(nearX, nearZ)) continue;
-          const value = field[tileIndexAt(nearX, nearZ)];
-          if (value >= NAVIGATION_UNREACHABLE) continue;
-          const isDiagonal = offsetX !== 0 && offsetZ !== 0;
-          if (isDiagonal && (!isWalkableAt(tileX + offsetX, tileZ) || !isWalkableAt(tileX, tileZ + offsetZ))) continue;
-          if (value < bestValue || (value === bestValue && bestIsDiagonal && !isDiagonal && value < field[currentIndex])) {
-            bestValue = value; bestX = nearX; bestZ = nearZ; bestIsDiagonal = isDiagonal;
-          }
-        }
-      }
-      goalX = bestX + 0.5; goalZ = bestZ + 0.5;
-    }
-  }
-  const deltaX = goalX - figure.x, deltaZ = goalZ - figure.z;
-  const distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
-  if (distance < 0.05) return 0;
-  const step = Math.min(distance, speed * dt);
-  figure.x += deltaX / distance * step;
-  figure.z += deltaZ / distance * step;
-  const desiredYaw = Math.atan2(deltaX, -deltaZ);
-  figure.yaw += clampNumber(wrapAngleToPi(desiredYaw - figure.yaw), -dt * 5, dt * 5);
-  return step;
-}
-
 // Where it starts looking once it has lost you: a little ahead of where you were last sensed,
 // in the direction you were moving, if it can walk there in a straight line.
 function chooseHollowSearchCenter() {
   const figure = hollow.figure;
   const leadX = hollow.lastKnownPlayerX + hollow.lastKnownVelocityX * TUNING.hollowSearchLeadSeconds;
   const leadZ = hollow.lastKnownPlayerZ + hollow.lastKnownVelocityZ * TUNING.hollowSearchLeadSeconds;
-  if (isWalkableAt(Math.floor(leadX), Math.floor(leadZ)) && hasClearHollowWalkingLine(hollow.lastKnownPlayerX, hollow.lastKnownPlayerZ, leadX, leadZ) &&
+  if (isWalkableAt(Math.floor(leadX), Math.floor(leadZ)) && hasClearWalkingLineForWay(HOLLOW_WAY, hollow.lastKnownPlayerX, hollow.lastKnownPlayerZ, leadX, leadZ) &&
       getZoneAtPosition(leadX, leadZ) !== level.storeZone) {
     hollow.searchCenterX = leadX; hollow.searchCenterZ = leadZ;
     hollow.targetX = leadX; hollow.targetZ = leadZ;
@@ -733,7 +658,7 @@ function updateHollow(dt) {
     if (hollow.enragedTimer > 0) hollow.stunSeconds = 0; else speed = 0;
   }
 
-  const movedDistance = speed > 0 ? moveHollowToward(hollow.targetX, hollow.targetZ, speed, dt) : 0;
+  const movedDistance = speed > 0 ? moveCreatureToward(hollow, hollow.targetX, hollow.targetZ, speed, dt) : 0;
   hollow.currentSpeed = movedDistance / Math.max(dt, 0.0001);
 
   // ---- pose ----
@@ -987,3 +912,20 @@ function getNearestHuntingStillDistance() {
   }
   return nearest;
 }
+
+// ---------------------------------------------------------------------------
+// The two kinds of creature in this file, for the game to run (CREATURE_KINDS, 08-creatures.js)
+// ---------------------------------------------------------------------------
+
+addCreatureKind({
+  key: 'hollow',
+  update: updateHollow,
+  holdStill: function () { hollow.figure.hitsThisFrame = 0; }, // what the beam put on it meanwhile is not counted up for later
+  reset: function () { deactivateHollow(); hollow.knowsPlayerPositionAlways = false; },
+  hear: hearNoiseAsHollow,
+  // Above the ceilings it is at no door.
+  walkers: function (into) { if (hollow.isActive && !isHollowInCrawlspace()) into.push(hollow); }
+});
+
+// (The Stills hear nothing, and a door opens for them by a rule of their own: see updateDoors.)
+addCreatureKind({ key: 'stills', update: updateStills, reset: createStills });

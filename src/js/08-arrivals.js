@@ -102,7 +102,7 @@ function updateArrivals(dt) {
   }
 }
 
-// A noise was made somewhere in the station (hearNoise, 08-entities.js): it takes time off every wait. `radius`
+// A noise was made somewhere in the station (hearNoise, 08-creatures.js): it takes time off every wait. `radius`
 // is how far it carries as it was made, before anybody's hearing has a say.
 // (It only notes that a wait is over. The arriving is done at the next turn of the station, and not in the
 // middle of whatever made the noise.)

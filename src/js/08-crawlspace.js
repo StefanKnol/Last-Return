@@ -19,12 +19,11 @@
 //
 // To its path finding the crawlspace is a set of expensive short cuts between hatches, so it only goes up there
 // when walking is much further, or impossible. The numbers are in 00-config.js under "The crawlspace".
+//
+// Which doors are shut to it at this moment, and the path finding itself, are not the Hollow's alone: they are
+// its way of getting around (HOLLOW_WAY, 08-entities.js), and the code for a way is in 08-creatures.js. Another
+// creature can be given a way that uses these same hatches.
 // ---------------------------------------------------------------------------
-
-// 1 for the tile of every door that is closed to the Hollow at this moment.
-const tileBlocksHollow = new Uint8Array(TILE_COUNT);
-// Goes up by one whenever a door opens or closes to the Hollow, so that it knows to work out its way again.
-let hollowNavigationVersion = 0;
 
 // The ceiling hatches of this station: { x, z, index, part, ceilingY, isOpen, cover }.
 // `isOpen` is false until the Hollow has used the hatch once; `cover` is the part of it that moves.
@@ -53,128 +52,7 @@ function canHollowOpenDoor(door) {
 
 // True if the Hollow can get through this door right now: it opens for it, or it is standing open anyway.
 function isDoorPassableToHollow(door) {
-  return canHollowOpenDoor(door) || door.openFraction > 0.6;
-}
-
-// Brings tileBlocksHollow up to date with the doors. Called every frame after the doors have moved; cheap.
-function refreshHollowDoorBlocks() {
-  let hasChanged = false;
-  for (const door of doors) {
-    const index = tileIndexAt(door.tileX, door.tileZ);
-    const isBlocked = isDoorPassableToHollow(door) ? 0 : 1;
-    if (tileBlocksHollow[index] !== isBlocked) { tileBlocksHollow[index] = isBlocked; hasChanged = true; }
-  }
-  if (hasChanged) hollowNavigationVersion++;
-}
-
-// A tile the Hollow can walk on right now: walkable, and not the tile of a door that is shut to it.
-function isTileWalkableForHollow(tileX, tileZ) {
-  return isWalkableAt(tileX, tileZ) && tileBlocksHollow[tileIndexAt(tileX, tileZ)] !== 1;
-}
-
-// A tile that is neither wall nor a door shut to the Hollow. There may be furniture on it.
-function isTileOpenGroundForHollow(tileX, tileZ) {
-  if (!isInsideGrid(tileX, tileZ)) return false;
-  const index = tileIndexAt(tileX, tileZ);
-  return tileIsOpen[index] === 1 && tileBlocksHollow[index] !== 1;
-}
-
-// True when a straight walk between two points stays on walkable tiles and goes through no door that is shut to the Hollow.
-function hasClearHollowWalkingLine(fromX, fromZ, toX, toZ) {
-  return isLineClearOfTiles(fromX, fromZ, toX, toZ, isTileWalkableForHollow, false);
-}
-
-// True when a straight line from where the Hollow stands to a point crosses no wall and no door that is shut
-// to it. It is for getting the Hollow back onto walkable floor when it has ended up standing where it cannot
-// path from, so unlike the function above it does not mind furniture, and it does not mind what the Hollow is
-// standing in either: a doorway that has shut on it, or a wall, is exactly what it has to be let out of.
-function isOpenGroundBetween(fromX, fromZ, toX, toZ) {
-  return isLineClearOfTiles(fromX, fromZ, toX, toZ, isTileOpenGroundForHollow, true);
-}
-
-// ---------------------------------------------------------------------------
-// Path finding for the Hollow: walking, plus the crawlspace
-// ---------------------------------------------------------------------------
-
-// What a crawl between two hatches costs, in steps of walking. See hollowCrawlFixedSteps in 00-config.js.
-function getHollowCrawlSteps(firstHatch, secondHatch) {
-  return Math.round(TUNING.hollowCrawlFixedSteps +
-    distanceBetweenPoints(firstHatch.x, firstHatch.z, secondHatch.x, secondHatch.z) * TUNING.hollowCrawlStepsPerMetre);
-}
-
-// Spreads walking distance outward from one tile that already has its distance in `field`, lowering any tile
-// it can reach more cheaply. The Hollow's rules: not through a door shut to it, not into the calibration store.
-function spreadHollowDistance(field, startIndex) {
-  let queueHead = 0, queueTail = 0;
-  navigationQueue[queueTail++] = startIndex;
-  while (queueHead < queueTail) {
-    const index = navigationQueue[queueHead++];
-    const nextDistance = field[index] + 1;
-    const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
-    for (let direction = 0; direction < 4; direction++) {
-      const neighbourX = tileX + (direction === 0 ? 1 : direction === 1 ? -1 : 0);
-      const neighbourZ = tileZ + (direction === 2 ? 1 : direction === 3 ? -1 : 0);
-      if (!isInsideGrid(neighbourX, neighbourZ)) continue;
-      const neighbourIndex = neighbourZ * GRID_WIDTH + neighbourX;
-      if (tileIsWalkable[neighbourIndex] === 0 || field[neighbourIndex] <= nextDistance) continue;
-      if (tileBlocksHollow[neighbourIndex] === 1) continue;
-      if (Math.abs(tileFloorHeight[neighbourIndex] - tileFloorHeight[index]) > MAXIMUM_STEP_HEIGHT) continue;
-      if (level.storeZone && tileZone[neighbourIndex] === level.storeZone) continue;
-      field[neighbourIndex] = nextDistance;
-      navigationQueue[queueTail++] = neighbourIndex;
-    }
-  }
-}
-
-// How far the Hollow has to go from every tile to reach the target tile, in steps: on foot where it can, and
-// through the crawlspace where that is cheaper or the only way. `useCrawlspace` false leaves the crawlspace out
-// (used to check that the locks really do stop it).
-function computeHollowDistanceField(field, targetIndex, useCrawlspace) {
-  field.fill(NAVIGATION_UNREACHABLE);
-  if (targetIndex < 0) return;
-  field[targetIndex] = 0;
-  spreadHollowDistance(field, targetIndex);
-  if (useCrawlspace === false) return;
-  // A hatch can also be reached from any other hatch, at the price of the crawl. Each time that turns out
-  // cheaper than what a hatch had, the saving is spread outward from it on foot. Repeated until nothing improves.
-  for (let pass = 0; pass <= hollowHatches.length; pass++) {
-    let hasImproved = false;
-    for (const hatch of hollowHatches) {
-      let best = field[hatch.index];
-      for (const other of hollowHatches) {
-        if (other === hatch || field[other.index] >= NAVIGATION_UNREACHABLE) continue;
-        best = Math.min(best, field[other.index] + getHollowCrawlSteps(hatch, other));
-      }
-      if (best < field[hatch.index]) {
-        field[hatch.index] = best;
-        spreadHollowDistance(field, hatch.index);
-        hasImproved = true;
-      }
-    }
-    if (!hasImproved) break;
-  }
-}
-
-function findHollowHatchAtTile(tileIndex) {
-  for (const hatch of hollowHatches) if (hatch.index === tileIndex) return hatch;
-  return null;
-}
-
-// Standing on a hatch tile: if the shortest way on from here is up through the hatch, returns the hatch to
-// crawl to. Otherwise (walking on is as good or better) returns null.
-function findHollowCrawlFrom(hatch, field) {
-  const tileX = hatch.index % GRID_WIDTH, tileZ = (hatch.index - tileX) / GRID_WIDTH;
-  let bestOnFoot = NAVIGATION_UNREACHABLE;
-  for (const step of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    if (isInsideGrid(tileX + step[0], tileZ + step[1])) bestOnFoot = Math.min(bestOnFoot, field[tileIndexAt(tileX + step[0], tileZ + step[1])]);
-  }
-  let bestHatch = null, bestThroughCeiling = NAVIGATION_UNREACHABLE;
-  for (const other of hollowHatches) {
-    if (other === hatch || field[other.index] >= NAVIGATION_UNREACHABLE) continue;
-    const steps = field[other.index] + getHollowCrawlSteps(hatch, other);
-    if (steps < bestThroughCeiling) { bestThroughCeiling = steps; bestHatch = other; }
-  }
-  return bestThroughCeiling < bestOnFoot + 1 ? bestHatch : null;
+  return isDoorPassableToWay(HOLLOW_WAY, door);
 }
 
 // ---------------------------------------------------------------------------
@@ -316,12 +194,12 @@ function findDoorWorthBreaking() {
   // The way it would have to walk as things stand (maybe "no way at all"). Not the way over the ceiling: a door
   // in its face is what it goes at first, and the crawlspace is what it falls back on when the door has held.
   const onFoot = borrowTileField('doorWorthBreaking');
-  computeHollowDistanceField(onFoot, hollow.fieldTargetIndex, false);
+  computeWayDistanceField(HOLLOW_WAY, onFoot, hollow.fieldTargetIndex, false);
   const stepsRound = onFoot[hereIndex];
   let best = null, bestSaving = TUNING.hollowDoorBangWorthSteps;
   for (const door of doors) {
     if (!isDoorBreakable(door) || door.bangCooldown > 0) continue;
-    if (tileBlocksHollow[tileIndexAt(door.tileX, door.tileZ)] !== 1) continue;  // it is open: just walk through
+    if (HOLLOW_WAY.tileBlocks[tileIndexAt(door.tileX, door.tileZ)] !== 1) continue;  // it is open: just walk through
     if (game.flags.keycardLevel < door.cardLevel) continue;                     // not one you could open: leave it be
     const sides = getDoorSides(door);
     if (!sides) continue;
@@ -329,7 +207,7 @@ function findDoorWorthBreaking() {
       const near = sides[order], far = sides[1 - order];
       const metres = distanceBetweenPoints(figure.x, figure.z, near.x, near.z);
       if (metres > TUNING.hollowDoorBangWithinMetres || field[far.index] >= NAVIGATION_UNREACHABLE) continue;
-      if (!hasClearHollowWalkingLine(figure.x, figure.z, near.x, near.z)) continue;
+      if (!hasClearWalkingLineForWay(HOLLOW_WAY, figure.x, figure.z, near.x, near.z)) continue;
       const stepsThrough = metres + 2 + field[far.index];
       const saving = stepsRound - stepsThrough;
       if (saving >= bestSaving) { bestSaving = saving; best = { door: door, stand: near }; }
@@ -356,7 +234,7 @@ function updateHollowDoorChoice(dt) {
   hollow.doorCheckTimer = 0.4;
   // Its distance field has to be the one for where it is hunting to, or the sums below mean nothing.
   if (hollow.fieldTargetIndex !== findNearestWalkableTileIndex(hollow.lastKnownPlayerX, hollow.lastKnownPlayerZ)) return;
-  if (hollow.fieldVersion !== hollowNavigationVersion) return;
+  if (hollow.fieldVersion !== HOLLOW_WAY.version) return;
   const found = findDoorWorthBreaking();
   if (found) hollow.doorBang = { door: found.door, standX: found.stand.x, standZ: found.stand.z, isPounding: false, timer: 0, hits: 0, hitTimer: 0 };
 }
@@ -366,7 +244,7 @@ function updateHollowDoorChoice(dt) {
 // turn of the clock in updateHollowDoorChoice: under a hatch it would be gone before that came round.)
 function chooseDoorBeforeCrawling() {
   if (hollow.state !== HOLLOW_STATE_HUNT || hollow.doorBang) return false;
-  if (hollow.fieldTargetIndex !== findNearestWalkableTileIndex(hollow.lastKnownPlayerX, hollow.lastKnownPlayerZ) || hollow.fieldVersion !== hollowNavigationVersion) return false;
+  if (hollow.fieldTargetIndex !== findNearestWalkableTileIndex(hollow.lastKnownPlayerX, hollow.lastKnownPlayerZ) || hollow.fieldVersion !== HOLLOW_WAY.version) return false;
   const found = findDoorWorthBreaking();
   if (!found) return false;
   hollow.doorBang = { door: found.door, standX: found.stand.x, standZ: found.stand.z, isPounding: false, timer: 0, hits: 0, hitTimer: 0 };
@@ -441,7 +319,7 @@ function breakDoor(door) {
     game.flags.hasHeardOfBrokenDoor = true;
     scheduleEvent(3.5, function () { playRadioLine('doorBroken'); });
   }
-  refreshHollowDoorBlocks();
+  refreshCreatureDoorBlocks();
 }
 
 // Puts a door back as it was built: whole, undamaged, standing. For the start of a new descent.
@@ -462,9 +340,8 @@ function mendDoor(door) {
 function clearHollowHatches() {
   hollowHatches.length = 0;
   tileHollowPart.fill(0);
-  tileBlocksHollow.fill(0);
   hollowPartCount = 0;
-  hollowNavigationVersion++;
+  clearCreatureDoorBlocks();
 }
 
 // True for a door that stays shut to the Hollow whatever happens: a keycard door, the lift door.
@@ -616,7 +493,7 @@ function refreshHollowParts() {
   if (hollowHatches.length === 0) return;
   findHollowParts();
   for (const hatch of hollowHatches) hatch.part = tileHollowPart[hatch.index];
-  refreshHollowDoorBlocks();
+  refreshCreatureDoorBlocks();
 }
 
 // Where the hatches go. Nothing here is left to chance: the same station always gets the same hatches.
@@ -676,7 +553,7 @@ function placeHollowHatches() {
   // A locked-off part with nothing in it big enough for that: one hatch all the same, or it could never get in or out.
   for (let partNumber = 1; partNumber < parts.length; partNumber++) if (hatchesInPart[partNumber] === 0) placeIn(parts[partNumber], 1);
   level.hatchCount = hollowHatches.length;
-  refreshHollowDoorBlocks();
+  refreshCreatureDoorBlocks();
 }
 
 // ---- The part you can reach without the mains ----
@@ -715,7 +592,7 @@ function findUnpoweredStartTiles() {
 function auditHollowRoutes() {
   const problems = [];
   // As at the worst moment for it once the mains is on: every keycard door and the lift door shut.
-  const savedBlocks = tileBlocksHollow.slice();
+  const tileBlocksHollow = HOLLOW_WAY.tileBlocks, savedBlocks = tileBlocksHollow.slice();
   for (const door of doors) tileBlocksHollow[tileIndexAt(door.tileX, door.tileZ)] = isLockingDoorKind(door.kind) || door.kind === DOOR_KIND_BAY ? 1 : 0;
   const hatchesInPart = new Array(hollowPartCount + 1).fill(0);
   for (const hatch of hollowHatches) {
@@ -730,14 +607,14 @@ function auditHollowRoutes() {
   }
   const startIndex = findNearestWalkableTileIndex(HOLLOW_SPAWN_POSITION.x, HOLLOW_SPAWN_POSITION.z);
   const field = borrowTileField('auditHollowRoutes');
-  computeHollowDistanceField(field, startIndex, true);
+  computeWayDistanceField(HOLLOW_WAY, field, startIndex, true);
   let unreachable = 0, partsReachedOnFoot = 0;
   for (let index = 0; index < TILE_COUNT; index++) {
     if (tileHollowPart[index] !== 0 && field[index] >= NAVIGATION_UNREACHABLE) unreachable++;
   }
   if (unreachable > 0) problems.push(unreachable + ' tile(s) the Hollow can never reach, even through the crawlspace');
   // And without the crawlspace it must be shut into the part it starts in, if there is more than one part.
-  computeHollowDistanceField(field, startIndex, false);
+  computeWayDistanceField(HOLLOW_WAY, field, startIndex, false);
   const reachedParts = new Set();
   for (let index = 0; index < TILE_COUNT; index++) if (tileHollowPart[index] !== 0 && field[index] < NAVIGATION_UNREACHABLE) reachedParts.add(tileHollowPart[index]);
   partsReachedOnFoot = reachedParts.size;
@@ -747,7 +624,7 @@ function auditHollowRoutes() {
   for (const door of doors) if (door.kind === DOOR_KIND_POWERED) tileBlocksHollow[tileIndexAt(door.tileX, door.tileZ)] = 1;
   const startTiles = findUnpoweredStartTiles();
   if (startTiles.length === 0) problems.push('there is no floor for the Hollow in the part of the station you can reach without the mains');
-  computeHollowDistanceField(field, startIndex, true);
+  computeWayDistanceField(HOLLOW_WAY, field, startIndex, true);
   let outOfReachBeforeMains = 0;
   for (const index of startTiles) if (field[index] >= NAVIGATION_UNREACHABLE) outOfReachBeforeMains++;
   if (outOfReachBeforeMains > 0) problems.push('before the mains is on the Hollow cannot get to ' + outOfReachBeforeMains + ' tile(s) of the part you can reach by then, even through the crawlspace');

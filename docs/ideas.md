@@ -44,11 +44,19 @@
     - shop at collection points or between levels (vending machines with limited stock and items randomly as well?)
 
 - more monsters to vary threat or increase it
+  - what they share is in place (08-creatures.js: ways of getting around, walking, hearing, the list of kinds); each is its own file of behaviour
+  - a few of the harmless ones from the start of a descent, how many by threat level (left alone by the crew, in lore)
   - lidar monster produces dots around it on everything, but can see the player
-  - small monster 
-    - moves objects (including what you need, chaseable and interruptable to get item back)
+    - nearly 2 m: no vents, but the ceiling hatches. A cone of pulses from its face, more of them while it hunts
+    - hits once and runs off (wants the health system)
+  - small monster (the looter)
+    - under a metre: walks through vents, cannot reach a hatch. Its nest is in a vent
+    - moves objects (including what you need, chaseable and interruptable to get item back): from an open bay, the fuel can
+    - out of your hands only if it can reach: held up high it tries and cannot
+    - scared off by sound
     - makes noise to summon other monsters (hits objects, walks in vents, etc.)
     - throws things at the player when angered (throwing the small monster or hitting it with stuff)
+  - more vents for it: more of them, T-junctions and crossings, one way down from an upper level. (A vent the player fits may not join two lock tiers; one too small for the player may)
   - other types of blind monsters with different systems for it
   - kidnapping monster that moves a player somewhere else
 

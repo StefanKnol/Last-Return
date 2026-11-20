@@ -181,9 +181,7 @@ function resetWorldState() {
   liftDoor.openFraction = 1;
   shutHollowHatches(); // the ceiling hatches are shut again until it has been through them
   raycastableFigures.length = 0;
-  deactivateHollow();
-  hollow.knowsPlayerPositionAlways = false;
-  createStills();
+  resetCreatures(); // the Hollow is not in the station, the Stills stand in their store (CREATURE_KINDS, 08-creatures.js)
   createPhantoms();
   resetPlayerToStart();
   game.checkpoint.x = PLAYER_START.x; game.checkpoint.z = PLAYER_START.z; game.checkpoint.yaw = PLAYER_START.yaw;
@@ -892,10 +890,10 @@ function updateStation(dt) {
   // (While it has hold of you, it has no mind for anything else. Alone that is the whole of the station
   // standing still; as the host of others it is only this, for the moment it takes.)
   if (debugState.options.freezeCreatures || game.mode === 'dying') {
-    hollow.figure.hitsThisFrame = 0;
+    holdCreaturesStill();
   } else {
     updateArrivals(dt); // what is not here yet may come now (08-arrivals.js)
-    shareWorldSoundsDuring(function () { updateHollow(dt); updateStills(dt); });
+    shareWorldSoundsDuring(function () { updateCreatures(dt); }); // every kind there is (08-creatures.js)
   }
 }
 
@@ -1226,7 +1224,11 @@ function startApplication() {
     arrivals: arrivals, creatureArrivals: CREATURE_ARRIVALS, getSecondsUntilArrival: getSecondsUntilArrival, resetArrivals: resetArrivals,
     doCreaturesArriveByThemselves: doCreaturesArriveByThemselves, findUnpoweredStartTiles: findUnpoweredStartTiles, hollowSpawn: HOLLOW_SPAWN_POSITION,
     // The Hollow and locked doors: its ceiling hatches, what is shut to it right now, and its way round.
-    hollowHatches: hollowHatches, tileBlocksHollow: tileBlocksHollow, auditHollowRoutes: auditHollowRoutes,
+    hollowHatches: hollowHatches, tileBlocksHollow: HOLLOW_WAY.tileBlocks, auditHollowRoutes: auditHollowRoutes,
+    // What the creatures have in common (08-creatures.js): the kinds, their ways of getting around, and the path finding of a way.
+    creatureKinds: CREATURE_KINDS, creatureWays: CREATURE_WAYS, createCreatureWay: createCreatureWay, createCreatureLegs: createCreatureLegs,
+    computeWayDistanceField: computeWayDistanceField, refreshCreatureDoorBlocks: refreshCreatureDoorBlocks, moveCreatureToward: moveCreatureToward,
+    findNearestWalkableTileIndex: findNearestWalkableTileIndex,
     gridWidth: GRID_WIDTH, // tiles in one row of the map: a tile's place in tileBlocksHollow is z * gridWidth + x
     findDoorWorthBreaking: findDoorWorthBreaking, breakDoor: breakDoor, mendDoor: mendDoor, getDoorSides: getDoorSides,
     playDoorBang: playDoorBang, playDoorBreak: playDoorBreak,
@@ -1239,7 +1241,7 @@ function startApplication() {
     getHollowStepsTo: function (x, z) {
       // How far the Hollow has to go from where it is to (x, z), in steps, crawlspace included.
       const field = borrowTileField('hollowStepsTo');
-      computeHollowDistanceField(field, findNearestWalkableTileIndex(x, z), true);
+      computeWayDistanceField(HOLLOW_WAY, field, findNearestWalkableTileIndex(x, z), true);
       return field[findNearestWalkableTileIndex(hollow.figure.x, hollow.figure.z)];
     },
     playHollowCeilingStep: playHollowCeilingStep, playHatchRattle: playHatchRattle, playHatchBurst: playHatchBurst,
