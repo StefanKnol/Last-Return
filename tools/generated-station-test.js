@@ -1,6 +1,6 @@
 // Checks the generated stations: that many of them can be built and finished,
 // that a seed always gives the same station, and that one of them plays from lift to lift.
-const { openGame, startGame, drawFrames } = require('./browser-harness.js');
+const { openGame, startGame, drawFrames, carryFuelToTank } = require('./browser-harness.js');
 
 const failures = [];
 function check(description, condition, detail) {
@@ -128,7 +128,9 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
       if (vent.mouths.length !== 2 || vent.tileCount < 3) continue;
       debug.teleport(vent.mouths[0].roomX, vent.mouths[0].roomZ, 0);
       // room, every vent tile, room: one more step than the vent has tiles
-      if (debug.stepsFromPlayerTo(vent.mouths[1].roomX, vent.mouths[1].roomZ) === vent.tileCount + 1) return seed;
+      // (The station's own seed is what is typed into the title screen below. It is the seed asked for, unless the
+      // tests were told to build other stations: a seed typed into the menu is taken as it is.)
+      if (debug.stepsFromPlayerTo(vent.mouths[1].roomX, vent.mouths[1].roomZ) === vent.tileCount + 1) return debug.level.seed;
     }
     return 0;
   }, [String(describeFirstVent)]);
@@ -148,6 +150,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('choosing "Uncharted annex" shows the size, layout and seed boxes', await page.evaluate(() => !document.getElementById('station-options').hidden));
   await page.selectOption('#title-station-size', 'medium');
   await page.selectOption('#title-station-layout', 'mixed');
+  await page.selectOption('#title-station-levels', 'two'); // as the station was chosen above
   await page.fill('#title-seed', String(playSeed));
   await startGame(page, false);
   const loaded = await inGame(() => ({ kind: window.lastReturnDebug.level.kind, seed: window.lastReturnDebug.level.seed, description: window.lastReturnDebug.level.description }));
@@ -158,8 +161,10 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     link.dispatchEvent(new Event('pointerdown'));
     return Object.fromEntries(new URL(link.href).searchParams);
   });
+  // The work orders there are, by name, as the game has them.
+  const workOrderLabels = await inGame(() => window.lastReturnDebug.workOrders.map((order) => order.label));
   check('"Report a problem" carries the seed and the station options',
-    reported.station === 'Uncharted annex' && new RegExp('^' + playSeed + ', medium, [a-z]+, two levels, work order (Survey|Recovery|Salvage|Restart), (with the|no) wait for the lift$').test(reported.seed), reported);
+    reported.station === 'Uncharted annex' && new RegExp('^' + playSeed + ', medium, [a-z]+, two levels, work order (' + workOrderLabels.join('|') + '), (with the|no) wait for the lift$').test(reported.seed), reported);
 
   await page.keyboard.down('KeyW');
   await inGame(() => window.lastReturnDebug.simulate(4));
@@ -245,7 +250,9 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
       await page.keyboard.up('KeyC');
       await inGame(() => window.lastReturnDebug.simulate(1));
       Object.assign(state, await inGame(() => ({ stillCrouching: window.lastReturnDebug.player.isCrouching, stillInVent: window.lastReturnDebug.isVentAt(window.lastReturnDebug.player.x, window.lastReturnDebug.player.z),
-        eyeAfter: Math.round(window.lastReturnDebug.player.eyeHeight * 100) / 100, quietLimit: window.lastReturnDebug.tuning.audibleRadiusCrouchWalking, ventLimit: window.lastReturnDebug.tuning.audibleRadiusVentCrawling })));
+        eyeAfter: Math.round(window.lastReturnDebug.player.eyeHeight * 100) / 100,
+        crouchedEye: window.lastReturnDebug.tuning.playerHeightCrouching * window.lastReturnDebug.tuning.playerEyeHeightToCrouchedBody, // where the eyes are crouched (09-player.js)
+        quietLimit: window.lastReturnDebug.tuning.audibleRadiusCrouchWalking, ventLimit: window.lastReturnDebug.tuning.audibleRadiusVentCrawling })));
     }
     await page.keyboard.up('KeyW');
     return state;
@@ -254,7 +261,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('walking at a vent on your feet does not get you in', standing.inVent === false && standing.crouching === false, standing);
   const crawling = await enterVent(true);
   check('crouched you crawl in, and you stay down in there even when you let go of crouch',
-    crawling.inVent && crawling.crouching && crawling.stillInVent && crawling.stillCrouching && crawling.eyeAfter < 1.05, crawling);
+    crawling.inVent && crawling.crouching && crawling.stillInVent && crawling.stillCrouching && Math.abs(crawling.eyeAfter - crawling.crouchedEye) < 0.05, crawling);
   check('crawling in a vent is louder than creeping in a room', crawling.audible === crawling.ventLimit && crawling.ventLimit > crawling.quietLimit, crawling);
   const hollowInVent = await inGame(([mouths]) => {
     const debug = window.lastReturnDebug, hollow = debug.hollow;
@@ -322,10 +329,11 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     await standNear(2);
     await inGame(() => window.lastReturnDebug.use(2));
     const refused = await inGame(() => ({ powerOn: window.lastReturnDebug.game.flags.powerOn, objective: window.lastReturnDebug.game.objectiveText }));
-    await standNear(missionIds.fuelCan);
-    await inGame((id) => window.lastReturnDebug.use(id), missionIds.fuelCan);
-    check('the generator will not start without the fuel can, and says so', refused.powerOn === false && /fuel/i.test(refused.objective) &&
-      (await inGame(() => window.lastReturnDebug.game.flags.hasFuel)) === true, refused);
+    // The can is a loose thing on a crate: it is taken into the beam, carried to the set and held against it.
+    const fuelled = await carryFuelToTank(page, missionIds.fuelCan, 0);
+    check('the generator will not start with an empty day tank, and says so; the fuel can is in reach, is carried to it in the beam, and runs out into the tank in about five seconds',
+      refused.powerOn === false && /fuel/i.test(refused.objective) && fuelled.reachToCan < 2 && fuelled.isInTheBeam && /hold it against/.test(fuelled.objectiveWithCan) &&
+      fuelled.isFull && fuelled.seconds >= 4 && fuelled.seconds <= 6.5 && fuelled.canIsNow === 'empty fuel can' && fuelled.isStillInTheBeam, [refused, fuelled]);
   }
   await standNear(2);
   const hollowWalk = await inGame(() => {
@@ -378,17 +386,19 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     const refused = await inGame(() => ({ started: window.lastReturnDebug.game.flags.uploadStarted, uploaded: window.lastReturnDebug.game.flags.spoolsUploaded,
       objective: window.lastReturnDebug.game.objectiveText }));
     let furthestReach = 0;
+    const notFuelled = []; // every can that did not fill the tank it was carried to, with what happened
     for (const generator of mission.extraGenerators) {
       if (generator.needsFuel) {
-        furthestReach = Math.max(furthestReach, await standNear(generator.fuelCanId));
-        await inGame((id) => window.lastReturnDebug.use(id), generator.fuelCanId);
+        const fuelled = await carryFuelToTank(page, generator.fuelCanId, generator.objectId);
+        furthestReach = Math.max(furthestReach, fuelled.reachToCan);
+        if (!fuelled.isFull) notFuelled.push(fuelled);
       }
       furthestReach = Math.max(furthestReach, await standNear(generator.objectId));
       await inGame((id) => { window.lastReturnDebug.use(id); window.lastReturnDebug.hollow.isActive = false; }, generator.objectId);
     }
-    check('the terminal will not call the lift until every generator is running; each can be walked to and started',
-      !refused.started && !refused.uploaded && /generator/i.test(refused.objective) && furthestReach < 2 &&
-      (await inGame(() => window.lastReturnDebug.game.flags.extraGeneratorsRunning)) === mission.extraGenerators.length, { refused: refused, furthestReach: furthestReach });
+    check('the terminal will not call the lift until every generator is running; each can be walked to and started, one with an empty tank once its can has been carried to it',
+      !refused.started && !refused.uploaded && /generator/i.test(refused.objective) && furthestReach < 2 && notFuelled.length === 0 &&
+      (await inGame(() => window.lastReturnDebug.game.flags.extraGeneratorsRunning)) === mission.extraGenerators.length, { refused: refused, furthestReach: furthestReach, notFuelled: notFuelled });
   }
   // Whatever else this station asks for before the upload (quests added since the checks above were written):
   // the terminal refuses for each in turn, and each of its things can be walked to and used.
@@ -423,12 +433,12 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   }
   // (Whether the car has to come down is one of the station's complications: without it, it is there at once.)
   const upload = await inGame(() => ({ started: window.lastReturnDebug.game.flags.uploadStarted, countdown: window.lastReturnDebug.game.liftCountdown,
-    waits: window.lastReturnDebug.level.liftWaits, arrived: window.lastReturnDebug.game.flags.liftArrived }));
-  check('with the work order done the terminal calls the lift: forty seconds in a station with the wait, at once in one without',
-    upload.started && (upload.waits ? upload.countdown > 39 && upload.countdown <= 40 && !upload.arrived : upload.arrived), upload);
-  // Forty-one seconds with nothing hunting you: the Hollow is sent away again every second, because its waking
+    waits: window.lastReturnDebug.level.liftWaits, arrived: window.lastReturnDebug.game.flags.liftArrived, wait: window.lastReturnDebug.tuning.liftArrivalSeconds }));
+  check('with the work order done the terminal calls the lift: the full wait in a station with the wait, at once in one without',
+    upload.started && (upload.waits ? upload.countdown > upload.wait - 1 && upload.countdown <= upload.wait && !upload.arrived : upload.arrived), upload);
+  // The wait and a second more with nothing hunting you: the Hollow is sent away again every second, because its waking
   // (some seconds after Generator 2 starts, by the game's own clock) may fall anywhere in this wait.
-  await inGame(() => { const debug = window.lastReturnDebug; for (let second = 0; second < 41; second++) { debug.hollow.isActive = false; debug.simulate(1); } });
+  await inGame((wait) => { const debug = window.lastReturnDebug; for (let second = 0; second < wait + 1; second++) { debug.hollow.isActive = false; debug.simulate(1); } }, upload.wait);
   const arrival = await inGame(() => { const debug = window.lastReturnDebug; return { arrived: debug.game.flags.liftArrived, door: debug.getLiftDoor().openFraction, mode: debug.game.mode, countdown: debug.game.liftCountdown, workOrder: debug.level.workOrder, objective: debug.game.objectiveText }; });
   check('the lift arrives and opens', arrival.arrived && arrival.door === 1, arrival);
   await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(debug.playerStart.x, debug.playerStart.z, 0); debug.simulate(0.2); });
@@ -451,12 +461,17 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   for (let pump = 0; pump < 6; pump++) await drawFrames(page, 1);
   check('the title screen scans the generated lift lobby by itself', (await inGame(() => window.lastReturnDebug.pointCloud.totalReturns)) > 0);
 
-  // --- more than one keycard: a large station has two, and each opens only its own ring of doors ---
+  // --- more than one keycard: a large station has as many as its size says (two or more), and each opens only its own ring of doors ---
+  // Any large station will do: the first seed that can be built, typed in by its own seed as above.
+  const largeSeed = await inGame(() => {
+    for (let seed = 1; seed <= 20; seed++) if (window.lastReturnDebug.loadStation('generated', seed, 'large', 'mixed', 'two')) return window.lastReturnDebug.level.seed;
+    return 0;
+  });
   await page.selectOption('#title-station-size', 'large');
-  await page.fill('#title-seed', '3');
+  await page.fill('#title-seed', String(largeSeed));
   await startGame(page, false);
   const cards = await inGame(() => {
-    const debug = window.lastReturnDebug, result = { count: debug.level.keycardCount, problems: debug.auditProgression() };
+    const debug = window.lastReturnDebug, result = { seed: debug.level.seed, count: debug.level.keycardCount, sizeSays: debug.sizePresets.large.keycards, problems: debug.auditProgression() };
     debug.grantPower();
     const doorOfCard = (cardLevel) => debug.doors.find((door) => door.kind === 2 && door.cardLevel === cardLevel);
     const tryDoor = (door) => {
@@ -484,15 +499,17 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   });
   await drawFrames(page, 2);
   cards.chip = await page.evaluate(() => document.getElementById('chip-keycard').textContent);
-  check('a large station has two keycards and passes the lock-order check', cards.count === 2 && cards.problems.length === 0 && cards.hasBothKindsOfDoor, cards);
+  check('a large station has the keycards its size says, two or more, and passes the lock-order check',
+    largeSeed > 0 && cards.seed === largeSeed && cards.count === cards.sizeSays && cards.count >= 2 && cards.problems.length === 0 && cards.hasBothKindsOfDoor, cards);
   check('keycard 1 opens its own doors and not keycard 2 doors; keycard 2 opens those',
     cards.card1DoorNoCard === 0 && cards.levelAfterCard1 === 1 && cards.card1DoorWithCard1 === 1 && cards.card2DoorWithCard1 === 0 &&
-    cards.levelAfterCard2 === 2 && cards.card2DoorWithCard2 === 1 && cards.chip === 'KEYCARDS 2/2', cards);
+    cards.levelAfterCard2 === 2 && cards.card2DoorWithCard2 === 1 && cards.chip === 'KEYCARDS 2/' + cards.count, cards);
 
   // --- the core sample and winch breaker jobs, each on the first large station the seeds give it to ---
   const jobRules = await inGame(() => {
     const debug = window.lastReturnDebug, flags = debug.game.flags, ids = debug.missionObjectIds, result = {};
-    const findStation = (wanted) => { for (let seed = 1; seed < 80; seed++) { debug.loadStation('generated', seed, 'large', 'mixed', 'one'); if (wanted(debug.level.mission)) return seed; } return -1; };
+    // (A seed that cannot be built is stepped over. When none of the seeds has the job, the check below fails and says so.)
+    const findStation = (wanted) => { for (let seed = 1; seed < 80; seed++) { if (!debug.loadStation('generated', seed, 'large', 'mixed', 'one')) continue; if (wanted(debug.level.mission)) return seed; } return -1; };
     // These stations have other quests as well, and the lift waits for those too. This does every one of them
     // but the two these checks are about (each quest's own rules are checked in generators-test and quests-test).
     const startEveryGenerator = () => {
@@ -501,6 +518,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     };
     // Core samples, and no breaker to muddy it.
     result.coreSeed = findStation((mission) => mission.coreCount > 0 && !mission.needsBreaker);
+    if (result.coreSeed < 0) result.notFound = 'no large station with core samples and no winch breaker among seeds 1 to 79';
     debug.grantPower(); debug.grantSpools(); startEveryGenerator();
     debug.use(1);
     result.refusedWithoutCores = !flags.uploadStarted && !flags.spoolsUploaded;
@@ -511,6 +529,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     result.acceptedWithCores = flags.uploadStarted === true;
     // The winch breaker, closed after the upload.
     result.breakerSeed = findStation((mission) => mission.needsBreaker && debug.level.liftWaits);
+    if (result.breakerSeed < 0) result.notFound = 'no large station with a winch breaker and the wait for the lift among seeds 1 to 79';
     debug.grantSpools();
     debug.use(ids.winchBreaker);
     result.breakerNeedsPower = flags.breakerClosed === false;
@@ -519,7 +538,7 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     debug.use(1);
     result.uploadedButNoLift = flags.spoolsUploaded === true && flags.uploadStarted === false;
     debug.use(ids.winchBreaker);
-    result.liftCalledByBreaker = flags.uploadStarted === true && debug.game.liftCountdown > 30;
+    result.liftCalledByBreaker = flags.uploadStarted === true && debug.game.liftCountdown > debug.tuning.liftArrivalSeconds - 1;
     // The other order: breaker first, then the upload calls the lift straight away.
     debug.loadStation('generated', result.breakerSeed, 'large', 'mixed', 'one');
     debug.grantPower(); debug.grantSpools(); startEveryGenerator();
@@ -537,20 +556,20 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
     jobRules.breakerSeed > 0 && jobRules.breakerNeedsPower && jobRules.uploadedButNoLift && jobRules.liftCalledByBreaker &&
     jobRules.breakerFirstDoesNotCallLift && jobRules.thenUploadCallsLift, jobRules);
 
-  // --- the largest size: three keycards ---
+  // --- the largest size: as many keycards as its size says ---
   await inGame(() => window.lastReturnDebug.setWorkshopContentUsed(true)); // (any eight of them: as the game builds them)
   const massive = await inGame(() => {
     const debug = window.lastReturnDebug, bad = [];
-    let cardTotal = 0;
+    const wrongCardCounts = [];
     for (let seed = 1; seed <= 8; seed++) {
       const wasBuilt = debug.loadStation('generated', seed, 'massive', ['tight', 'mixed', 'sprawling'][seed % 3], seed % 2 === 0 ? 'two' : 'one');
       const found = wasBuilt ? debug.auditLayout().concat(debug.auditProgression()).concat(debug.auditHollowRoutes()).concat(debug.auditNoisyFloor()) : ['no plan could be made'];
       if (found.length > 0) bad.push({ seed: seed, problems: found.slice(0, 4) });
-      cardTotal += debug.level.keycardCount;
+      if (debug.level.keycardCount !== debug.sizePresets.massive.keycards) wrongCardCounts.push({ seed: seed, keycards: debug.level.keycardCount });
     }
-    return { bad: bad, cardTotal: cardTotal };
+    return { bad: bad, wrongCardCounts: wrongCardCounts, sizeSays: debug.sizePresets.massive.keycards };
   });
-  check('8 massive stations: all can be built and finished in order, each with three keycards', massive.bad.length === 0 && massive.cardTotal === 24, massive);
+  check('8 massive stations: all can be built and finished in order, each with as many keycards as its size says', massive.bad.length === 0 && massive.wrongCardCounts.length === 0, massive);
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();

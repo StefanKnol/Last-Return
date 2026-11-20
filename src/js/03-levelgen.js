@@ -1558,11 +1558,13 @@ function auditLevelProgression() {
     computeDistanceField(field, findNearestWalkableTileIndex(PLAYER_START.x, PLAYER_START.z), 0, null);
     for (const index of closed) tileIsWalkable[index] = 1;
   };
+  const canReachSpot = function (x, z) {
+    const index = findNearestWalkableTileIndex(x, z);
+    return index >= 0 && field[index] < NAVIGATION_UNREACHABLE;
+  };
   const canReach = function (objectId) {
     const interactable = findInteractableByObjectId(objectId);
-    if (!interactable) return false;
-    const index = findNearestWalkableTileIndex(interactable.x, interactable.z);
-    return index >= 0 && field[index] < NAVIGATION_UNREACHABLE;
+    return interactable !== null && interactable !== undefined && canReachSpot(interactable.x, interactable.z);
   };
   const cardIds = KEYCARD_OBJECT_IDS.slice(1, level.keycardCount + 1);
   const mustExistOnce = [OBJECT_LIFT_TERMINAL, OBJECT_GENERATOR, OBJECT_SPOOL_1, OBJECT_SPOOL_2, OBJECT_SPOOL_3].concat(cardIds);
@@ -1588,7 +1590,7 @@ function auditLevelProgression() {
     } else if (!canReach(OBJECT_SPOOL_3)) problems.push('the third spool cannot be reached at all');
   }
   // The quests: each thing they need must exist, and be where its quest says it is (09-quests.js).
-  auditQuests(problems, reach, canReach, mustExistOnce);
+  auditQuests(problems, reach, canReach, mustExistOnce, canReachSpot);
   if (!level.storeZone) problems.push('there is no calibration store');
   // Everything you must use has to be within arm's reach of somewhere you can stand.
   for (const objectId of mustExistOnce) {

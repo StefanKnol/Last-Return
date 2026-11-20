@@ -46,8 +46,13 @@ function check(description, condition, detail) {
   await page.keyboard.down('KeyW');
   await inGame(() => window.lastReturnDebug.simulate(4));
   await page.keyboard.up('KeyW');
-  const afterWalking = await inGame(() => ({ x: window.lastReturnDebug.player.x, hasLeftLift: window.lastReturnDebug.game.flags.hasLeftLift }));
-  check('walking forward leaves the lift car', afterWalking.hasLeftLift && afterWalking.x > 10, afterWalking);
+  const afterWalking = await inGame(() => {
+    const debug = window.lastReturnDebug;
+    const zone = debug.getZoneAt(debug.player.x, debug.player.z);
+    return { x: debug.player.x, zone: zone, place: debug.zoneNames[zone], hasLeftLift: debug.game.flags.hasLeftLift };
+  });
+  // (It must stand in a real zone of the station, and that zone must not be the car.)
+  check('walking forward leaves the lift car', afterWalking.hasLeftLift && afterWalking.zone > 0 && typeof afterWalking.place === 'string' && afterWalking.place !== 'LIFT CAR', afterWalking);
   // Leaving the lift has just changed the objective, and the quiet screen shows it for eight seconds after that.
   // So it is looked at here and not further down with the rest of the quiet screen: by then the pause screen has
   // come and gone, and on a machine that draws slowly that takes most of those eight seconds, or all of them.
@@ -246,11 +251,13 @@ function check(description, condition, detail) {
   // --- generator wakes the Hollow, which walks to the noise ---
   await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(69.2, 47.5, Math.PI / 2); debug.use(2); debug.teleport(14, 51, 0); debug.simulate(7); });
   check('generator restores power and the Hollow appears', await inGame(() => window.lastReturnDebug.game.flags.powerOn && window.lastReturnDebug.hollow.isActive));
+  // Where it is sent is the spot in front of the generator that the station keeps for that.
+  const generatorApproach = await inGame(() => [window.lastReturnDebug.level.generatorApproachX, window.lastReturnDebug.level.generatorApproachZ]);
   let closestToGenerator = Infinity;
   for (let step = 0; step < 30; step++) {
     await inGame(() => window.lastReturnDebug.simulate(1));
     const position = await inGame(() => [window.lastReturnDebug.hollow.figure.x, window.lastReturnDebug.hollow.figure.z]);
-    closestToGenerator = Math.min(closestToGenerator, Math.hypot(position[0] - 68.5, position[1] - 47.5));
+    closestToGenerator = Math.min(closestToGenerator, Math.hypot(position[0] - generatorApproach[0], position[1] - generatorApproach[1]));
   }
   check('the Hollow walks from the shaft to the generator room', closestToGenerator < 3, closestToGenerator);
 
@@ -259,12 +266,16 @@ function check(description, condition, detail) {
     const debug = window.lastReturnDebug;
     debug.hollow.figure.x = 30.5; debug.hollow.figure.z = 52.5; debug.hollow.graceTimer = 0;
     debug.teleport(22.5, 52.5, Math.PI / 2);
-    // A tap of the beam: it must not start a hunt.
+    // A tap of the beam: it must not start a hunt. It starts calm, so all its anger afterwards is the tap's.
+    debug.hollow.anger = 0;
     debug.setScannerSpread(6);
     debug.setScanHeld(true);
     debug.simulate(0.3);
     debug.setScanHeld(false);
-    window.tapResult = { anger: debug.hollow.anger, state: debug.hollow.state, hits: debug.hollow.figure.totalHits };
+    window.tapResult = { anger: debug.hollow.anger, state: debug.hollow.state, hits: debug.hollow.figure.totalHits,
+      // What the whole tap gives if every moment of it is in the beam: seconds × hollowAngerPerBeamSecond × the threat
+      // level's anger factor. simulate(0.3) runs in steps of 1/30 s and may run one step more than 0.3 s.
+      angerOfWholeTap: debug.tuning.hollowAngerPerBeamSecond * debug.game.difficulty.angerFactor * (0.3 + 1 / 30), noticeLevel: debug.tuning.hollowAngerNoticeLevel };
     debug.simulate(0.2);
     window.tapResult.stateAfter = debug.hollow.state;
     // Holding the beam: after about 1.25 s it knows where the light comes from.
@@ -274,9 +285,16 @@ function check(description, condition, detail) {
   });
   const tap = await inGame(() => window.tapResult);
   check('a tap of the beam raises its anger without starting a hunt',
-    tap.hits > 0 && tap.anger > 0.03 && tap.anger < 0.15 && tap.state !== 2 && tap.stateAfter !== 2, tap);
-  const held = await inGame(() => ({ held: window.lastReturnDebug.hollow.heldAmount, speed: window.lastReturnDebug.hollow.currentSpeed, state: window.lastReturnDebug.hollow.state, anger: window.lastReturnDebug.hollow.anger }));
-  check('holding the beam on it starts a hunt and slows it', held.state === 2 && held.held > 0.9 && held.speed < 1 && held.anger >= 0.3, held);
+    tap.hits > 0 && tap.anger > tap.angerOfWholeTap / 2 && tap.anger <= tap.angerOfWholeTap + 1e-9 && tap.anger < tap.noticeLevel && tap.state !== 2 && tap.stateAfter !== 2, tap);
+  const held = await inGame(() => {
+    const debug = window.lastReturnDebug, hollow = debug.hollow, tuning = debug.tuning;
+    // The fastest it may go while held: its hunt at full anger, with what holding it takes off.
+    const fastestWhileHeld = tuning.hollowHuntSpeed * (1 + tuning.hollowAngerSpeedBonus) * debug.game.difficulty.hollowSpeedFactor *
+      (1 - hollow.heldAmount * (1 - tuning.hollowHeldSpeedFactor));
+    return { held: hollow.heldAmount, speed: hollow.currentSpeed, fastestWhileHeld: fastestWhileHeld, state: hollow.state, anger: hollow.anger, noticeLevel: tuning.hollowAngerNoticeLevel };
+  });
+  check('holding the beam on it starts a hunt and slows it',
+    held.state === 2 && held.held > 0.9 && held.speed <= held.fastestWhileHeld + 0.01 && held.anger >= held.noticeLevel, held);
   const enraged = await inGame(() => {
     const debug = window.lastReturnDebug;
     debug.player.heat = 0;
@@ -326,10 +344,10 @@ function check(description, condition, detail) {
     hollow.timeSinceSensed = 99;
     debug.teleport(14, 45.5, 0); // the player is out of earshot, in the security office
     debug.simulate(0.1);
-    return { state: hollow.state, searchCenterX: hollow.searchCenterX };
+    return { state: hollow.state, searchCenterX: hollow.searchCenterX, aheadX: 22 + 2.5 * debug.tuning.hollowSearchLeadSeconds };
   });
   check('after losing the player it searches ahead in the direction they were moving',
-    searchLead.state === 3 && searchLead.searchCenterX > 27, searchLead);
+    searchLead.state === 3 && searchLead.searchCenterX > 22 && Math.abs(searchLead.searchCenterX - searchLead.aheadX) < 0.01, searchLead);
 
   // --- the director: it steers the Hollow's wandering, and it has to be fair about it ---
   const steering = await inGame(() => {
@@ -372,8 +390,9 @@ function check(description, condition, detail) {
     result.duringChase = { phase: director.phase, state: hollow.state };
     // The chase is over and it is back to wandering: now the breather starts, and it heads for a far room.
     hollow.state = 0; hollow.doubleBackTimer = 3;
+    const timeBeforeBreather = debug.game.time;
     debug.simulate(0.3);
-    result.started = { phase: director.phase, targetSteps: debug.stepsFromPlayerTo(hollow.targetX, hollow.targetZ), feint: hollow.doubleBackTimer };
+    result.started = { phase: director.phase, targetSteps: debug.stepsFromPlayerTo(hollow.targetX, hollow.targetZ), feint: hollow.doubleBackTimer, reliefSteps: debug.tuning.directorReliefSteps };
     // The player keeps quiet for twenty seconds: it must never come nearer than it was, and it must get to a far
     // room. (Where it is at the twentieth second is not asked: if the far room was close enough to reach in
     // fourteen, it is by then on its way to the next far room, and that walk can lead back past the middle.)
@@ -399,22 +418,26 @@ function check(description, condition, detail) {
     // Left alone, the breather ends by itself once menace has drained, and it starts closing in again.
     let seconds = 20;
     for (; seconds < 90 && director.phase === 1; seconds++) debug.simulate(1);
-    result.ended = { phase: director.phase, seconds: seconds, menace: Math.round(director.menace * 100) / 100, mode: debug.game.mode };
+    // It cannot end before its shortest length, nor before menace has drained from full to where a breather may end.
+    const tuning = debug.tuning, pace = debug.getDirectorPaceFactor();
+    const earliestEnd = Math.max(tuning.directorReliefShortestSeconds, tuning.directorReliefMinimumSeconds / pace, (1 - tuning.directorReliefEndsBelowMenace) * tuning.directorCalmSeconds / pace);
+    result.ended = { phase: director.phase, seconds: seconds, lasted: debug.game.time - timeBeforeBreather, earliestEnd: earliestEnd, menace: Math.round(director.menace * 100) / 100, mode: debug.game.mode };
     return result;
   });
   check('with menace full, the Hollow is not called off in the middle of a chase', breather.duringChase.phase === 0 && breather.duringChase.state === 2, breather.duringChase);
   check('once the chase is over it gets a real breather: sent to a far room, with no pretending to leave',
-    breather.started.phase === 1 && breather.started.targetSteps >= 30 && breather.started.feint === 0, breather.started);
-  // It must get 30 steps away, which is as near as a breather's room may be. But it has arrived at a room once it
-  // is within a metre and a half of its middle, which can be two steps short: sent to a room exactly 30 steps
-  // off, it gets to 28 and then sets out for the next one. So for a room nearer than 32 steps, what is asked is
-  // that room less those two steps. (A room 75 steps off it does not reach in twenty seconds, and need not.)
+    breather.started.phase === 1 && breather.started.targetSteps >= breather.started.reliefSteps && breather.started.feint === 0, breather.started);
+  // It must get directorReliefSteps away, which is as near as a breather's room may be. But it has arrived at a room
+  // once it is within a metre and a half of its middle, which can be two steps short: sent to a room exactly that
+  // far off, it gets to two steps less and then sets out for the next one. So for a room less than two steps beyond
+  // that, what is asked is that room less those two steps. (A room 75 steps off it does not reach in twenty
+  // seconds, and need not.)
   check('during the breather it stays away from a player who keeps quiet, and gets as far off as a breather asks',
     breather.away.phase === 1 && breather.away.mode === 'playing' && breather.away.nearestSteps >= breather.away.stepsAtStart - 2 &&
-    breather.away.farthestSteps >= Math.min(30, breather.started.targetSteps - 2), [breather.started, breather.away]);
+    breather.away.farthestSteps >= Math.min(breather.started.reliefSteps, breather.started.targetSteps - 2), [breather.started, breather.away]);
   check('noise during a breather still brings it', breather.afterNoise.state === 1 || breather.afterNoise.state === 2, breather.afterNoise);
-  check('the breather ends by itself, after at least 25 seconds, and the closing-in starts again',
-    breather.ended.phase === 0 && breather.ended.seconds >= 25 && breather.ended.seconds < 90 && breather.ended.mode === 'playing', breather.ended);
+  check('the breather ends by itself, not before its shortest length and the time menace takes to drain, and the closing-in starts again',
+    breather.ended.phase === 0 && breather.ended.lasted >= breather.ended.earliestEnd && breather.ended.seconds < 90 && breather.ended.mode === 'playing', breather.ended);
   await inGame(() => { window.lastReturnDebug.hollow.isActive = false; });
 
   // --- doors ---
@@ -461,11 +484,11 @@ function check(description, condition, detail) {
   await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(59.5, 8.5, 0); debug.use(5); });
   await page.keyboard.press('KeyE');
   await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(10.2, 55.3, -Math.PI / 2); debug.use(1); });
-  const upload = await inGame(() => ({ started: window.lastReturnDebug.game.flags.uploadStarted, countdown: window.lastReturnDebug.game.liftCountdown }));
-  check('uploading three spools calls the lift', upload.started && upload.countdown > 39 && upload.countdown <= 40, upload);
-  await inGame(() => { const debug = window.lastReturnDebug; debug.hollow.isActive = false; debug.simulate(41); });
+  const upload = await inGame(() => ({ started: window.lastReturnDebug.game.flags.uploadStarted, countdown: window.lastReturnDebug.game.liftCountdown, wait: window.lastReturnDebug.tuning.liftArrivalSeconds }));
+  check('uploading three spools calls the lift', upload.started && upload.countdown > upload.wait - 1 && upload.countdown <= upload.wait, upload);
+  await inGame(() => { const debug = window.lastReturnDebug; debug.hollow.isActive = false; debug.simulate(debug.tuning.liftArrivalSeconds + 1); });
   check('the lift arrives and opens', await inGame(() => window.lastReturnDebug.game.flags.liftArrived && window.lastReturnDebug.doors[0].openFraction === 1));
-  await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(6.5, 53.5, Math.PI / 2); debug.simulate(0.2); });
+  await inGame(() => { const debug = window.lastReturnDebug; debug.teleport(debug.playerStart.x, debug.playerStart.z, Math.PI / 2); debug.simulate(0.2); });
   check('boarding the lift starts the ascent', (await inGame(() => window.lastReturnDebug.game.mode)) === 'ascending');
   await page.waitForFunction(() => window.lastReturnDebug.game.mode === 'ending', null, { timeout: 90000 });
   await drawFrames(page, 1);
@@ -568,10 +591,14 @@ function check(description, condition, detail) {
   const landed = await inDebugGame(() => [window.lastReturnDebug.player.eyeHeight, window.lastReturnDebug.tuning.playerHeight*window.lastReturnDebug.tuning.playerEyeHeightToBody]);
   check('switching flying off puts the player back on the floor', Math.abs(landed[0] - landed[1]) < 0.01, landed);
 
-  await inDebugGame(() => { document.getElementById('debug-zone').value = '19'; });
+  const chosenZone = await inDebugGame(() => {
+    const select = document.getElementById('debug-zone');
+    select.value = Array.from(select.options).find((option) => option.textContent === 'SHAFT 9').value;
+    return Number(select.value);
+  });
   await clickInPage('debug-teleport');
-  const zoneAfterTeleport = await inDebugGame(() => { const debug = window.lastReturnDebug; debug.simulate(0.2); return [debug.player.x, debug.player.z]; });
-  check('"Go to" moves the player into the chosen zone (Shaft 9)', zoneAfterTeleport[0] > 49 && zoneAfterTeleport[0] < 69 && zoneAfterTeleport[1] < 15, zoneAfterTeleport);
+  const zoneAfterTeleport = await inDebugGame(() => { const debug = window.lastReturnDebug; debug.simulate(0.2); return [debug.player.x, debug.player.z, debug.getZoneAt(debug.player.x, debug.player.z)]; });
+  check('"Go to" moves the player into the chosen zone (Shaft 9)', zoneAfterTeleport[2] === chosenZone, zoneAfterTeleport);
 
   const tuned = await inDebugGame(() => {
     const field = document.getElementById('debug-tuning-walkSpeed');

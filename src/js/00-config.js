@@ -207,6 +207,12 @@ const TUNING = {
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned
   scanGrenadeStunSeconds: 3.5,      // how long the Hollow stands stunned. An enraged Hollow is not stunned.
   noiseRadiusScanGrenade: 20,       // going off is loud. The Hollow comes to where it went off, not to you.
+  // The fuel can (a loose object that fills a generator's day tank: see "Fuel" in 09-quests.js).
+  fuelPourSeconds: 5,               // how long a full can takes to run out into a tank
+  fuelPourReachMetres: 0.5,         // the can pours while its middle is this near to the generator's body, in your beam or set down against it
+  fuelPourTopMetres: 2.4,           // ... and no higher than this above the floor the generator stands on
+  fuelPourStepSeconds: 0.25,        // the pouring is done a splash at a time, this often (each splash is one thing done to the station, for everybody down there)
+  noiseRadiusFuelPour: 7,           // each second of pouring is heard this far: it glugs, and the can booms. A walking step carries 4.
   // The Hollow and things it kicks.
   hollowChasesKickedMass: 4,        // something this light or lighter (kg) that it kicks, it goes after ...
   hollowChasesKickedSeconds: 5,     // ... for this long at most, unless it is hunting you
@@ -615,6 +621,7 @@ const CAPTIONS = {
   ambientMetal: { text: '[metal ticks as it settles]', level: 'sound', withinMetres: 37, seconds: 2.5, slot: 'station', rank: 0 },
   ambientKnocks: { text: '[knocking, far below]', level: 'sound', withinMetres: 13, seconds: 3.5, slot: 'station', rank: 0 },
   salvageBayPing: { text: '[a salvage bay pings]', level: 'sound', withinMetres: 45, seconds: 2.5, slot: 'salvageBay', rank: 0 },
+  fuelPour: { text: '[fuel glugs into a tank]', level: 'sound', withinMetres: 14, seconds: 2, slot: 'machinery', rank: 0 },
   liftBell: { text: '[the lift bell rings]', level: 'sound', withinMetres: 50, seconds: 2.2 },
   liftButtonPressed: { text: '[a button clicks outside the lift door]', level: 'tell', withinMetres: 20, seconds: 3 },
 
@@ -724,11 +731,12 @@ const OBJECTIVE_TEXT = {
   returnToLift: 'Return to the lift lobby and upload the spools at the terminal.',
   returnToLiftWithManifest: 'That is the work order done. Return to the lift lobby and call the lift at the terminal.', // on an order that is not about spools
   findFuel: 'Generator 2 has no fuel. Find the fuel can on this level.',
-  bringFuel: 'Carry the fuel can to Generator 2, off Pump Hall B.',
+  bringFuel: 'Carry the fuel can to Generator 2, off Pump Hall B, and hold it against the set.',
+  startGeneratorFuelled: 'The day tank is full. Start Generator 2.',
   collectCores: 'Dispatch also wants the core samples.',   // added after the spool objective while samples are missing
   // Added while some of the station's generators are not running. {running} and {total} count Generator 2 as well.
   startGenerators: 'The lift winch needs every generator running: {running} of {total} so far. They are marked on the map.',
-  fuelForGenerator: 'You are carrying a fuel can. One of the generators has an empty tank.',
+  fuelForGenerator: 'You are carrying a fuel can. One of the generators has an empty tank: hold the can against it.',
   closeBreaker: 'The lift will not come. Close the winch breaker: it is marked on the map.',
   surviveLift: 'The lift is coming. Stay alive until it arrives.',
   boardLift: 'Board the lift.',
