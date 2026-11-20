@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { chromium } = require('playwright');
+const { launchBrowser } = require('./browser-harness.js');
 const { startDevServer, patchObjectNumbers, formatRoomFile } = require('./dev-server.js');
 
 const failures = [];
@@ -59,9 +59,7 @@ function checkSourcePatching() {
   const objectPath = path.join(root, 'src', 'objects', 'testThing.json');
 
   const server = await startDevServer({ root: root, port: 0, quiet: true });
-  const browser = await chromium.launch({
-    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
-  });
+  const browser = await launchBrowser(); // (the same browser as every other suite: browser-harness.js says which, and why)
   const context = await browser.newContext({ viewport: { width: 1400, height: 820 } });
   const page = await context.newPage();
   const problems = [];
