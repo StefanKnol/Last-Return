@@ -3,6 +3,7 @@
 // written as nothing but an entry (crew badges, isolation valves) play by the rules their entries give, and
 // that Dispatch's lines come when their table says: with a quest, with the Stills waking, with a room.
 const { openGame, startGame, drawFrames } = require('./browser-harness.js');
+const { TEST_OBJECT_KINDS } = require('./test-objects.js');
 
 const failures = [];
 function check(description, condition, detail) {
@@ -37,6 +38,12 @@ function check(description, condition, detail) {
       d.setDebugOption('invulnerable', true);
       d.hollow.isActive = false;
       return built;
+    };
+    // The same, from this seed on, until a station can be built (now and then a seed cannot be: the game then
+    // builds Kessel-9 instead). Returns the seed that was built, or 0 if none of the next sixty could be.
+    lab.freshFrom = function (kind, seed, size, layout, levels, order) {
+      for (let tried = seed; tried < seed + 60; tried++) if (lab.fresh(kind, tried, size, layout, levels, order)) return tried;
+      return 0;
     };
     window.lab = lab;
   });
@@ -99,13 +106,28 @@ function check(description, condition, detail) {
   // This check and seven more below build stations by the dozen in one go. Before each station the browser
   // gets a moment to clear the last one away (browser-harness.js says why).
   const survey = await inGame(async () => {
-    const d = window.lastReturnDebug, lab = window.lab, result = { bad: [], sizes: {}, seen: {}, numbersUsedTwice: [], orders: {}, notTheOrder: [], withTheWait: 0, withoutTheWait: 0 };
+    const d = window.lastReturnDebug, lab = window.lab, result = { bad: [], sizes: {}, seen: {}, numbersUsedTwice: [], orders: {}, notTheOrder: [], withTheWait: 0, withoutTheWait: 0, passedOver: [], notJustified: [], notAsPlanned: [] };
     const layouts = ['tight', 'mixed', 'sprawling', 'sparse'];
     for (const size of ['small', 'medium', 'large', 'massive']) {
       const complications = [], all = [];
-      for (let seed = 1; seed <= 16; seed++) {
+      let built = 0;
+      // Sixteen of each size, each size from seeds of its own: the work order and the complications are drawn
+      // from the seed alone, so 64 stations are 64 draws. (A seed that cannot be built is stepped over: the game
+      // builds Kessel-9 for it.)
+      const firstSeed = 1 + 100 * ['small', 'medium', 'large', 'massive'].indexOf(size);
+      for (let seed = firstSeed; built < 16 && seed < firstSeed + 76; seed++) {
         await window.letTheBrowserCatchUp();
-        if (!lab.fresh('generated', seed, size, layouts[seed % 4], seed % 2 ? 'one' : 'two')) { result.bad.push(size + ' ' + seed + ': not built'); continue; }
+        if (!lab.fresh('generated', seed, size, layouts[seed % 4], seed % 2 ? 'one' : 'two')) continue;
+        built++;
+        // The work order is the first the seed draws that the station has room for: every order drawn before
+        // the one it has must be one that does not fit (tried alone, further down).
+        const ranked = d.rankWorkOrders(d.level.questSeed).map((one) => one.key);
+        for (const earlier of ranked.slice(0, ranked.indexOf(d.level.workOrder))) result.passedOver.push({ seed: seed, size: size, layout: layouts[seed % 4], levels: seed % 2 ? 'one' : 'two', order: earlier });
+        // What was built is what was planned: every complication the planner picked for it is there, and no other.
+        const plan = d.planQuests(d.level.questSeed, d.sizePresets[size], d.workOrders.filter((one) => one.key === d.level.workOrder)[0]);
+        const plannedComplications = d.questComplications.filter((key) => plan[key] !== undefined).join();
+        const builtComplications = d.questComplications.filter((key) => key === 'liftWait' ? d.level.liftWaits : d.findQuest(key) !== null).join();
+        if (builtComplications !== plannedComplications) result.notAsPlanned.push(size + ' ' + seed + ': planned ' + (plannedComplications || 'none') + ', built ' + (builtComplications || 'none'));
         const found = d.auditLayout().concat(d.auditProgression());
         if (found.length > 0) result.bad.push(size + ' ' + seed + ': ' + found.slice(0, 3).join('; '));
         for (const quest of d.level.quests) result.seen[quest.key] = (result.seen[quest.key] || 0) + 1;
@@ -128,13 +150,29 @@ function check(description, condition, detail) {
         const numbers = d.interactables.map((thing) => thing.objectId);
         if (new Set(numbers).size !== numbers.length) result.numbersUsedTwice.push(size + ' ' + seed);
       }
-      result.sizes[size] = { fewest: Math.min.apply(null, complications), most: Math.max.apply(null, complications), allowed: d.sizePresets[size].complications, each: complications.join(''), questsInAll: all.join(' ') };
+      if (built < 16) result.bad.push('only ' + built + ' ' + size + ' stations could be built from seeds ' + firstSeed + ' to ' + (firstSeed + 75));
+      // That a size uses its whole range is seen in what the planner picks for 500 seeds (over sixteen stations a
+      // range of three numbers leaves one out about one run in two hundred); every station built keeps within it.
+      const planned = [];
+      for (let seed = 1; seed <= 500; seed++) {
+        const plan = d.planQuests(seed, d.sizePresets[size], d.workOrders[0]);
+        planned.push(d.questComplications.filter((key) => plan[key] !== undefined).length);
+      }
+      result.sizes[size] = { fewest: Math.min.apply(null, complications), most: Math.max.apply(null, complications), allowed: d.sizePresets[size].complications, each: complications.join(''), questsInAll: all.join(' '),
+        plannedFewest: Math.min.apply(null, planned), plannedMost: Math.max.apply(null, planned) };
     }
-    lab.fresh('generated', 5, 'massive', 'mixed', 'two');
+    // Each order passed over: built with only that order switched on, it has no room for it either.
+    for (const passed of result.passedOver) {
+      await window.letTheBrowserCatchUp();
+      const name = passed.size + ' ' + passed.seed + ': passed over ' + passed.order;
+      if (!lab.fresh('generated', passed.seed, passed.size, passed.layout, passed.levels, passed.order)) result.notJustified.push(name + ', and could not be built again to show why');
+      else if (d.level.workOrder === passed.order) result.notJustified.push(name + ', which it has room for');
+    }
+    const sameSeed = lab.freshFrom('generated', 5, 'massive', 'mixed', 'two');
     const first = lab.describeQuests();
-    lab.fresh('generated', 6, 'massive', 'mixed', 'two');
+    lab.freshFrom('generated', sameSeed + 1, 'massive', 'mixed', 'two');
     result.anotherSeedDiffers = lab.describeQuests() !== first;
-    lab.fresh('generated', 5, 'massive', 'mixed', 'two');
+    lab.fresh('generated', sameSeed, 'massive', 'mixed', 'two');
     result.sameSeedSame = lab.describeQuests() === first;
     lab.fresh('classic', 0);
     result.classic = d.level.quests.map((quest) => quest.key);
@@ -142,27 +180,36 @@ function check(description, condition, detail) {
     result.classicIntro = d.getIntroLines();
     // The lines on the way down, on each order: the same four, with the order's own in place of Kessel-9's, and the seed.
     result.intros = d.workOrders.map((order) => {
-      lab.fresh('generated', 3, 'large', 'mixed', 'one', order.key);
+      lab.freshFrom('generated', 3, 'large', 'mixed', 'one', order.key);
       const lines = d.getIntroLines(), theOrder = d.workOrders.filter((one) => one.key === d.level.workOrder)[0];
       return { asked: order.key, got: d.level.workOrder, lines: lines.length, same: lines[0] === result.classicIntro[0] && lines[1] === result.classicIntro[1] && lines[3] === result.classicIntro[3],
-        third: lines[2], isTheOrders: lines[2] === theOrder.intro(), seed: lines[4] };
+        third: lines[2], isTheOrders: lines[2] === theOrder.intro(), seed: lines[4], seedLine: 'No drawings survive for this annex. Survey reference ' + d.level.seed + '.' };
     });
     lab.fresh('classic', 0);
     return result;
   });
   check('64 stations of every size, with whatever quests the seed gave them: each can be finished, each quest\'s things are where it says', survey.bad.length === 0, survey.bad.slice(0, 4));
+  // (A quest comes with a work order, each drawn first for about one seed in four, or is a complication, which
+  // stations of every size but the smallest nearly always have one or more of: that one turns up in none of 64
+  // stations happens less than once in a thousand runs.)
   check('every quest turns up in some of them', described.quests.every((key) => survey.seen[key] > 0), survey.seen);
   check('each has one work order: that order\'s quests, asked for and first; the spools, asked of nobody unless it is Survey; and besides those only complications',
     survey.notTheOrder.length === 0, survey.notTheOrder.slice(0, 4));
-  check('all four work orders turn up among them', ['survey', 'recovery', 'salvage', 'restart'].every((key) => survey.orders[key] >= 6), survey.orders);
-  check('every size has as many complications as its range says (no fuel, a tripped breaker, the wait for the lift), and uses the whole range',
-    Object.keys(survey.sizes).every((size) => survey.sizes[size].fewest === survey.sizes[size].allowed[0] && survey.sizes[size].most === survey.sizes[size].allowed[1]), survey.sizes);
+  // (Each order is drawn first for about one seed in four; see the tick boxes further down. That one never turns
+  // up among 64 stations, each from a seed of its own, happens less than once in a thousand runs.)
+  check('all four work orders turn up among them, and each station has the first order its seed draws that it has room for',
+    ['survey', 'recovery', 'salvage', 'restart'].every((key) => survey.orders[key] >= 1) && survey.notJustified.length === 0, [survey.orders, survey.notJustified, survey.passedOver.length + ' orders passed over']);
+  check('every size has as many complications as its range says (no fuel, a tripped breaker, the wait for the lift), and uses the whole range; every station has just the ones planned for it',
+    survey.notAsPlanned.length === 0 &&
+    Object.keys(survey.sizes).every((size) => survey.sizes[size].fewest >= survey.sizes[size].allowed[0] && survey.sizes[size].most <= survey.sizes[size].allowed[1] &&
+      survey.sizes[size].plannedFewest === survey.sizes[size].allowed[0] && survey.sizes[size].plannedMost === survey.sizes[size].allowed[1]), [survey.notAsPlanned, survey.sizes]);
+  // (About 27 of the 64 have it, give or take four: fewer than 12 either way is four standard deviations off or more, and does not come by chance.)
   check('the wait for the lift is one of them: some stations have it and some do not', survey.withTheWait >= 12 && survey.withoutTheWait >= 12, [survey.withTheWait, survey.withoutTheWait]);
   check('no two things in a station share an object number', survey.numbersUsedTwice.length === 0, survey.numbersUsedTwice);
   check('the same seed always gives the same quests in the same places, and another seed gives others', survey.sameSeedSame && survey.anotherSeedDiffers, [survey.sameSeedSame, survey.anotherSeedDiffers]);
   check('the lines on the way down: Kessel-9\'s are as they were, and a generated station has the same with its own work order in the third and its seed after them',
     survey.classicIntro.join(' | ') === 'KESSEL-9 PUMPING ANNEX | 212 m below grade. Sealed 1987. | Work order 4471-B: recover three survey spools left by Crew 2. | There is no lighting. The scanner is the only way to see.' &&
-    survey.intros.length === 4 && survey.intros.every((intro) => intro.lines === 5 && intro.same && intro.isTheOrders && /^Work order 4471-[B-E]: /.test(intro.third) && intro.seed === 'No drawings survive for this annex. Survey reference 3.') &&
+    survey.intros.length === 4 && survey.intros.every((intro) => intro.lines === 5 && intro.same && intro.isTheOrders && /^Work order 4471-[B-E]: /.test(intro.third) && intro.seed === intro.seedLine) &&
     new Set(survey.intros.filter((intro) => intro.asked === intro.got).map((intro) => intro.third)).size >= 3, [survey.classicIntro, survey.intros]);
   check('Kessel-9 asks for the spools and nothing else: a Survey order, with the wait for the lift', survey.classic.join() === 'spools' && survey.classicOrder.join() === 'survey,true,false,3 spools', [survey.classic, survey.classicOrder]);
 
@@ -170,25 +217,38 @@ function check(description, condition, detail) {
   // The same seed, built with other numbers for its quests, is the same map: not a tile, a prop, a door, a hatch,
   // a loud patch of floor or a loose thing is anywhere else, and the quests have altered nothing of it.
   const apart = await inGame(() => {
-    const d = window.lastReturnDebug, lab = window.lab, result = { stations: 0, mapsThatDiffer: [], touched: [], cannotBeFinished: [], questsDiffered: 0, withAndWithoutSalvage: 0, wrongOrder: [], ordersBuilt: {} };
+    const d = window.lastReturnDebug, lab = window.lab, result = { stations: 0, mapsThatDiffer: [], touched: [], cannotBeFinished: [], sameOrderPairs: 0, sameOrderAlike: [], withAndWithoutSalvage: 0, wrongOrder: [], ordersBuilt: {} };
     for (const size of ['small', 'medium', 'large', 'massive']) {
-      for (let seed = 1; seed <= 5; seed++) {
+      let built = 0;
+      // Five of each size. (A seed that cannot be built is stepped over: the game builds Kessel-9 for it.)
+      for (let seed = 1; built < 5 && seed <= 65; seed++) {
         const station = ['generated', seed, size, ['mixed', 'tight', 'sprawling', 'sparse'][seed % 4], seed % 2 ? 'one' : 'two'], name = size + ' ' + seed;
         const builds = [[undefined], [seed + 1000], [seed + 2000], [seed + 3000], [undefined, ['survey']], [undefined, ['recovery']], [undefined, ['salvage']], [undefined, ['restart']]].map((how) => {
           const questSeed = how[0];
-          d.loadStation.apply(null, station.concat(how));
+          if (!d.loadStation.apply(null, station.concat(how))) return { built: false };
           d.game.flags.hasLeftLift = true; d.hollow.isActive = false;
           const audit = d.auditMapApartFromQuests(), found = d.auditLayout().concat(d.auditProgression()).concat(d.auditHollowRoutes()).concat(d.auditNoisyFloor()).concat(d.auditStationLooseObjects());
           if (audit.length) result.touched.push(name + ' (quests ' + questSeed + '): ' + audit[0]);
           if (found.length) result.cannotBeFinished.push(name + ' (quests ' + questSeed + '): ' + found[0]);
           if (how[1] && d.level.workOrder !== how[1][0] && !(how[1][0] === 'salvage' && d.level.workOrder === 'survey')) result.wrongOrder.push(name + ': asked for ' + how[1][0] + ', got ' + d.level.workOrder);
           if (how[1] && d.level.workOrder === how[1][0]) result.ordersBuilt[how[1][0]] = (result.ordersBuilt[how[1][0]] || 0) + 1;
-          return { map: d.level.mapFingerprint, questSeed: d.level.questSeed, quests: lab.describeQuests(''), hasSalvage: d.findQuest('haul') !== null };
+          return { built: true, workOrder: d.level.workOrder, map: d.level.mapFingerprint, seed: d.level.seed, questSeed: d.level.questSeed, quests: lab.describeQuests(''), hasSalvage: d.findQuest('haul') !== null };
         });
+        if (!builds[0].built) continue;
+        built++;
         result.stations++;
         if (builds.some((build) => build.map !== builds[0].map)) result.mapsThatDiffer.push(name);
-        if (builds[0].questSeed !== seed) result.mapsThatDiffer.push(name + ': left to itself, a station takes its quests from its own seed');
-        if (builds.some((build) => build.quests !== builds[0].quests)) result.questsDiffered++;
+        if (builds[0].questSeed !== builds[0].seed) result.mapsThatDiffer.push(name + ': left to itself, a station takes its quests from its own seed');
+        // On Recovery and on Restart, whose things go in rooms and spots picked at random, the station once more
+        // with other numbers for its quests. (Not Survey, whose only things are the spools its rooms put out; nor
+        // Salvage, whose bays go where a doorway is free, and a small station may have only one or two such
+        // doorways, so two builds may well dig the same bays.)
+        for (const [order, before] of [['recovery', builds[5]], ['restart', builds[7]]]) {
+          d.loadStation.apply(null, station.concat([seed + 4000, [order]]));
+          if (d.level.workOrder !== order || before.workOrder !== order || d.level.questSeed === before.questSeed) continue;
+          result.sameOrderPairs++;
+          if (lab.describeQuests('') === before.quests) result.sameOrderAlike.push(name + ' on ' + order + ': quest numbers ' + before.questSeed + ' and ' + d.level.questSeed);
+        }
         if (builds.some((build) => build.hasSalvage) && builds.some((build) => !build.hasSalvage)) result.withAndWithoutSalvage++;
       }
     }
@@ -196,10 +256,19 @@ function check(description, condition, detail) {
   });
   check('the map and the quests are apart: twenty stations, each built four times with other numbers for its quests and once on each of the four work orders, give the same map every time, and no quest has altered any of it',
     apart.stations === 20 && apart.mapsThatDiffer.length === 0 && apart.touched.length === 0 && apart.cannotBeFinished.length === 0, apart);
+  // (The game promises no more of Salvage than that a station with no room for a bay falls back to Survey, and
+  // that is checked for every station. How many have room is a rate of the content: about 94 % when this was
+  // written (136 of 144 tries). At 6 % failing, fewer than 14 of 20 comes by chance about once in ten thousand
+  // runs. If it fails after rooms were added or changed, it means stations have fewer spare doorways for bays
+  // than they had, not that a rule is broken: look at whether that is wanted.)
   check('a station built with one work order switched on has that order (Salvage with no doorway free for a bay falls back to Survey)',
-    apart.wrongOrder.length === 0 && apart.ordersBuilt.survey === 20 && apart.ordersBuilt.recovery === 20 && apart.ordersBuilt.restart === 20 && apart.ordersBuilt.salvage >= 16, [apart.wrongOrder, apart.ordersBuilt]);
-  check('and those were different quests: most of the twenty got other quests or other places for them, some of them salvage bays in one build and none in another',
-    apart.questsDiffered >= 15 && apart.withAndWithoutSalvage >= 5, [apart.questsDiffered, apart.withAndWithoutSalvage]);
+    apart.wrongOrder.length === 0 && apart.ordersBuilt.survey === 20 && apart.ordersBuilt.recovery === 20 && apart.ordersBuilt.restart === 20 && apart.ordersBuilt.salvage >= 14, [apart.wrongOrder, apart.ordersBuilt]);
+  // (On Recovery or Restart, other numbers for the quests put its things in other rooms and spots: two builds
+  // alike would need every badge, core sample, generator and valve put on the same spot by two different runs of
+  // random numbers, which does not happen by chance. Every station is built so on both, 40 pairs in all.
+  // And Salvage has bays only where it is the order.)
+  check('and those were different quests: builds with other numbers for their quests, on the same Recovery or Restart order, put their things in other places; and each that took a Salvage order had salvage bays in that build and none in another',
+    apart.sameOrderPairs === 2 * apart.stations && apart.sameOrderAlike.length === 0 && apart.withAndWithoutSalvage >= (apart.ordersBuilt.salvage || 0), [apart.sameOrderPairs + ' pairs on the same order', apart.sameOrderAlike, apart.withAndWithoutSalvage]);
 
   // --- a seed keeps its promise within a build ---
   // The same seed builds the same station every time it is asked for: the same map (one number for the whole of
@@ -220,11 +289,11 @@ function check(description, condition, detail) {
     };
     for (const name of ['medium 9 mixed one', 'large 7 sparse one', 'massive 12 tight two']) {
       const parts = name.split(' ');
-      lab.fresh('generated', Number(parts[1]), parts[0], parts[2], parts[3]);
+      const seed = lab.freshFrom('generated', Number(parts[1]), parts[0], parts[2], parts[3]);
       const first = describe();
-      lab.fresh('generated', Number(parts[1]) + 1, parts[0], parts[2], parts[3]);
+      lab.freshFrom('generated', seed + 1, parts[0], parts[2], parts[3]);
       const other = describe();
-      lab.fresh('generated', Number(parts[1]), parts[0], parts[2], parts[3]);
+      lab.fresh('generated', seed, parts[0], parts[2], parts[3]);
       const again = describe();
       result[name] = { sameMap: first.map === again.map && JSON.stringify(first.mapPartByPart) === JSON.stringify(again.mapPartByPart), sameQuests: first.quests === again.quests && first.quests !== '',
         otherSeedDiffers: other.map !== first.map, first: first, again: again };
@@ -246,6 +315,7 @@ function check(description, condition, detail) {
       names: ['Test valve 1', 'Test valve 2', 'Test valve 3'], text: Object.assign({}, valves.text, { refused: 'LIFT CONTROL: test valves shut: {done} of {total}.' }) });
     const stations = [['generated', 3, 'small', 'tight', 'one', 'restart'], ['generated', 8, 'medium', 'mixed', 'two', 'restart'], ['generated', 5, 'large', 'sprawling', 'one', 'restart'], ['generated', 2, 'massive', 'sparse', 'two', 'restart']];
     const restart = d.workOrders.filter((order) => order.key === 'restart')[0];
+    for (const station of stations) station[1] = lab.freshFrom.apply(null, station); // (stepping over a seed that cannot be built)
     const before = stations.map((station) => { lab.fresh.apply(null, station); return lab.describeQuests('testValves') + ' # ' + d.getStationFingerprint().length; });
     d.quests.push(madeUp);
     restart.quests.push('testValves');
@@ -298,7 +368,7 @@ function check(description, condition, detail) {
       for (let seed = 1; seed <= 14; seed++) {
         await window.letTheBrowserCatchUp();
         const station = ['generated', seed, size, ['mixed', 'tight', 'sparse'][seed % 3], seed % 2 ? 'one' : 'two', 'salvage'], name = size + ' ' + seed;
-        lab.fresh.apply(null, station);
+        if (!lab.fresh.apply(null, station)) continue; // (a seed that cannot be built is stepped over)
         result.stations++;
         const quest = d.findQuest('haul');
         if ((d.level.workOrder === 'salvage') !== (quest !== null) || (!quest && d.level.workOrder !== 'survey')) result.wrong.push(name + ': the order is ' + d.level.workOrder + (quest ? ' with' : ' without') + ' the quest');
@@ -341,12 +411,14 @@ function check(description, condition, detail) {
     }
     return result;
   });
-  check('salvage: on a Salvage order nearly every station has it (one with no doorway free for a bay has a Survey order instead); each asks for a round sum that is no more than what lies within walking reach, and has as many bays as its size allows: two tiles each behind a shut door of their own, a panel beside it, empty, and well apart',
-    salvagePlaces.withIt >= salvagePlaces.stations - 6 && salvagePlaces.wrong.length === 0, salvagePlaces);
+  // (As above: the game promises only the fallback; how many have room is a rate of the content, about 94 % when
+  // this was written. At 6 % failing, fewer than seven in ten of 28 comes by chance about once in forty thousand runs.)
+  check('salvage: on a Salvage order most stations have it (one with no doorway free for a bay has a Survey order instead); each asks for a round sum that is no more than what lies within walking reach, and has as many bays as its size allows: two tiles each behind a shut door of their own, a panel beside it, empty, and well apart',
+    salvagePlaces.stations >= 20 && salvagePlaces.withIt >= Math.ceil(salvagePlaces.stations * 0.7) && salvagePlaces.wrong.length === 0, salvagePlaces);
   check('salvage: a station with it is the same station without it, plus its bays: the same rooms and other doors, and to the tile the same hatches, loud floor, loose things and other quests\' things',
     salvagePlaces.moved.length === 0 && ['otherQuestsToTheTile', 'hatches', 'noisyFloor', 'looseThings'].every((what) => salvagePlaces.alsoTheSame[what] === salvagePlaces.withIt), [salvagePlaces.moved, salvagePlaces.alsoTheSame, salvagePlaces.withIt]);
 
-  const salvage = await inGame(async () => {
+  const salvage = await inGame(async (testWeight) => {
     const d = window.lastReturnDebug, lab = window.lab, result = {};
     for (let seed = 1; seed < 300 && !result.seed; seed++) {
       await window.letTheBrowserCatchUp();
@@ -357,7 +429,7 @@ function check(description, condition, detail) {
     d.setDebugOption('freezeCreatures', true);
     d.settings.captions = 'all';
     const state = d.haulState, target = state.target, quest = d.findQuest('haul'), bay = state.bays[0];
-    result.target = target; result.quota = bay.quota;
+    result.target = target; result.quota = bay.quota; result.lampRays = d.tuning.haulBayPulseRays;
     d.grantPower(); d.hollow.isActive = false;
     result.objectiveAtFirst = d.game.objectiveText;
     d.grantKeycard();
@@ -383,15 +455,15 @@ function check(description, condition, detail) {
     result.secondMeanwhile = { state: state.bays[1].state, said: /bay 1 is still open\. One at a time/.test(lab.messages()) };
 
     // What it wants carried in, with you standing in it: it counts, and the door stays up.
-    // (Nothing of glass: the third thing is let go of a metre up, on top of the first, and a jar does not survive that.)
-    const dearestFirst = d.looseObjects.filter((object) => !object.kind.shattersAt).sort((a, b) => b.kind.value - a.kind.value);
+    // (What is carried in is this check's own: two blocks that lie where they are put, one on each tile of the
+    // bay, each worth half of what the bay wants. How the station's own things are shaped, whether they roll or
+    // break, and what they are worth is the game's to change.)
+    d.looseObjectKinds.testSalvage = Object.assign(JSON.parse(JSON.stringify(testWeight)), { label: 'test salvage', value: Math.ceil(bay.quota / 2) });
     const isAlongX = bay.maximumX - bay.minimumX > 1;
     let carried = 0;
-    for (const object of dearestFirst) {
-      if (d.getHaulBayValue(bay) >= bay.quota) break;
-      d.pickUpLooseObject(object, false); d.releaseHeldLooseObject(0);
-      object.x = bay.minimumX + 0.5 + (isAlongX ? carried % 2 : 0); object.z = bay.minimumZ + 0.5 + (isAlongX ? 0 : carried % 2); object.y = bay.floorY + 0.4 + Math.floor(carried / 2) * 0.6;
-      object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0; d.wakeLooseObject(object);
+    for (const tile of [0, 1]) {
+      const object = d.createLooseObject('testSalvage', bay.minimumX + 0.5 + (isAlongX ? tile : 0), bay.floorY + 0.2, bay.minimumZ + 0.5 + (isAlongX ? 0 : tile), 0);
+      d.wakeLooseObject(object);
       carried++;
     }
     const looseBefore = d.looseObjects.length;
@@ -425,34 +497,37 @@ function check(description, condition, detail) {
     result.newDescent = { states: state.bays.map((each) => each.state).join(','), taken: state.taken, progress: d.getHaulProgress(), things: d.looseObjects.length === d.stationLooseObjects.length,
       doorsShut: state.bays.every((each) => each.door.openFraction === 0), panelsBack: state.bays.every((each) => each.interactable.isAvailable) };
     // If so much is lost that what is left is worth less than was asked, what is left is all that is asked.
-    const byWorth = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
-    let left = 0;
-    for (const object of byWorth) { if (byWorth.indexOf(object) < byWorth.length - 6) d.removeLooseObject(object); else left += object.kind.value; }
+    // (What is lost is everything but six things at most, together worth less than was asked: the dearest that
+    // keep it so. Few, so that the bays can take them all.)
+    const dearestFirst = d.looseObjects.slice().sort((a, b) => b.kind.value - a.kind.value);
+    let left = 0, kept = 0;
+    for (const object of dearestFirst) { if (kept < 6 && left + object.kind.value < d.haulState.target) { left += object.kind.value; kept++; } else d.removeLooseObject(object); }
     result.withLittleLeft = { left: left, asked: d.getHaulProgress().total, wasAsked: d.haulState.target };
     d.doQuest('haul');
     result.withLittleLeft.done = d.getHaulProgress().done;
     d.hollow.isActive = false;
+    delete d.looseObjectKinds.testSalvage;
     return result;
-  });
+  }, TEST_OBJECT_KINDS.testWeight);
   check('salvage: the objective and the screen say what is asked and how much is in, and not a word about spools; the terminal refuses until it is',
     salvage.seed > 0 && salvage.target >= 10 && salvage.objectiveAtFirst.indexOf('Salvage wants ' + salvage.target + ' worth') === 0 && !/spool/i.test(salvage.objectiveAtFirst) &&
     salvage.chipBefore.indexOf('SALVAGE 0/' + salvage.target) >= 0 && !salvage.refused.started && salvage.refused.said, salvage);
   check('salvage: a bay opens at its panel: the door goes up, a lamp puts a patch of points in front of it and pings, it is on the map from then on, and a minute later the lamp does it again',
-    salvage.opened.state === 'open' && salvage.opened.door > 0.95 && salvage.opened.lampPoints >= 300 && salvage.opened.pings === 1 && !salvage.opened.wasOnMap && salvage.opened.onMap && salvage.opened.wasWanted && salvage.opened.said &&
-    salvage.aMinuteLater.lampPoints >= 300 && salvage.aMinuteLater.pings === 2, [salvage.opened, salvage.aMinuteLater]);
-  check('salvage: one bay at a time: the second will not open while the first stands open', salvage.secondMeanwhile.state === 'shut' && salvage.secondMeanwhile.said, salvage.secondMeanwhile);
+    salvage.seed > 0 && salvage.opened.state === 'open' && salvage.opened.door > 0.95 && salvage.opened.lampPoints >= salvage.lampRays * 5 / 7 && salvage.opened.pings === 1 && !salvage.opened.wasOnMap && salvage.opened.onMap && salvage.opened.wasWanted && salvage.opened.said &&
+    salvage.aMinuteLater.lampPoints >= salvage.lampRays * 5 / 7 && salvage.aMinuteLater.pings === 2, [salvage.opened, salvage.aMinuteLater]);
+  check('salvage: one bay at a time: the second will not open while the first stands open', salvage.seed > 0 && salvage.secondMeanwhile.state === 'shut' && salvage.secondMeanwhile.said, salvage.secondMeanwhile);
   check('salvage: what lies in the open bay counts, and its door never comes down on you: not while you stand in it, and not if you dart back under it as it starts to seal',
-    salvage.withYouInside.state === 'open' && salvage.withYouInside.door > 0.95 && salvage.withYouInside.holds >= salvage.quota && salvage.withYouInside.progress.done === salvage.withYouInside.holds && salvage.withYouInside.said &&
+    salvage.seed > 0 && salvage.withYouInside.state === 'open' && salvage.withYouInside.door > 0.95 && salvage.withYouInside.holds >= salvage.quota && salvage.withYouInside.progress.done === salvage.withYouInside.holds && salvage.withYouInside.said &&
     salvage.withYouInside.chip.indexOf('SALVAGE ' + salvage.withYouInside.holds + '/') >= 0 && salvage.steppedOut === 'sealing' && salvage.dartedBack.state === 'open' && salvage.dartedBack.door > 0.95, [salvage.withYouInside, salvage.steppedOut, salvage.dartedBack]);
   check('salvage: with you out of it, the full bay seals: the door comes down for good, what was inside is taken, and the next bay can be opened',
-    salvage.sealed.state === 'sealed' && salvage.sealed.door === 0 && salvage.sealed.taken === salvage.sealed.held && salvage.sealed.thingsGone === salvage.sealed.carried && salvage.sealed.progress.done === salvage.sealed.taken &&
+    salvage.seed > 0 && salvage.sealed.state === 'sealed' && salvage.sealed.door === 0 && salvage.sealed.taken === salvage.sealed.held && salvage.sealed.thingsGone === salvage.sealed.carried && salvage.sealed.progress.done === salvage.sealed.taken &&
     salvage.sealed.panelGone && salvage.sealed.said && salvage.nextBay === 'open', [salvage.sealed, salvage.nextBay]);
   check('salvage: with what was asked sealed in, the screen says so, the objective is the lift (the work order is done, with no spool taken), and the terminal calls it',
-    salvage.afterAll.progress.done === salvage.target && salvage.afterAll.said && salvage.afterAll.objective === 'That is the work order done. Return to the lift lobby and call the lift at the terminal.' && salvage.accepted, salvage.afterAll);
+    salvage.seed > 0 && salvage.afterAll.progress.done === salvage.target && salvage.afterAll.said && salvage.afterAll.objective === 'That is the work order done. Return to the lift lobby and call the lift at the terminal.' && salvage.accepted, salvage.afterAll);
   check('salvage: a new descent has every bay shut and empty again and everything back where it lay',
-    /^(shut,?)+$/.test(salvage.newDescent.states) && salvage.newDescent.taken === 0 && salvage.newDescent.progress.done === 0 && salvage.newDescent.things && salvage.newDescent.doorsShut && salvage.newDescent.panelsBack, salvage.newDescent);
+    salvage.seed > 0 && /^(shut,?)+$/.test(salvage.newDescent.states) && salvage.newDescent.taken === 0 && salvage.newDescent.progress.done === 0 && salvage.newDescent.things && salvage.newDescent.doorsShut && salvage.newDescent.panelsBack, salvage.newDescent);
   check('salvage: if less is left in the station than was asked, what is left is all that is asked, so it can always be finished',
-    salvage.withLittleLeft.left < salvage.withLittleLeft.wasAsked && salvage.withLittleLeft.asked === salvage.withLittleLeft.left && salvage.withLittleLeft.done === salvage.withLittleLeft.left, salvage.withLittleLeft);
+    salvage.seed > 0 && salvage.withLittleLeft.left > 0 && salvage.withLittleLeft.left < salvage.withLittleLeft.wasAsked && salvage.withLittleLeft.asked === salvage.withLittleLeft.left && salvage.withLittleLeft.done === salvage.withLittleLeft.left, salvage.withLittleLeft);
 
   // --- the lift's door never comes down on you either ---
   const liftDoor = await inGame(() => {
@@ -535,10 +610,10 @@ function check(description, condition, detail) {
     result.beforeMains = { done: quest.done, said: /actuator dead\. It needs the mains/.test(lab.messages()), wantedOnMap: d.isInteractableWantedNow(thing) };
     d.grantPower(); d.hollow.isActive = false;
     result.notYetTold = { objective: d.game.objectiveText, chip: d.getQuestChips().join(' · '), marked: thing.isDiscovered };
-    // The mains coming on is when Dispatch thinks of them: thirty-four seconds on, after his line about the generators.
+    // The mains coming on is when Dispatch thinks of them: as many seconds on as the quest's entry says, after his line about the generators.
     d.setDebugOption('freezeCreatures', true);
     d.fireGameEvent('mainsOn');
-    d.simulate(33); const tooSoon = quest.isKnown;
+    d.simulate(quest.definition.tell.seconds - 1); const tooSoon = quest.isKnown;
     d.simulate(1.5);
     d.setDebugOption('freezeCreatures', false);
     result.told = { tooSoon: tooSoon, known: quest.isKnown, marked: quest.objects.every((object) => d.findInteractable(object.objectId).isDiscovered),
@@ -576,7 +651,7 @@ function check(description, condition, detail) {
   });
   check('isolation valves: one will not move before the mains is on, and shows dimly on the map',
     valves.seed > 0 && valves.beforeMains.done === 0 && valves.beforeMains.said && valves.beforeMains.wantedOnMap === false, valves.beforeMains);
-  check('isolation valves: until Dispatch speaks of them, thirty-four seconds after the mains comes on, the objective is the work order in its own words and nothing counts or marks them; then they are marked, counted and in the objective',
+  check('isolation valves: until Dispatch speaks of them, as long after the mains comes on as their entry says, the objective is the work order in its own words and nothing counts or marks them; then they are marked, counted and in the objective',
     valves.seed > 0 && valves.notYetTold.objective === 'Get every generator running and shut the isolation valves.' && !/VALVES/.test(valves.notYetTold.chip) && !valves.notYetTold.marked &&
     !valves.told.tooSoon && valves.told.known && valves.told.marked && valves.told.radio && /isolation valves have to be shut.*0 of/.test(valves.told.objective) &&
     valves.told.chip.indexOf('VALVES 0/' + valves.total) >= 0 && valves.told.wantedOnMap === true, [valves.notYetTold, valves.told]);
@@ -596,7 +671,8 @@ function check(description, condition, detail) {
       for (let seed = 1; seed <= 16; seed++) {
         await window.letTheBrowserCatchUp();
         // On another order: the three its rooms put out and no more, asked of nobody.
-        lab.fresh('generated', seed, size, layouts[seed % 4], seed % 2 ? 'one' : 'two', ['recovery', 'restart'][seed % 2]);
+        // (A seed that cannot be built is stepped over: the game builds Kessel-9 for it.)
+        if (!lab.fresh('generated', seed, size, layouts[seed % 4], seed % 2 ? 'one' : 'two', ['recovery', 'restart'][seed % 2])) continue;
         const unasked = d.findQuest('spools');
         if (d.level.workOrder !== 'survey' && (!unasked || !unasked.isOptional || unasked.total !== 3 || d.level.spoolCount !== 3 || d.level.quests[0].key === 'spools' || d.areSpoolsOnTheOrder())) {
           result.bad.push(size + ' ' + seed + ': on a ' + d.level.workOrder + ' order the spools are not three, asked of nobody');
@@ -607,17 +683,26 @@ function check(description, condition, detail) {
         counts.push(d.level.spoolCount);
         if (!quest || quest.isOptional || quest.total !== d.level.spoolCount || quest.objects.filter((object) => object.isFixed).length !== 3) result.bad.push(size + ' ' + seed + ': the quest and the station disagree');
         if (d.level.workOrder !== 'survey' || d.level.quests[0].key !== 'spools' || !d.areSpoolsOnTheOrder()) result.bad.push(size + ' ' + seed + ': the spools are not the first thing asked for');
+        // As many as were planned for it: the three and the planner's extra ones, every one of them put out.
+        const planned = 3 + d.planQuests(d.level.questSeed, d.sizePresets[size], d.workOrders.filter((order) => order.key === 'survey')[0]).spools.count;
+        if (d.level.spoolCount !== planned) result.bad.push(size + ' ' + seed + ': ' + planned + ' spools planned, ' + d.level.spoolCount + ' put out');
       }
       const allowed = d.sizePresets[size].extraSpools;
-      result.sizes[size] = { fewest: Math.min.apply(null, counts), most: Math.max.apply(null, counts), allowed: [3 + allowed[0], 3 + allowed[1]], counts: counts.join('') };
+      // That a size uses its whole range is seen in what the planner picks for 500 seeds (over sixteen stations a
+      // range of three numbers leaves one out about one run in two hundred); every station built keeps within it.
+      const planned = [], survey = d.workOrders.filter((order) => order.key === 'survey')[0];
+      for (let seed = 1; seed <= 500; seed++) planned.push(3 + d.planQuests(seed, d.sizePresets[size], survey).spools.count);
+      result.sizes[size] = { fewest: Math.min.apply(null, counts), most: Math.max.apply(null, counts), allowed: [3 + allowed[0], 3 + allowed[1]], counts: counts.join(''),
+        plannedFewest: Math.min.apply(null, planned), plannedMost: Math.max.apply(null, planned) };
     }
     lab.fresh('classic', 0);
     result.classic = { count: d.level.spoolCount, things: d.findQuest('spools').objects.map((object) => object.objectId).join() };
     return result;
   });
-  check('every station has the three spools its rooms put out, asked of nobody unless the order is Survey; on a Survey order a bigger one may have more, as many as its size allows; Kessel-9 has its three',
+  check('every station has the three spools its rooms put out, asked of nobody unless the order is Survey; on a Survey order a bigger one may have more, as many as its size allows and as many as were planned for it; Kessel-9 has its three',
     spoolCounts.bad.length === 0 && spoolCounts.classic.count === 3 && spoolCounts.classic.things === '3,4,5' &&
-    Object.keys(spoolCounts.sizes).every((size) => spoolCounts.sizes[size].fewest === spoolCounts.sizes[size].allowed[0] && spoolCounts.sizes[size].most === spoolCounts.sizes[size].allowed[1]), spoolCounts);
+    Object.keys(spoolCounts.sizes).every((size) => spoolCounts.sizes[size].fewest >= spoolCounts.sizes[size].allowed[0] && spoolCounts.sizes[size].most <= spoolCounts.sizes[size].allowed[1] &&
+      spoolCounts.sizes[size].plannedFewest === spoolCounts.sizes[size].allowed[0] && spoolCounts.sizes[size].plannedMost === spoolCounts.sizes[size].allowed[1]), spoolCounts);
 
   // A station with four spools and little else in the way.
   const fourFound = await inGame(async () => {
@@ -747,7 +832,7 @@ function check(description, condition, detail) {
     });
     await drawFrames(page, 3);
     const chipAfter = await inGame(() => document.getElementById('chip-spools').textContent);
-    const end = await inGame(() => {
+    const end = await inGame((seed) => {
       const d = window.lastReturnDebug, result = {};
       // The order itself: what the Hollow's pressure follows, and what the terminal asks for.
       const badges = d.findQuest('badges'), cores = d.findQuest('cores');
@@ -765,14 +850,14 @@ function check(description, condition, detail) {
       result.manifest = [d.describeUploadManifest(), badges.total + ' crew badges, ' + cores.total + ' core samples. Not on the work order: 3 survey spools'];
       d.setDebugOption('freezeCreatures', false); d.hollow.isActive = false;
       // The same station on a Survey order, with not one spool taken: all three in hand is all of it.
-      window.lab.fresh('generated', d.level.seed, 'large', 'mixed', 'one', 'survey');
+      window.lab.fresh('generated', seed, 'large', 'mixed', 'one', 'survey');
       d.grantPower(); d.hollow.isActive = false;
       const atStart = d.getWorkOrderProgressShare();
       d.use(3); d.closeReader();
       result.survey = { atStart: atStart, afterOne: d.getWorkOrderProgressShare(), ofSpools: d.level.spoolCount };
       d.hollow.isActive = false;
       return result;
-    });
+    }, unasked.seed);
     check('a spool nobody asked for: the screen and the objective say nothing of spools, and it shows dimly on the map',
       !before.chipShown && !/spool/i.test(before.objective) && before.wantedOnMap === false, before);
     check('it can still be taken and read, and the screen then counts what you hold without saying of how many; a message says it is not on this order, and Dispatch says nothing about it',
@@ -806,7 +891,7 @@ function check(description, condition, detail) {
     };
     for (let seed = 1; seed < 300 && !(result.without && result.withIt && result.breaker); seed++) {
       await window.letTheBrowserCatchUp();
-      lab.fresh('generated', seed, 'small', 'mixed', 'one', 'survey');
+      if (!lab.fresh('generated', seed, 'small', 'mixed', 'one', 'survey')) continue; // (a seed that cannot be built builds Kessel-9, with the spools alone and the wait)
       const keys = d.level.quests.map((quest) => quest.key).join();
       if (keys === 'spools' && !d.level.liftWaits && !result.without) result.without = Object.assign({ seed: seed }, call());
       else if (keys === 'spools' && d.level.liftWaits && !result.withIt) result.withIt = Object.assign({ seed: seed }, call());
@@ -844,7 +929,8 @@ function check(description, condition, detail) {
       result.boxes = boxes.map((box) => box !== null && box.type === 'checkbox' && box.checked).join();
       result.labels = boxes.map((box) => box.parentElement.textContent.trim()).join();
       result.allowedAtFirst = d.getAllowedWorkOrders().join();
-      // Each order comes up about as often as the others, whatever the seed.
+      // Each order comes up about as often as the others, whatever the seed. (500 of 2000 each, give or take 19:
+      // outside 400 to 600 is five standard deviations off, and does not come by chance.)
       const first = {};
       for (let seed = 1; seed <= 2000; seed++) { const key = d.rankWorkOrders(seed, d.getAllowedWorkOrders())[0].key; first[key] = (first[key] || 0) + 1; }
       result.first = first;
@@ -865,7 +951,8 @@ function check(description, condition, detail) {
       boxes[3].click();
       result.lastOne = { allowed: d.getAllowedWorkOrders().join(), boxes: boxes.map((box) => box.checked).join(), setting: d.settings.workOrders.restart };
       const orders = {};
-      for (let seed = 1; seed <= 6; seed++) { d.loadStation('generated', seed, 'small', 'mixed', 'one', undefined, d.getAllowedWorkOrders()); orders[d.level.workOrder] = (orders[d.level.workOrder] || 0) + 1; }
+      // (Six stations; a seed that cannot be built is stepped over.)
+      for (let seed = 1, built = 0; built < 6 && seed <= 66; seed++) { if (!d.loadStation('generated', seed, 'small', 'mixed', 'one', undefined, d.getAllowedWorkOrders())) continue; built++; orders[d.level.workOrder] = (orders[d.level.workOrder] || 0) + 1; }
       result.onlyRestart = orders;
     } finally {
       // Back as they were.
@@ -989,7 +1076,7 @@ function check(description, condition, detail) {
       result.room = { beforeEntering: /The car is at your level/.test(lab.messages()), placeAtStart: d.zoneNames[d.getZoneAt(d.player.x, d.player.z)] };
       const hall = d.findSigns('PUMP HALL B')[0];
       let inside = null;
-      for (let z = 30; z < 70 && !inside; z++) for (let x = 30; x < 80 && !inside; x++) if (d.zoneNames[d.getZoneAt(x + 0.5, z + 0.5)] === 'PUMP HALL B' && d.findWalkableSpotNear(x + 0.5, z + 0.5)) inside = d.findWalkableSpotNear(x + 0.5, z + 0.5);
+      for (let z = Math.floor(d.level.boundsMinimumZ); z < d.level.boundsMaximumZ && !inside; z++) for (let x = Math.floor(d.level.boundsMinimumX); x < d.level.boundsMaximumX && !inside; x++) if (d.zoneNames[d.getZoneAt(x + 0.5, z + 0.5)] === 'PUMP HALL B' && d.findWalkableSpotNear(x + 0.5, z + 0.5)) inside = d.findWalkableSpotNear(x + 0.5, z + 0.5);
       d.teleport(inside.x, inside.z, 0); d.simulate(0.5);
       result.room.place = d.zoneNames[d.getZoneAt(d.player.x, d.player.z)];
       result.room.onEntering = /The car is at your level/.test(lab.messages());

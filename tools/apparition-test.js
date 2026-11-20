@@ -5,6 +5,14 @@
 // for where the player stands.
 const { openGame, startGame } = require('./browser-harness.js');
 
+// The share of the crawler's tries that must find a place, over the stations where it can be placed at all.
+// Measured: 7, 11 and 19 in 1000 over a plain run and two on other stations (12 places in 1700 such tries at the least;
+// one station gives 1 in 400, another 13 in 400).
+// The tries go on until 12 have found a place, so at 7 in 1000 the share would come out below 2 in 1000 only if
+// more than 6000 tries were needed, where about 1700 give or take 500 are usual: chance practically never
+// does that. A crawler that had become three or more times harder to place is noticed.
+const SMALLEST_CRAWLER_SHARE = 0.002;
+
 const failures = [];
 function check(description, condition, detail) {
   const line = (condition ? 'ok    ' : 'FAIL  ') + description + (detail !== undefined ? '  ' + JSON.stringify(detail) : '');
@@ -85,6 +93,20 @@ const labSource = String(function () {
     d.setDebugOption('invulnerable', true);
     d.setScannerSpread(24);
   };
+  // The first generated station of this size, layout and number of levels that has vent mouths for a crawler,
+  // as the list freshStation takes, or null if there is none among sixty seeds. (What a seed builds changes with
+  // every new room, so such a station is looked for, not written down.) Found once, then kept.
+  lab.stationsWithVentMouths = {};
+  lab.findStationWithVentMouths = function (size, layout, levels) {
+    const name = [size, layout, levels].join(' ');
+    if (lab.stationsWithVentMouths[name] !== undefined) return lab.stationsWithVentMouths[name];
+    let found = null;
+    for (let seed = 1; seed <= 60 && !found; seed++) {
+      if (d.loadStation('generated', seed, size, layout, levels) && d.phantomVentMouths.length > 0) found = ['generated', seed, size, layout, levels];
+    }
+    lab.stationsWithVentMouths[name] = found;
+    return found;
+  };
   window.lab = lab;
 });
 
@@ -108,21 +130,48 @@ const labSource = String(function () {
     // The five kinds the phantom director chooses from. (The one in your face has its own checks further down.)
     const kinds = d.phantomKindKeys.filter((kind) => kind !== 'face');
     for (const kind of kinds) placed[kind] = 0;
-    const stations = [['classic', 0, 'medium', 'mixed', 'one'], ['generated', 1, 'medium', 'mixed', 'two'], ['generated', 2, 'large', 'sprawling', 'one']];
-    for (const station of stations) {
+    const stations = [['classic', 0, 'medium', 'mixed', 'one'], lab.findStationWithVentMouths('medium', 'mixed', 'two'), lab.findStationWithVentMouths('large', 'sprawling', 'one')];
+    const missing = [];
+    if (!stations[1]) missing.push('no medium two-level station with vent mouths among sixty seeds');
+    if (!stations[2]) missing.push('no large sprawling station with vent mouths among sixty seeds');
+    // A crawler only goes where a vent mouth is open (no cover standing in it), and how many of those a station
+    // has is down to what it happens to build. So if these stations gave the crawler too few places for its
+    // rules to have been put to the test, further stations with vent mouths are gone over, with tries for the
+    // crawler only, until it has been placed often enough (or sixty seeds have been tried).
+    const crawlersWanted = 12;
+    let nextSeed = 1, extraStations = 0;
+    // Its tries and its places, station by station: see the share asked for below the loop.
+    const crawlerByStation = [];
+    for (let stationNumber = 0; stationNumber < stations.length || (placed.crawler < crawlersWanted && nextSeed <= 60); stationNumber++) {
+      let station = stations[stationNumber];
+      const isExtra = stationNumber >= 3;
+      if (isExtra) {
+        station = null;
+        for (; nextSeed <= 60 && !station; nextSeed++) {
+          if (stations.some((used) => used && used[0] === 'generated' && used[1] === nextSeed && used[2] === 'medium' && used[3] === 'mixed' && used[4] === 'two')) continue;
+          if (d.loadStation('generated', nextSeed, 'medium', 'mixed', 'two') && d.phantomVentMouths.length > 0) station = ['generated', nextSeed, 'medium', 'mixed', 'two'];
+        }
+        if (!station) break;
+        stations.push(station); extraStations++;
+      }
+      if (!station) continue;
       lab.freshStation.apply(null, station);
-      for (let attempt = 0; attempt < 720; attempt++) {
+      const crawlerHere = { station: station[0] + ' ' + station[1], tries: 0, placed: 0 };
+      crawlerByStation.push(crawlerHere);
+      for (let attempt = 0; attempt < (isExtra ? 300 : 720); attempt++) {
         if (!lab.standSomewhere()) continue;
         // Vents are few, so in the stations that have them the crawler gets more tries than the others.
-        const turns = station[0] === 'classic' ? kinds : kinds.concat(['crawler', 'crawler', 'crawler', 'crawler']);
+        const turns = isExtra ? ['crawler'] : station[0] === 'classic' ? kinds : kinds.concat(['crawler', 'crawler', 'crawler', 'crawler']);
         const kind = turns[attempt % turns.length];
         // Half the time the scanner is on, with a narrow beam or a wide one: the rules are stricter then.
         const isScanning = lab.random() < 0.5;
         d.setScannerSpread(isScanning && lab.random() < 0.5 ? 6 : 24);
         d.player.scannerActivity = isScanning ? 1 : 0;
         const phantom = d.summonPhantom(kind);
+        if (kind === 'crawler') crawlerHere.tries++;
         if (!phantom) continue;
         placed[kind]++;
+        if (kind === 'crawler') crawlerHere.placed++;
         const figure = phantom.figure, where = station[0] + ' ' + station[1] + ' try ' + attempt + ' ' + kind;
         const complain = function (what) { broken.push(where + ': ' + what); };
         const tileX = Math.floor(figure.x), tileZ = Math.floor(figure.z);
@@ -169,12 +218,22 @@ const labSource = String(function () {
       }
     }
     d.setScannerSpread(24);
-    return { placed: placed, broken: broken.slice(0, 6), brokenCount: broken.length };
+    if (placed.crawler < crawlersWanted) missing.push('the crawler found a place only ' + placed.crawler + ' times, where ' + crawlersWanted + ' are wanted, over the stations above and every medium two-level station with vent mouths among sixty seeds');
+    // Going over more stations must not hide a crawler that has become much harder to place. So, over the
+    // stations where it could be put in a vent mouth at all, the share of its tries that found a place is asked
+    // to stay above a floor (see the check for the measured share and the floor).
+    const stationsThatTookACrawler = crawlerByStation.filter((entry) => entry.placed > 0);
+    const crawler = { tries: crawlerByStation.reduce((sum, entry) => sum + entry.tries, 0), placed: placed.crawler,
+      triesWhereItFits: stationsThatTookACrawler.reduce((sum, entry) => sum + entry.tries, 0), byStation: crawlerByStation };
+    crawler.shareWhereItFits = crawler.triesWhereItFits > 0 ? Math.round(placed.crawler / crawler.triesWhereItFits * 1000) / 1000 : 0;
+    return { placed: placed, crawler: crawler, crawlersWanted: crawlersWanted, extraStations: extraStations, broken: broken.slice(0, 6), brokenCount: broken.length, missing: missing };
   });
   check('every apparition was put where the rules of its kind allow (range, in sight, never inside the beam, good floor)',
     placing.brokenCount === 0, placing.broken);
   check('each kind found a place often enough for that to mean something',
-    placing.placed.watcher >= 40 && placing.placed.behind >= 40 && placing.placed.dummy >= 40 && placing.placed.crosser >= 15 && placing.placed.crawler >= 12, placing.placed);
+    placing.missing.length === 0 && placing.placed.watcher >= 40 && placing.placed.behind >= 40 && placing.placed.dummy >= 40 && placing.placed.crosser >= 15 && placing.placed.crawler >= placing.crawlersWanted &&
+    placing.crawler.shareWhereItFits >= SMALLEST_CRAWLER_SHARE,
+    placing.missing.length ? placing.missing : Object.assign({ extraStationsForTheCrawler: placing.extraStations, crawlerTriesAndPlaces: placing.crawler, smallestShareAsked: SMALLEST_CRAWLER_SHARE }, placing.placed));
 
   // --- the watcher: gone after a proper look, gone if approached, withdrawn and not counted if never seen ---
   const watcher = await inGame(() => {
@@ -319,10 +378,16 @@ const labSource = String(function () {
   // --- the crawler: in a vent mouth, low enough to be in one, gone after a proper look ---
   const crawler = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, result = {};
-    lab.freshStation('generated', 1, 'medium', 'mixed', 'two');
-    result.ventMouths = d.phantomVentMouths.length;
-    const phantom = lab.summonSomewhere('crawler', 900);
-    if (!phantom) return Object.assign(result, { none: true });
+    // The first station with a vent mouth a crawler can be put in (one whose cover does not stand in it).
+    let phantom = null;
+    for (let seed = 1; seed <= 60 && !phantom; seed++) {
+      if (!d.loadStation('generated', seed, 'medium', 'mixed', 'two') || d.phantomVentMouths.length === 0) continue;
+      lab.freshStation('generated', seed, 'medium', 'mixed', 'two');
+      result.station = 'generated ' + seed;
+      result.ventMouths = d.phantomVentMouths.length;
+      phantom = lab.summonSomewhere('crawler', 300);
+    }
+    if (!phantom) return { none: true, missing: 'no medium two-level station among sixty seeds had a vent mouth a crawler could be put in' };
     const figure = phantom.figure;
     let top = 0;
     for (let capsule = 0; capsule < figure.capsuleCount; capsule++) top = Math.max(top, figure.capsules[capsule * 7 + 1] + figure.capsules[capsule * 7 + 6], figure.capsules[capsule * 7 + 4] + figure.capsules[capsule * 7 + 6]);
@@ -355,7 +420,8 @@ const labSource = String(function () {
     quick.phantomFaceChancePerScan = 0;
     for (const key in quick) { kept[key] = tuning[key]; tuning[key] = quick[key]; }
     const runs = [];
-    for (const station of [['classic', 0], ['generated', 2, 'large', 'sprawling', 'one']]) {
+    for (const station of [['classic', 0], lab.findStationWithVentMouths('large', 'sprawling', 'one')]) {
+      if (!station) { runs.push({ station: 'generated', missing: 'no large sprawling station with vent mouths among sixty seeds' }); continue; }
       lab.freshStation.apply(null, station);
       const run = { station: station.slice(0, 2).join(' '), budget: director.budget, events: [], mostAtOnce: 0, lateEvents: 0 };
       let time = 0, current = null, event = null, sinceMove = 99, timeFull = -1;
@@ -396,6 +462,7 @@ const labSource = String(function () {
     return { runs: runs, quick: quick };
   });
   for (const run of walk.runs) {
+    if (run.missing) { check(run.station + ': a quiet walk gets its apparitions, of several kinds, and no more than the descent is allowed', false, run.missing); continue; }
     const events = run.events;
     const tooSoon = [], sameTwice = [];
     for (let index = 1; index < events.length; index++) {

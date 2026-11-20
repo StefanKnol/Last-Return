@@ -63,9 +63,18 @@ function check(description, condition, detail) {
         const angle = d.player.yaw + eighths * Math.PI / 4;
         return { x: d.player.x + Math.sin(angle) * metres, z: d.player.z - Math.cos(angle) * metres };
       },
+      // A point straight ahead, well inside the distance of every caption named: half the shortest of their
+      // distances (as the table gives them), and no more than four metres.
+      inEarshotOf: function (keys) {
+        let metres = 4;
+        for (const key of keys) if (d.captions[key].withinMetres > 0) metres = Math.min(metres, d.captions[key].withinMetres / 2);
+        return this.pointAt(metres, 0);
+      },
       // What is on screen, without the lines the station puts up by itself now and then (a drip, a pipe).
       lines: function () { return d.getCaptionLines().filter((line) => line.key.indexOf('ambient') !== 0); },
-      line: function (key) { return this.lines().filter((line) => line.key === key)[0] || null; }
+      line: function (key) { return this.lines().filter((line) => line.key === key)[0] || null; },
+      // Where a line says its sound is, or the reason there is no line to say it.
+      where: function (key) { const line = this.line(key); return line ? line.where : 'no line: "' + key + '" was not put up'; }
     };
   });
 
@@ -74,7 +83,7 @@ function check(description, condition, detail) {
     const d = window.lastReturnDebug, lab = window.captionLab, result = {};
     for (const level of ['off', 'tells', 'all']) {
       d.settings.captions = level; d.clearCaptions();
-      const there = lab.pointAt(4, 0);
+      const there = lab.inEarshotOf(['hollowFound', 'hollowSteps']);
       result[level] = { tell: d.showCaption('hollowFound', there), sound: d.showCaption('hollowSteps', there), onScreen: lab.lines().map((line) => line.key) };
     }
     // Messages and Dispatch are not captions: with captions off they still come.
@@ -85,7 +94,7 @@ function check(description, condition, detail) {
     result.messagesBefore = before;
     // Lowering the level takes down what it no longer allows.
     d.settings.captions = 'all'; d.clearCaptions();
-    d.showCaption('hollowFound', lab.pointAt(4, 0)); d.showCaption('hollowSteps', lab.pointAt(4, 0));
+    d.showCaption('hollowFound', lab.inEarshotOf(['hollowFound'])); d.showCaption('hollowSteps', lab.inEarshotOf(['hollowSteps']));
     d.settings.captions = 'tells';
     result.leftAfterLowering = lab.lines().map((line) => line.key);
     d.settings.captions = 'off';
@@ -115,7 +124,12 @@ function check(description, condition, detail) {
       if (!inside || outside) wrong.push(key);
     }
     d.clearCaptions();
-    return { tried: tried, wrong: wrong, fromNowhere: d.showCaption('heartbeat'), anyDistance: d.showCaption('hollowLost', lab.pointAt(200, 3)) };
+    // Every caption the table gives no distance, put 200 m off.
+    const withNoDistance = Object.keys(d.captions).filter((key) => key !== 'heartbeat' && d.captions[key].withinMetres === 0);
+    const notShownFromAfar = withNoDistance.filter((key) => { d.clearCaptions(); return !d.showCaption(key, lab.pointAt(200, 3)); });
+    d.clearCaptions();
+    return { tried: tried, wrong: wrong, fromNowhere: d.showCaption('heartbeat'), withNoDistance: withNoDistance.length, notShownFromAfar: notShownFromAfar,
+      anyDistance: withNoDistance.length > 0 && notShownFromAfar.length === 0 };
   });
   check('every caption with a distance shows just inside it and not just outside it', earshot.tried >= 25 && earshot.wrong.length === 0, earshot);
   check('a caption with no distance shows from anywhere, and one for a sound of your own needs no place at all', earshot.fromNowhere && earshot.anyDistance, earshot);
@@ -124,37 +138,43 @@ function check(description, condition, detail) {
   const pointing = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.captionLab, result = { around: [], turned: [], words: [] };
     d.settings.captions = 'all';
+    // Distances well inside each word's band, from the game's settings (nearer than 1.2 m is "right here").
+    const closeMetres = d.tuning.captionCloseMetres, nearMetres = d.tuning.captionNearMetres;
+    // The snarl is the sound used: none of them may be past the distance it carries (the table's), or it is not shown.
+    const snarlReach = d.captions.hollowSnarl.withinMetres > 0 ? d.captions.hollowSnarl.withinMetres * 0.9 : Infinity;
+    const closeDistance = Math.min(snarlReach, (1.2 + closeMetres) / 2), nearDistance = Math.min(snarlReach, (closeMetres + nearMetres) / 2), farDistance = Math.min(snarlReach, nearMetres * 1.5);
+    result.distances = [0.6, closeDistance, nearDistance, farDistance];
     for (let eighths = 0; eighths < 8; eighths++) {
       d.clearCaptions();
-      d.showCaption('hollowSnarl', lab.pointAt(8, eighths));
-      result.around.push(lab.line('hollowSnarl').where);
+      d.showCaption('hollowSnarl', lab.pointAt(nearDistance, eighths));
+      result.around.push(lab.where('hollowSnarl'));
     }
     // One thing that stays where it is, while the player turns to the right a quarter at a time: it goes from
     // ahead, to the left, to behind, to the right.
     d.clearCaptions();
-    const fixed = lab.pointAt(8, 0);
+    const fixed = lab.pointAt(nearDistance, 0);
     for (let quarter = 0; quarter < 4; quarter++) {
       d.showCaption('hollowSnarl', fixed);
-      result.turned.push(lab.line('hollowSnarl').where);
+      result.turned.push(lab.where('hollowSnarl'));
       d.player.yaw += Math.PI / 2;
     }
     // (four quarter turns: the player faces the way they did)
-    for (const metres of [0.6, 3, 8, 20]) {
+    for (const metres of result.distances) {
       d.clearCaptions();
       d.showCaption('hollowSnarl', lab.pointAt(metres, 0));
-      result.words.push(lab.line('hollowSnarl').where);
+      result.words.push(lab.where('hollowSnarl'));
     }
     // A thing that moves is followed.
     d.clearCaptions();
-    const mover = lab.pointAt(8, 0);
+    const mover = lab.pointAt(nearDistance, 0);
     d.showCaption('hollowSnarl', mover);
-    const before = lab.line('hollowSnarl').where;
-    const behind = lab.pointAt(3, 4); mover.x = behind.x; mover.z = behind.z;
-    result.followed = [before, lab.line('hollowSnarl').where];
+    const before = lab.where('hollowSnarl');
+    const behind = lab.pointAt(closeDistance, 4); mover.x = behind.x; mover.z = behind.z;
+    result.followed = [before, lab.where('hollowSnarl')];
     // On "tells" there is no arrow: that level is for people who can hear where it is.
     d.settings.captions = 'tells'; d.clearCaptions();
     d.showCaption('hollowFound', lab.pointAt(8, 2));
-    result.onTells = lab.line('hollowFound').where;
+    result.onTells = lab.where('hollowFound');
     result.arrowShownOnTells = !document.querySelector('#hud-caption .hud-caption-where').hidden;
     return result;
   });
@@ -169,15 +189,33 @@ function check(description, condition, detail) {
   const lines = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.captionLab, result = {};
     d.settings.captions = 'all'; d.clearCaptions();
-    const there = lab.pointAt(4, 0);
-    // The growl goes on all the time; a snarl is over in a moment and says more. They share a line.
-    d.showCaption('hollowGrowlHunting', there);
-    result.snarlTakesOver = d.showCaption('hollowSnarl', there);
-    result.growlWaits = d.showCaption('hollowGrowlHunting', there) === false;
+    // Captions of the test's own, put into the game's table for this part and taken out again at its end, so
+    // that what is checked is the rule and not how the game's own captions are tuned: two that share a line
+    // (one going on all the time, one over in a moment that says more), and one on a line of its own that says most.
+    const testCaptions = {
+      testSteady: { text: '[test: a sound that goes on]', level: 'sound', withinMetres: 0, seconds: 1.2, slot: 'testShared', rank: 0 },
+      testSaysMore: { text: '[test: a short sound that says more]', level: 'sound', withinMetres: 0, seconds: 1.8, slot: 'testShared', rank: 2 },
+      testSaysMost: { text: '[test: says most]', level: 'tell', withinMetres: 0, seconds: 3.2, rank: 3 }
+    };
+    const crowd = [];
+    for (let number = 0; number < d.tuning.captionMostLines + 2; number++) {
+      testCaptions['testCrowd' + number] = { text: '[test: one of many]', level: 'sound', withinMetres: 0, seconds: 2, rank: 0 };
+      crowd.push('testCrowd' + number);
+    }
+    Object.assign(d.captions, testCaptions);
+    const there = lab.inEarshotOf(['hollowSteps']);
+    // The one that goes on all the time and the one that says more share a line.
+    d.showCaption('testSteady', there);
+    result.snarlTakesOver = d.showCaption('testSaysMore', there);
+    result.growlWaits = d.showCaption('testSteady', there) === false;
     result.whileSnarling = lab.lines().map((line) => line.key);
-    d.simulate(d.captions.hollowSnarl.seconds + 0.2);
-    result.growlComesBack = d.showCaption('hollowGrowlHunting', there);
+    d.simulate(d.captions.testSaysMore.seconds + 0.2);
+    result.growlComesBack = d.showCaption('testSteady', there);
     result.afterwards = lab.lines().map((line) => line.key);
+    // The game's growl and its snarl are meant to be such a pair: one line, the snarl saying more.
+    result.gameGrowlAndSnarl = { growl: [d.captions.hollowGrowlHunting.slot, d.captions.hollowGrowlHunting.rank], snarl: [d.captions.hollowSnarl.slot, d.captions.hollowSnarl.rank] };
+    result.gameGrowlAndSnarlShare = Boolean(d.captions.hollowSnarl.slot) && d.captions.hollowSnarl.slot === d.captions.hollowGrowlHunting.slot &&
+      (d.captions.hollowSnarl.rank || 0) > (d.captions.hollowGrowlHunting.rank || 0);
     // A sound that goes on keeps its one line for as long as it lasts, and is gone soon after it stops.
     d.clearCaptions();
     let mostLines = 0;
@@ -185,20 +223,25 @@ function check(description, condition, detail) {
     result.keptUp = { mostLines: mostLines, stillThere: lab.line('hollowSteps') !== null };
     d.simulate(d.captions.hollowSteps.seconds + 0.2);
     result.goneAfterItStops = lab.line('hollowSteps') === null;
-    // Never more lines than the screen is given: the ones that say least make way.
+    // Never more lines than the screen is given: the ones that say least make way. Two more than fit, each on its
+    // own line, with the one that says most among the first.
     d.clearCaptions();
-    for (const key of ['hollowSteps', 'hatchRattle', 'doorOpens', 'stillShifts', 'hollowFound', 'phantomBreath']) d.showCaption(key, there);
+    const shown = [crowd[0], 'testSaysMost'].concat(crowd.slice(1));
+    for (const key of shown) d.showCaption(key, there);
     result.crowded = lab.lines().map((line) => line.key);
+    result.newest = shown[shown.length - 1];
     result.mostLines = d.tuning.captionMostLines;
     d.clearCaptions();
+    for (const key of Object.keys(testCaptions)) delete d.captions[key];
     return result;
   });
-  check('captions that share a line take turns: a snarl pushes the growl out, the growl waits, and comes back when the snarl has had its time',
-    lines.snarlTakesOver && lines.growlWaits && lines.whileSnarling.join() === 'hollowSnarl' && lines.growlComesBack && lines.afterwards.join() === 'hollowGrowlHunting', lines);
+  check('captions that share a line take turns: one that says more pushes the steady one out, the steady one waits, and comes back when the other has had its time (the game\'s snarl and growl are such a pair)',
+    lines.snarlTakesOver && lines.growlWaits && lines.whileSnarling.join() === 'testSaysMore' && lines.growlComesBack && lines.afterwards.join() === 'testSteady' &&
+    lines.gameGrowlAndSnarlShare, lines);
   check('a sound that goes on is one steady line, and the line goes soon after the sound stops',
     lines.keptUp.mostLines === 1 && lines.keptUp.stillThere && lines.goneAfterItStops, lines.keptUp);
-  check('never more lines than the screen is given, and what the Hollow has just done is kept',
-    lines.crowded.length === lines.mostLines && lines.crowded.indexOf('hollowFound') >= 0 && lines.crowded.indexOf('phantomBreath') >= 0, lines.crowded);
+  check('never more lines than the screen is given, and the one that says most is kept (and the newest)',
+    lines.crowded.length === lines.mostLines && lines.crowded.indexOf('testSaysMost') >= 0 && lines.crowded.indexOf(lines.newest) >= 0, lines.crowded);
 
   // --- in play: the things that make a sound put their caption up ---
   const play = await inGame(() => {
@@ -206,9 +249,11 @@ function check(description, condition, detail) {
     const count = function (key) { return d.captionCounts[key] || 0; };
     d.settings.captions = 'all'; d.clearCaptions();
     d.teleport(44.5, 52.5, 0);
-    // It wanders past, eight metres off, taking no notice of the player.
+    // It wanders past, a few metres off, taking no notice of the player.
     d.setDebugOption('creaturesIgnorePlayer', true);
-    const start = lab.pointAt(5, 6); // to the player's left
+    // Its footsteps and its growl carry as far as the table says: it starts and stops well inside the shorter of the two.
+    const earshot = Math.min(d.captions.hollowSteps.withinMetres, d.captions.hollowGrowl.withinMetres);
+    const start = lab.pointAt(Math.min(5, earshot * 0.75), 6); // to the player's left
     d.spawnHollow(start.x, start.z);
     d.hollow.graceTimer = 999;
     const seen = {};
@@ -219,7 +264,7 @@ function check(description, condition, detail) {
     }
     result.wandering = seen;
     // It stops dead to listen: no footsteps, so that line goes; the growl is still there.
-    const stand = lab.pointAt(4, 6);
+    const stand = lab.pointAt(Math.min(4, earshot * 0.6), 6);
     for (let time = 0; time < 3; time += 0.1) { d.hollow.state = 4; d.hollow.listenTimer = 5; d.hollow.figure.x = stand.x; d.hollow.figure.z = stand.z; d.simulate(0.1); }
     result.listening = lab.lines().map((line) => line.key);
     // It finds the player: the first time with the stinger ("it has found you"), the second time soon after with only the roar.
@@ -233,8 +278,15 @@ function check(description, condition, detail) {
     result.foundAgain = { state: d.hollow.state, found: count('hollowFound') - foundBefore, roar: count('hollowRoar') - roarBefore };
     // Hunting, its growl is the louder one, it snarls, and your heart pounds.
     const snarlBefore = count('hollowSnarl'), heartBefore = count('heartbeat'), loudGrowlBefore = count('hollowGrowlHunting');
-    for (let time = 0; time < 6; time += 0.1) { d.hollow.state = 2; d.hollow.timeSinceSensed = 0; d.hollow.figure.x = stand.x; d.hollow.figure.z = stand.z; d.simulate(0.1); }
-    result.hunting = { snarls: count('hollowSnarl') - snarlBefore, heartbeat: count('heartbeat') - heartBefore > 0, loudGrowl: count('hollowGrowlHunting') - loudGrowlBefore > 0 };
+    // Hunting, it snarls every 2.2 to 4 seconds (4.0 is the longest gap, written in src/js/08-entities.js, not on
+    // the test hook), but a snarl that comes while "it roars" still has the line is not put up (the roar says
+    // more). So the first snarl on screen comes at most the roar's time plus the longest gap after the hunt
+    // begins, and half a second is allowed for the steps. Six seconds at least, then on until a snarl is up.
+    const longestSnarlGapSeconds = 4.0;
+    const mostHuntSeconds = Math.max(6, d.captions.hollowRoar.seconds + longestSnarlGapSeconds + 0.5);
+    let huntSeconds = 0;
+    for (; huntSeconds < mostHuntSeconds && (huntSeconds < 6 || count('hollowSnarl') === snarlBefore); huntSeconds += 0.1) { d.hollow.state = 2; d.hollow.timeSinceSensed = 0; d.hollow.figure.x = stand.x; d.hollow.figure.z = stand.z; d.simulate(0.1); }
+    result.hunting = { mostSeconds: mostHuntSeconds, seconds: Math.round(huntSeconds * 10) / 10, snarls: count('hollowSnarl') - snarlBefore, heartbeat: count('heartbeat') - heartBefore > 0, loudGrowl: count('hollowGrowlHunting') - loudGrowlBefore > 0 };
     // It loses the player.
     const lostBefore = count('hollowLost'), sniffBefore = count('hollowSniff');
     d.setDebugOption('creaturesIgnorePlayer', true);
@@ -261,19 +313,21 @@ function check(description, condition, detail) {
     const d = window.lastReturnDebug, lab = window.captionLab, result = {};
     const count = function (key) { return d.captionCounts[key] || 0; };
     d.settings.captions = 'all'; d.clearCaptions();
-    // A door that opens by itself, with the Hollow at it and the player eight metres off.
+    // A door that opens by itself, with the Hollow at it and the player some way off: four and a half metres
+    // further than the distance within which a door is taken to be the player's own doing.
     let door = null;
     for (const candidate of d.doors) if (candidate.kind === d.doorKinds.automatic && !door) door = candidate;
     const sides = d.getDoorSides(door);
     const awayX = Math.sign(sides[0].x - door.centerX), awayZ = Math.sign(sides[0].z - door.centerZ);
-    const far = d.findWalkableSpotNear(door.centerX + awayX * 8, door.centerZ + awayZ * 8);
+    const playerMetres = d.tuning.captionOwnDoorMetres + 4.5;
+    const far = d.findWalkableSpotNear(door.centerX + awayX * playerMetres, door.centerZ + awayZ * playerMetres);
     d.teleport(far.x, far.z, 0); d.simulate(0.3);
     d.setDebugOption('creaturesIgnorePlayer', true);
     const opensBefore = count('doorOpens'), closesBefore = count('doorCloses');
     const atDoor = { x: door.centerX - awayX * 1.2, z: door.centerZ - awayZ * 1.2 };
     d.spawnHollow(atDoor.x, atDoor.z); d.hollow.graceTimer = 999;
     for (let time = 0; time < 2; time += 0.1) { d.hollow.state = 4; d.hollow.listenTimer = 5; d.hollow.figure.x = atDoor.x; d.hollow.figure.z = atDoor.z; d.simulate(0.1); }
-    result.byTheHollow = { metresFromPlayer: Math.round(Math.hypot(door.centerX - d.player.x, door.centerZ - d.player.z) * 10) / 10, opens: count('doorOpens') - opensBefore };
+    result.byTheHollow = { ownDoorMetres: d.tuning.captionOwnDoorMetres, metresFromPlayer: Math.round(Math.hypot(door.centerX - d.player.x, door.centerZ - d.player.z) * 10) / 10, opens: count('doorOpens') - opensBefore };
     d.hollow.isActive = false;
     d.simulate(4);
     result.byTheHollow.closes = count('doorCloses') - closesBefore;
@@ -282,8 +336,17 @@ function check(description, condition, detail) {
     d.teleport(door.centerX + awayX * 1.2, door.centerZ + awayZ * 1.2, 0); d.simulate(1.5);
     result.byThePlayer = { open: door.openFraction, opens: count('doorOpens') - opensBeforeOwn };
     d.setDebugOption('creaturesIgnorePlayer', false);
-    // A ceiling hatch forced open near the player, and one too far away to hear.
-    const hatch = d.hollowHatches[0];
+    // A ceiling hatch forced open near the player, and the same hatch from somewhere too far away to hear it:
+    // the first hatch that has one of these places (the lift, the shaft, the generator) out of its earshot.
+    const reach = d.captions.hatchBurst.withinMetres;
+    let hatch = null, farPlace = null;
+    for (const candidate of d.hollowHatches) {
+      for (const place of [d.playerStart, { x: d.shaft.x + 3, z: d.shaft.z }, d.generator]) {
+        const spot = d.findWalkableSpotNear(place.x, place.z);
+        if (!hatch && spot && Math.hypot(candidate.x - spot.x, candidate.z - spot.z) > reach + 1) { hatch = candidate; farPlace = spot; }
+      }
+    }
+    if (!hatch) { result.noFarHatch = 'no hatch of Kessel-9 is out of earshot of the lift, the shaft or the generator'; hatch = d.hollowHatches[0]; }
     const underHatch = d.findWalkableSpotNear(hatch.x + 3, hatch.z);
     d.shutHollowHatches();
     d.teleport(underHatch.x, underHatch.z, 0);
@@ -291,10 +354,12 @@ function check(description, condition, detail) {
     d.forceHollowHatchOpen(hatch, true);
     result.hatchNear = count('hatchBurst') - burstBefore;
     d.shutHollowHatches();
-    d.teleport(d.playerStart.x, d.playerStart.z, 0);
-    result.hatchMetresFromTheLift = Math.round(Math.hypot(hatch.x - d.playerStart.x, hatch.z - d.playerStart.z));
-    d.forceHollowHatchOpen(hatch, true);
-    result.hatchFar = count('hatchBurst') - burstBefore - result.hatchNear;
+    if (farPlace) {
+      d.teleport(farPlace.x, farPlace.z, 0);
+      result.hatchMetresFromFarPlace = Math.round(Math.hypot(hatch.x - farPlace.x, hatch.z - farPlace.z));
+      d.forceHollowHatchOpen(hatch, true);
+      result.hatchFar = count('hatchBurst') - burstBefore - result.hatchNear;
+    }
     d.shutHollowHatches();
     // The station's own sounds each have theirs. They come by chance, so the clock is run until all four have.
     // That is usually within three minutes, but water drips are rare: only one drip in five falls near enough
@@ -310,11 +375,12 @@ function check(description, condition, detail) {
     result.ambient = { seconds: ambientSeconds, heard: ['ambientDrips', 'ambientPipe', 'ambientMetal', 'ambientKnocks'].filter((key, index) => count(key) > ambientBefore[index]) };
     return result;
   });
-  check('a door the Hollow opens eight metres away says so, opening and closing',
-    things.byTheHollow.metresFromPlayer > 5 && things.byTheHollow.opens === 1 && things.byTheHollow.closes === 1, things.byTheHollow);
+  check('a door the Hollow opens some metres away says so, opening and closing',
+    things.byTheHollow.metresFromPlayer > things.byTheHollow.ownDoorMetres && things.byTheHollow.opens === 1 && things.byTheHollow.closes === 1, things.byTheHollow);
   check('the door you open yourself gets no caption', things.byThePlayer.open > 0.5 && things.byThePlayer.opens === 0, things.byThePlayer);
-  check('a ceiling hatch forced open three metres away says so; the same hatch from the lift, out of earshot, does not',
-    things.hatchNear === 1 && (things.hatchMetresFromTheLift <= 25 || things.hatchFar === 0), things);
+  check('a ceiling hatch forced open three metres away says so; the same hatch from out of earshot does not',
+    !things.noFarHatch && things.hatchNear === 1 && things.hatchMetresFromFarPlace > table.hatchBurst.withinMetres && things.hatchFar === 0,
+    things.noFarHatch || { near: things.hatchNear, far: things.hatchFar, metresFromFarPlace: things.hatchMetresFromFarPlace });
   check('the station\'s own sounds (drips, a pipe, settling metal, the knocking in the shaft) each have a caption', things.ambient.heard.length === 4, things.ambient);
 
   // --- the rest of them, each made to happen ---
@@ -383,10 +449,11 @@ function check(description, condition, detail) {
     d.simulate(3.5);
     result.bell = count('liftBell');
 
-    // In a station that has a vent, the Hollow crawling through it.
+    // In a station that has a vent, the Hollow crawling through it. The first seed whose station has a straight
+    // stretch of vent three tiles long is used: what a seed builds changes with every new room.
     let vent = null;
-    for (let seed = 1; seed <= 12 && !vent; seed++) {
-      d.loadStation('generated', seed, 'medium', 'mixed', 'one');
+    for (let seed = 1; seed <= 60 && !vent; seed++) {
+      if (!d.loadStation('generated', seed, 'medium', 'mixed', 'one')) continue;
       if (d.level.ventCount === 0) continue;
       for (let z = d.level.boundsMinimumZ; z < d.level.boundsMaximumZ && !vent; z++) {
         for (let x = d.level.boundsMinimumX; x < d.level.boundsMaximumX && !vent; x++) {
@@ -418,7 +485,9 @@ function check(description, condition, detail) {
   check('the apparition behind you breathes, and the arrow points behind', rest.breath.came && rest.breath.captions === 1 && /^[↓↙↘] (close|near)$/.test(rest.breath.where || ''), rest.breath);
   check('the Stills coming up behind you shift', rest.stills >= 1, rest.stills);
   check('the lift on its way down rings its bell', rest.bell >= 1, rest.bell);
-  check('the Hollow crawling through a vent booms on the sheet metal', rest.vent !== null && rest.ventSteps.captions >= 1 && rest.ventSteps.metresAway < 12, [rest.vent, rest.ventSteps]);
+  check('the Hollow crawling through a vent booms on the sheet metal',
+    rest.vent !== null && rest.ventSteps.captions >= 1 && rest.ventSteps.metresAway < table.hollowVentSteps.withinMetres,
+    rest.vent === null ? 'no station with a straight vent three tiles long among sixty seeds' : [rest.vent, rest.ventSteps]);
 
   check('no script errors were reported', problems.length === 0, problems);
 

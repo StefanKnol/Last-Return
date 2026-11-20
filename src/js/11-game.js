@@ -1153,6 +1153,7 @@ function startApplication() {
     setWorkshopContentUsed: function (isUsed) { isWorkshopContentUsed = isUsed !== false; },
     missionObjectIds: { fuelCan: OBJECT_FUEL_CAN, winchBreaker: OBJECT_WINCH_BREAKER, firstCore: OBJECT_CORE_FIRST, firstExtraGenerator: OBJECT_EXTRA_GENERATOR_FIRST, firstExtraFuelCan: OBJECT_EXTRA_FUEL_CAN_FIRST },
     // Quests (09-quests.js): the descriptions, this station's, and the questions the game asks of them.
+    questItemNearSteps: QUEST_ITEM_NEAR_STEPS, // how many steps from its machine a quest's item (a fuel can) is put at most, while a room that near has space
     quests: QUESTS, questItems: QUEST_ITEMS, findQuest: findQuest, isQuestUnfinished: isQuestUnfinished, getUnfinishedQuests: getUnfinishedQuests,
     getQuestChips: getQuestChips, fireGameEvent: fireGameEvent, dispatchCues: DISPATCH_CUES,
     radioText: function (key) { return RADIO_MESSAGES[key]; }, clearMessages: clearMessages, showMessage: showMessage, updateGameProgress: updateGameProgress, playLooseObjectFlingSound: playLooseObjectFlingSound, closeReader: closeReader,
@@ -1266,6 +1267,7 @@ function startApplication() {
     awakenStills: awakenStills,
     emitNoise: emitNoise,
     looseObjects: looseObjects, looseObjectKinds: LOOSE_OBJECT_KINDS, looseState: looseState,
+    designedObjectLimits: DESIGNED_OBJECT_LIMITS, // what the workshop allows an object to be: how many parts, how far out, how thin and how thick
     input: input, debugHooks: debugHooks, findLooseObjectInFocus: findLooseObjectInFocus, getThrowWindUp: getThrowWindUp,
     noteLooseObjectScanned: noteLooseObjectScanned, stunHollow: stunHollow, getLooseObjectLabel: getLooseObjectLabel, getLooseShoveResistance: getLooseShoveResistance,
     setLooseObjectOrientation: setLooseObjectOrientation, getLooseObjectPointLifeCode: getLooseObjectPointLifeCode,

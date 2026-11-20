@@ -37,10 +37,30 @@ function check(description, condition, detail) {
         if (!isRightKind) missing.push(presetKey + '.' + option.key);
       }
     }
-    return { missing: missing, options: d.customDifficultyOptions.map((option) => option.key), startsAs: d.describeCustomDifficulty(d.settings.customDifficulty) };
+    const notAsStandard = d.customDifficultyOptions.filter((option) => d.settings.customDifficulty[option.key] !== d.difficultyPresets.standard[option.key]).map((option) => option.key);
+    return { missing: missing, options: d.customDifficultyOptions.map((option) => option.key), notAsStandard: notAsStandard, startsAs: d.describeCustomDifficulty(d.settings.customDifficulty),
+      table: d.customDifficultyOptions, standard: d.difficultyPresets.standard, huntSpeed: d.tuning.hollowHuntSpeed, sprintSpeed: d.tuning.sprintSpeed };
   });
   check('every preset has a value of the right kind for everything a custom threat level can set', shape.missing.length === 0, shape.missing);
-  check('a custom threat level starts out the same as Standard', shape.startsAs === 'The same as Standard.', shape.startsAs);
+  check('a custom threat level starts out the same as Standard', shape.notAsStandard.length === 0, { differs: shape.notAsStandard, says: shape.startsAs });
+  // The values the controls are set to below come out of the table of settings, so that they are always ones the
+  // panel offers whatever it is retuned to: the top or the bottom end of a setting, whichever is not Standard's.
+  const valueOtherThanStandard = (key, wantsTopEnd) => {
+    const option = shape.table.find((candidate) => candidate.key === key), standardValue = shape.standard[key];
+    if (option.kind === 'switch') return !standardValue;
+    const ends = option.kind === 'choice' ? [option.choices[0][0], option.choices[option.choices.length - 1][0]] : [option.minimum, option.maximum];
+    const preferred = wantsTopEnd ? ends[1] : ends[0];
+    return preferred !== standardValue ? preferred : (wantsTopEnd ? ends[0] : ends[1]);
+  };
+  const labelOf = (key) => shape.table.find((option) => option.key === key).label;
+  // How a changed setting is named in the line that says how a custom level differs from Standard: its label, then
+  // "on" or "off" for a switch, the name of the choice, or the percentage, as the panel's row shows it.
+  const shownInSummary = (key, value) => {
+    const option = shape.table.find((candidate) => candidate.key === key);
+    if (option.kind === 'switch') return option.label + ' ' + (value ? 'on' : 'off');
+    if (option.kind === 'choice') return option.label + ' ' + option.choices.find((choice) => choice[0] === value)[1].toLowerCase();
+    return option.label + ' ' + Math.round(value * 100) + ' %';
+  };
 
   // --- the title screen: choosing Custom opens the panel, with a row for each setting ---
   const beforeChoosing = await page.evaluate(() => ({ panelHidden: document.getElementById('screen-custom').hidden, adjustHidden: document.getElementById('button-custom-difficulty').hidden }));
@@ -54,24 +74,38 @@ function check(description, condition, detail) {
     beforeChoosing.panelHidden && beforeChoosing.adjustHidden && !opened.panelHidden && !opened.adjustHidden && opened.titleStillThere &&
     opened.rows === shape.options.length && opened.setting === 'custom', { before: beforeChoosing, opened: opened });
 
-  await setControl('hollowSpeedFactor', 1.35);
-  await setControl('hearingFactor', 0.7);
-  await setControl('checkpointsEnabled', false);
-  await setControl('phantomFactor', 2);
+  const firstChoice = { hollowSpeedFactor: valueOtherThanStandard('hollowSpeedFactor', true), hearingFactor: valueOtherThanStandard('hearingFactor', false),
+    checkpointsEnabled: valueOtherThanStandard('checkpointsEnabled'), phantomFactor: valueOtherThanStandard('phantomFactor', true) };
+  for (const key in firstChoice) await setControl(key, firstChoice[key]);
   const afterSetting = await inGame(() => JSON.parse(JSON.stringify(window.lastReturnDebug.settings.customDifficulty)));
   const speedRow = await readRow('hollowSpeedFactor'), heatRow = await readRow('heatFactor'), lifeRow = await readRow('checkpointsEnabled');
-  check('moving a control changes the setting, and the row says what it now comes to',
-    afterSetting.hollowSpeedFactor === 1.35 && afterSetting.hearingFactor === 0.7 && afterSetting.checkpointsEnabled === false && afterSetting.phantomFactor === 2 &&
-    speedRow.value === '135 %' && /cannot outrun/.test(speedRow.note) && /One life/.test(lifeRow.note), { settings: afterSetting, speedRow: speedRow, lifeRow: lifeRow });
+  // What the rows should say is what the game works out for those values (a percentage, and its sentence).
+  const expectedNotes = await inGame((values) => ({ speed: window.lastReturnDebug.explainCustomDifficultyValue('hollowSpeedFactor', values.hollowSpeedFactor),
+    life: window.lastReturnDebug.explainCustomDifficultyValue('checkpointsEnabled', values.checkpointsEnabled) }), firstChoice);
+  // The speed row warns "You cannot outrun it." exactly when its hunt is at least as fast as your sprint. That is
+  // tried at both ends of the setting's range. The top end must be over that line: if no value of the range is,
+  // the table has made the warning one that can never be shown, and the check fails saying so.
+  const speedOption = shape.table.find((option) => option.key === 'hollowSpeedFactor');
+  const outrun = await inGame((ends) => ends.map((value) => ({ value: value, note: window.lastReturnDebug.explainCustomDifficultyValue('hollowSpeedFactor', value) })),
+    [speedOption.minimum, speedOption.maximum]);
+  outrun.forEach((end) => { end.isOverTheLine = shape.huntSpeed * end.value >= shape.sprintSpeed; end.warns = /You cannot outrun it\./.test(end.note); });
+  const outrunDetail = outrun[1].isOverTheLine ? outrun : { outrun: outrun, problem: 'no Hollow speed in the range makes its hunt as fast as your sprint, so "You cannot outrun it." can never be shown' };
+  check('moving a control changes the setting, and the row says what it now comes to; the speed row says you cannot outrun it exactly when its hunt is as fast as your sprint',
+    Object.keys(firstChoice).every((key) => afterSetting[key] === firstChoice[key]) &&
+    speedRow.value === Math.round(firstChoice.hollowSpeedFactor * 100) + ' %' && speedRow.note === expectedNotes.speed && expectedNotes.speed.length > 0 &&
+    lifeRow.note === expectedNotes.life && expectedNotes.life.length > 0 &&
+    outrun[1].isOverTheLine && outrun.every((end) => end.warns === end.isOverTheLine),
+    { settings: afterSetting, speedRow: speedRow, lifeRow: lifeRow, expectedNotes: expectedNotes, outrun: outrunDetail });
   check('rows that differ from Standard are marked, rows that do not are not', speedRow.changed && lifeRow.changed && !heatRow.changed, [speedRow.changed, lifeRow.changed, heatRow.changed]);
   const summary = await page.evaluate(() => [document.getElementById('custom-summary').textContent, document.getElementById('difficulty-description').textContent]);
   check('the panel and the title screen both say how it differs from Standard',
-    summary[0] === summary[1] && /Hollow speed 135 %/.test(summary[0]) && /Hollow hearing 70 %/.test(summary[0]) && /Apparitions many/.test(summary[0]) && /Checkpoints off/.test(summary[0]), summary);
+    summary[0] === summary[1] && Object.keys(firstChoice).every((key) => summary[0].indexOf(shownInSummary(key, firstChoice[key])) >= 0) && summary[0].indexOf(labelOf('heatFactor')) < 0,
+    { says: summary, shouldName: Object.keys(firstChoice).map((key) => shownInSummary(key, firstChoice[key])) });
 
   await page.evaluate(() => document.getElementById('button-custom-done').click());
   const closed = await page.evaluate(() => document.getElementById('screen-custom').hidden);
   await page.evaluate(() => document.getElementById('button-custom-difficulty').click());
-  const reopened = await page.evaluate(() => !document.getElementById('screen-custom').hidden && document.getElementById('custom-hollowSpeedFactor').value === '1.35');
+  const reopened = await page.evaluate((speed) => !document.getElementById('screen-custom').hidden && document.getElementById('custom-hollowSpeedFactor').value === String(speed), firstChoice.hollowSpeedFactor);
   check('Done closes the panel, and Adjust opens it again with the values as they were left', closed && reopened, [closed, reopened]);
 
   // --- it is remembered: close the page, open it again ---
@@ -83,30 +117,66 @@ function check(description, condition, detail) {
     description: document.getElementById('difficulty-description').textContent
   }));
   check('after closing and reopening the page, Custom is still chosen with the same values, and the panel does not pop open by itself',
-    remembered.difficulty === 'custom' && remembered.pill && remembered.panelHidden && remembered.values.hollowSpeedFactor === 1.35 &&
-    remembered.values.checkpointsEnabled === false && /Hollow speed 135 %/.test(remembered.description), remembered);
+    remembered.difficulty === 'custom' && remembered.pill && remembered.panelHidden && Object.keys(firstChoice).every((key) => remembered.values[key] === firstChoice[key]) &&
+    remembered.description === summary[0], remembered);
 
   // --- "Start from" copies a preset; values that are no good are put right ---
-  await page.evaluate(() => { document.getElementById('button-custom-difficulty').click(); document.getElementById('custom-from-nightmare').click(); });
-  const fromNightmare = await page.evaluate(() => document.getElementById('custom-summary').textContent);
-  await page.evaluate(() => document.getElementById('custom-from-standard').click());
-  const fromStandard = await page.evaluate(() => document.getElementById('custom-summary').textContent);
-  check('"Start from" copies a preset exactly', fromNightmare === 'The same as Nightmare.' && fromStandard === 'The same as Standard.', [fromNightmare, fromStandard]);
+  // What a copy holds is compared with the preset itself, value by value. The summary must name the preset, and
+  // name none of the settings: a copy differs from it in nothing.
+  const copyOf = (presetKey) => page.evaluate((key) => {
+    const d = window.lastReturnDebug, preset = d.difficultyPresets[key];
+    document.getElementById('custom-from-' + key).click();
+    return { summary: document.getElementById('custom-summary').textContent, label: preset.label,
+      differs: d.customDifficultyOptions.filter((option) => d.settings.customDifficulty[option.key] !== preset[option.key]).map((option) => option.key) };
+  }, presetKey);
+  await page.evaluate(() => document.getElementById('button-custom-difficulty').click());
+  const fromNightmare = await copyOf('nightmare');
+  const fromStandard = await copyOf('standard');
+  check('"Start from" copies a preset exactly',
+    [fromNightmare, fromStandard].every((copy) => copy.differs.length === 0 && copy.summary.indexOf(copy.label) >= 0 && shape.table.every((option) => copy.summary.indexOf(option.label) < 0)),
+    [fromNightmare, fromStandard]);
+  // Values that are no good, made for each setting from its own range in the table: above its top, below its
+  // bottom, between two of its steps, of the wrong kind, between two of its choices; a switch set to something
+  // that is no switch, and one set rightly that must be kept; and one that is no setting at all. The kinds of bad
+  // value go round the settings they can apply to, and the check makes sure every kind was really tried.
   const repaired = await inGame(() => {
-    const d = window.lastReturnDebug;
-    return d.sanitizeCustomDifficultyValues({ hollowEnabled: 'yes', hollowSpeedFactor: 99, hearingFactor: -3, heatFactor: 1.234, staminaFactor: 'fast', phantomFactor: 0.6, checkpointsEnabled: false, somethingElse: 5 });
+    const d = window.lastReturnDebug, standard = d.difficultyPresets.standard, stored = { somethingElse: 5 }, expected = {}, tried = {};
+    const kindsOfBadValue = {
+      percent: [
+        ['above its top', (option) => [option.maximum + 99, option.maximum]],
+        ['below its bottom', (option) => [option.minimum - 3, option.minimum]],
+        ['between two steps', (option) => [option.minimum + option.step * 1.3, Math.round((option.minimum + option.step) * 1000) / 1000]],
+        ['of the wrong kind', (option) => ['fast', standard[option.key]]]
+      ],
+      switch: [
+        ['a switch set to no switch', (option) => ['yes', standard[option.key]]],
+        ['a switch set rightly', (option) => [!standard[option.key], !standard[option.key]]]
+      ],
+      choice: [
+        ['between two choices', (option) => [option.choices[0][0] + (option.choices[1][0] - option.choices[0][0]) * 0.3, option.choices[0][0]]]
+      ]
+    };
+    const turnOfKind = { percent: 0, switch: 0, choice: 0 };
+    for (const option of d.customDifficultyOptions) {
+      const kinds = kindsOfBadValue[option.kind];
+      const kindOfBadValue = kinds[turnOfKind[option.kind]++ % kinds.length];
+      const pair = kindOfBadValue[1](option);
+      stored[option.key] = pair[0]; expected[option.key] = pair[1];
+      tried[kindOfBadValue[0]] = option.key;
+    }
+    const allKinds = [].concat(kindsOfBadValue.percent, kindsOfBadValue.switch, kindsOfBadValue.choice).map((kind) => kind[0]);
+    const result = d.sanitizeCustomDifficultyValues(stored);
+    return { stored: stored, result: result, tried: tried, notTried: allKinds.filter((kind) => !(kind in tried)),
+      wrong: Object.keys(expected).filter((key) => result[key] !== expected[key]), kept: Object.keys(result).filter((key) => !(key in expected)) };
   });
   check('stored values that are out of range, of the wrong kind or between steps are put right',
-    repaired.hollowEnabled === true && repaired.hollowSpeedFactor === 1.4 && repaired.hearingFactor === 0.5 && repaired.heatFactor === 1.2 &&
-    repaired.staminaFactor === 1 && repaired.phantomFactor === 0.5 && repaired.checkpointsEnabled === false && repaired.somethingElse === undefined, repaired);
+    repaired.notTried.length === 0 && repaired.wrong.length === 0 && repaired.kept.length === 0 && repaired.result.somethingElse === undefined, repaired);
 
   // --- what is set is what the game plays by ---
-  await setControl('hollowSpeedFactor', 0.8);
-  await setControl('staminaFactor', 2);
-  await setControl('heatFactor', 0.5);
-  await setControl('angerFactor', 2);
-  await setControl('phantomFactor', 2);
-  await setControl('checkpointsEnabled', false);
+  const secondChoice = { hollowSpeedFactor: valueOtherThanStandard('hollowSpeedFactor', false), staminaFactor: valueOtherThanStandard('staminaFactor', true),
+    heatFactor: valueOtherThanStandard('heatFactor', false), angerFactor: valueOtherThanStandard('angerFactor', true), phantomFactor: valueOtherThanStandard('phantomFactor', true),
+    checkpointsEnabled: false }; // one life: what the checks further down are about
+  for (const key in secondChoice) await setControl(key, secondChoice[key]);
   await page.evaluate(() => document.getElementById('button-custom-done').click());
   await startGame(page, false);
   const playing = await inGame(() => {
@@ -116,8 +186,9 @@ function check(description, condition, detail) {
       standardHearing: d.difficultyPresets.standard.hearingFactor, panelHidden: document.getElementById('screen-custom').hidden };
   });
   check('a descent begun on Custom plays by the custom values, and by Standard for whatever was left alone',
-    playing.label === 'Custom' && playing.isCustom && /^custom-/.test(playing.key) && playing.speed === 0.8 && playing.stamina === 2 && playing.heat === 0.5 &&
-    playing.anger === 2 && playing.phantoms === 2 && playing.checkpoints === false && playing.hearing === playing.standardHearing && playing.panelHidden, playing);
+    playing.label === 'Custom' && playing.isCustom && /^custom-/.test(playing.key) && playing.speed === secondChoice.hollowSpeedFactor && playing.stamina === secondChoice.staminaFactor &&
+    playing.heat === secondChoice.heatFactor && playing.anger === secondChoice.angerFactor && playing.phantoms === secondChoice.phantomFactor && playing.checkpoints === false &&
+    playing.hearing === playing.standardHearing && playing.panelHidden, playing);
 
   // --- each new setting changes the thing it says it changes (measured against the same thing at 100 %) ---
   const effects = await inGame(() => {
@@ -192,9 +263,10 @@ function check(description, condition, detail) {
     anger[1] > 0.05 && Math.abs(anger[0] - anger[1] / 2) < 0.03 && Math.abs(anger[2] - anger[1] * 2) < 0.06, anger);
   check('apparitions "None": none may come, and the ones that stand at fixed places are gone too',
     apparitions.none.budget === 0 && apparitions.none.placed === 0 && /all of its apparitions/.test(apparitions.none.reason), apparitions.none);
-  check('apparitions "Few", "Normal" and "Many": half as many, the usual number, twice as many; Kessel-9 keeps its three placed ones',
-    apparitions.normal.budget === 4 && apparitions.few.budget === 2 && apparitions.many.budget === 8 &&
-    apparitions.few.placed === 3 && apparitions.normal.placed === 3 && apparitions.many.placed === 3, [apparitions.few, apparitions.normal, apparitions.many]);
+  // (How many is the usual number comes from tuning and the size of the station; what is checked is what the setting does to it.)
+  check('apparitions "Few", "Normal" and "Many": half as many, the usual number, twice as many; Kessel-9 keeps its placed ones on all three',
+    apparitions.normal.budget > 0 && apparitions.few.budget === Math.round(apparitions.normal.budget * 0.5) && apparitions.many.budget === apparitions.normal.budget * 2 &&
+    apparitions.normal.placed > 0 && apparitions.few.placed === apparitions.normal.placed && apparitions.many.placed === apparitions.normal.placed, [apparitions.few, apparitions.normal, apparitions.many]);
   check('with "Many" the wait after one is half as long, with "Few" twice as long',
     apparitions.normal.waitAfterOne >= effects.gap[0] && apparitions.normal.waitAfterOne <= effects.gap[1] &&
     apparitions.many.waitAfterOne >= effects.gap[0] / 2 && apparitions.many.waitAfterOne <= effects.gap[1] / 2 &&
@@ -264,9 +336,9 @@ function check(description, condition, detail) {
     d.game.flags.powerOn = true; d.game.flags.spoolsCollected = 3;
     d.teleport(10.2, 55.3, -Math.PI / 2); d.use(1);
     d.hollow.isActive = false;
-    d.simulate(41);
+    d.simulate(d.tuning.liftArrivalSeconds + 1);
     d.hollow.isActive = false;
-    d.teleport(6.5, 53.5, Math.PI / 2); d.simulate(0.2);
+    d.teleport(d.playerStart.x, d.playerStart.z, Math.PI / 2); d.simulate(0.2);
   });
   await page.waitForFunction(() => window.lastReturnDebug.game.mode === 'ending', null, { timeout: 90000 });
   await drawFrames(page, 1);
@@ -276,21 +348,24 @@ function check(description, condition, detail) {
     for (const term of terms) rows[term.textContent] = term.nextElementSibling.textContent;
     const bestKeys = [];
     for (let index = 0; index < window.localStorage.length; index++) if (/^last-return-best-/.test(window.localStorage.key(index))) bestKeys.push(window.localStorage.key(index));
-    return { rows: rows, bestKeys: bestKeys, key: window.lastReturnDebug.game.difficulty.key };
+    return { rows: rows, bestKeys: bestKeys, key: window.lastReturnDebug.game.difficulty.key, description: window.lastReturnDebug.describeCustomDifficulty(window.lastReturnDebug.settings.customDifficulty) };
   });
   check('the ending screen says Custom and lists what was changed',
-    ending.rows['Threat level'] === 'Custom' && /Hollow speed 80 %/.test(ending.rows['Custom settings'] || '') && /Your stamina 200 %/.test(ending.rows['Custom settings'] || ''), ending.rows);
+    ending.rows['Threat level'] === 'Custom' && ending.rows['Custom settings'] === ending.description &&
+    ending.description.indexOf(shownInSummary('hollowSpeedFactor', secondChoice.hollowSpeedFactor)) >= 0 && ending.description.indexOf(shownInSummary('staminaFactor', secondChoice.staminaFactor)) >= 0,
+    { rows: ending.rows, description: ending.description, shouldName: [shownInSummary('hollowSpeedFactor', secondChoice.hollowSpeedFactor), shownInSummary('staminaFactor', secondChoice.staminaFactor)] });
   check('its best time is kept under its own values, apart from Standard',
     ending.bestKeys.length === 1 && ending.bestKeys[0] === 'last-return-best-' + ending.key && ending.bestKeys[0] !== 'last-return-best-standard', ending.bestKeys);
 
   // --- the presets still work, and the panel stays out of the way ---
   await page.evaluate(() => document.getElementById('button-ending-restart').click());
   await page.evaluate(() => document.getElementById('difficulty-nightmare').click());
-  const backOnPreset = await page.evaluate(() => ({ adjustHidden: document.getElementById('button-custom-difficulty').hidden, panelHidden: document.getElementById('screen-custom').hidden, description: document.getElementById('difficulty-description').textContent }));
+  const backOnPreset = await page.evaluate(() => ({ adjustHidden: document.getElementById('button-custom-difficulty').hidden, panelHidden: document.getElementById('screen-custom').hidden, description: document.getElementById('difficulty-description').textContent,
+    customDescription: window.lastReturnDebug.describeCustomDifficulty(window.lastReturnDebug.settings.customDifficulty) }));
   await startGame(page, false);
   const nightmare = await inGame(() => ({ label: window.lastReturnDebug.game.difficulty.label, same: window.lastReturnDebug.game.difficulty === window.lastReturnDebug.difficultyPresets.nightmare }));
   check('choosing a preset again hides Adjust, and the descent plays on that preset untouched',
-    backOnPreset.adjustHidden && backOnPreset.panelHidden && !/Standard, but/.test(backOnPreset.description) && nightmare.label === 'Nightmare' && nightmare.same, { backOnPreset: backOnPreset, nightmare: nightmare });
+    backOnPreset.adjustHidden && backOnPreset.panelHidden && backOnPreset.description !== backOnPreset.customDescription && nightmare.label === 'Nightmare' && nightmare.same, { backOnPreset: backOnPreset, nightmare: nightmare });
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();

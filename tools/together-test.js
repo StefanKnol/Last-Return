@@ -5,6 +5,17 @@ const http = require('http');
 const { WebSocket } = require('ws');
 const { startServer } = require('../server/server.js');
 const { openGame, startGame } = require('./browser-harness.js');
+const { TEST_OBJECT_KINDS, installTestObjectKinds, removeTestObjectKinds } = require('./test-objects.js');
+
+// The station the lobby goes down into. Any seed will do: the checks find in it what they need (a door, a stretch
+// of floor) and put down their own things. The host types it into the title screen, so tools/browser-harness.js
+// cannot add to it for `--other-stations`; that is done here, from the number run-tests.js passes on.
+const lobbySeed = 4471 + Math.max(0, Math.floor(Number(process.env.TEST_OTHER_STATIONS || 0)));
+
+// The loose things this suite puts down are the tests' own, from tools/test-objects.js: an open crate, a block of
+// three kilograms that does not roll, two small light blocks, and a block exactly as heavy as the game says stops you.
+const TEST_KINDS_OF_THIS_SUITE = ['testCrate', 'testWeight', 'testSmallBlock', 'testHeavyBlock'];
+const installTogetherTestObjectKinds = (page) => installTestObjectKinds(page, TEST_KINDS_OF_THIS_SUITE);
 
 const failures = [];
 function check(description, condition, detail) {
@@ -198,7 +209,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const a = first.page, b = second.page;
 
   check('the title screen offers a lobby when the page comes from the server', await a.isVisible('#button-host-lobby'));
-  await a.evaluate(() => { const d = window.lastReturnDebug; d.settings.station = 'generated'; d.settings.seedText = '4471'; d.settings.stationSize = 'small'; d.settings.difficulty = 'standard'; d.settings.workOrders = { salvage: true, survey: false, recovery: false, restart: false }; });
+  await a.evaluate((lobbySeed) => { const d = window.lastReturnDebug; d.settings.station = 'generated'; d.settings.seedText = String(lobbySeed); d.settings.stationSize = 'small'; d.settings.difficulty = 'standard'; d.settings.workOrders = { salvage: true, survey: false, recovery: false, restart: false }; }, lobbySeed);
   await a.click('#button-host-lobby');
   await a.waitForFunction(() => window.lastReturnDebug.together.code !== '');
   const code = await a.textContent('#together-lobby-code');
@@ -215,7 +226,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const shownAtFirst = await b.evaluate(() => { const d = window.lastReturnDebug; return { station: d.settings.station, seed: d.settings.seedText, size: d.settings.stationSize, difficulty: d.settings.difficulty,
     sizeControl: document.getElementById('title-station-size').value, cannotChange: document.getElementById('title-station-size').disabled && document.getElementById('difficulty-nightmare').closest('fieldset').disabled }; });
   check('the other\'s title screen shows the station and the threat level the host has chosen, and cannot change them',
-    shownAtFirst.station === 'generated' && shownAtFirst.seed === '4471' && shownAtFirst.size === 'small' && shownAtFirst.sizeControl === 'small' && shownAtFirst.difficulty === 'standard' && shownAtFirst.cannotChange, shownAtFirst);
+    shownAtFirst.station === 'generated' && shownAtFirst.seed === String(lobbySeed) && shownAtFirst.size === 'small' && shownAtFirst.sizeControl === 'small' && shownAtFirst.difficulty === 'standard' && shownAtFirst.cannotChange, shownAtFirst);
   await a.evaluate(() => { document.getElementById('station-generated').click(); }); // (the title screen was not told of the settings put in above: this shows the size and the seed)
   await a.selectOption('#title-station-size', 'large');
   await b.waitForFunction(() => window.lastReturnDebug.settings.stationSize === 'large', null, { timeout: 5000 }).catch(() => {});
@@ -236,7 +247,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const station = async (page) => page.evaluate(() => { const d = window.lastReturnDebug; return { seed: d.level.seed, map: d.level.mapFingerprint, order: d.level.workOrder, difficulty: d.game.difficulty.label, players: d.players.length }; });
   const stationA = await station(a), stationB = await station(b);
   check('both are in the same station, built the same to the tile, at the host\'s threat level',
-    stationA.seed === 4471 && stationA.map === stationB.map && stationA.order === stationB.order && stationA.difficulty === 'Standard' && stationB.difficulty === 'Standard', [stationA, stationB]);
+    stationA.seed === lobbySeed && stationA.map === stationB.map && stationA.order === stationB.order && stationA.difficulty === 'Standard' && stationB.difficulty === 'Standard', [stationA, stationB]);
   check('a descent together can be for salvage', stationA.order === 'salvage' && stationB.order === 'salvage', [stationA.order, stationB.order]);
   const comparison = await b.evaluate(() => {
     const d = window.lastReturnDebug, result = { hostMap: d.together.hostMap, mine: d.level.mapFingerprint, saidWhenSame: document.getElementById('hud-messages').textContent.includes('not built the same') };
@@ -304,7 +315,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const blocked = await b.evaluate(() => {
     const d = window.lastReturnDebug, before = d.pointCloud.totalReturns, writtenBefore = d.pointCloud.writeIndex;
     for (let count = 0; count < 5; count++) d.updateTogether(0.1);
-    return { points: d.pointCloud.totalReturns - before, written: d.pointCloud.writeIndex - writtenBefore };
+    return { points: d.pointCloud.totalReturns - before, written: (d.pointCloud.writeIndex - writtenBefore + d.pointCloud.capacity) % d.pointCloud.capacity }; // (the cloud starts again at 0 when it is full)
   });
   check('a scanner pointed at you lights nothing behind you on your own screen, and nothing on you', blocked.points === 0, blocked);
   check('the light on another scanner is always lit: a few points every frame that are not returns', blocked.written > 0, blocked);
@@ -351,25 +362,38 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     }
     return -1;
   });
+  // (A station without such a door is told of in plain words, and the door is left out.)
+  const openFractionOf = (page, index) => page.evaluate((index) => index >= 0 ? window.lastReturnDebug.doors[index].openFraction : null, index);
   await both(0.6);
-  const doorBefore = [await a.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex), await b.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex)];
-  await b.evaluate((index) => { const d = window.lastReturnDebug, door = d.doors[index]; d.teleport(door.centerX, door.centerZ, 0); d.player.velocityX = 0; d.player.velocityZ = 0; }, doorIndex);
+  const doorBefore = [await openFractionOf(a, doorIndex), await openFractionOf(b, doorIndex)];
+  if (doorIndex >= 0) await b.evaluate((index) => { const d = window.lastReturnDebug, door = d.doors[index]; d.teleport(door.centerX, door.centerZ, 0); d.player.velocityX = 0; d.player.velocityZ = 0; }, doorIndex);
   await both(2.4);
-  const doorAfter = [await a.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex), await b.evaluate((index) => window.lastReturnDebug.doors[index].openFraction, doorIndex)];
-  check('a door opens for the other in the host\'s game, and the other\'s door follows it', doorBefore[0] === 0 && doorBefore[1] === 0 && doorAfter[0] === 1 && doorAfter[1] === 1, [doorBefore, doorAfter]);
+  const doorAfter = [await openFractionOf(a, doorIndex), await openFractionOf(b, doorIndex)];
+  check('a door opens for the other in the host\'s game, and the other\'s door follows it', doorBefore[0] === 0 && doorBefore[1] === 0 && doorAfter[0] === 1 && doorAfter[1] === 1,
+    doorIndex >= 0 ? [doorBefore, doorAfter] : 'no automatic door more than ten metres from the host in station ' + lobbySeed);
 
   // The host's Hollow: shown to the other where the host has it, and it hears the other.
   const hollowAt = await a.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0];
-    let spot = null;
-    for (const way of [[9, 0], [-9, 0], [0, 9], [0, -9], [6, 6], [-6, -6]]) { const tried = d.findWalkableSpotNear(other.x + way[0], other.z + way[1]); if (tried && Math.hypot(tried.x - other.x, tried.z - other.z) > 5) { spot = tried; break; } }
-    d.spawnHollow(spot.x, spot.z);
+    // (Somewhere more than five metres from them. Without such a place the check below says so; the Hollow is then
+    // put at the farthest place found, so that what follows has a Hollow to go on with.)
+    let spot = null, farthest = null;
+    for (const way of [[9, 0], [-9, 0], [0, 9], [0, -9], [6, 6], [-6, -6], [6, -6], [-6, 6], [12, 0], [-12, 0], [0, 12], [0, -12]]) {
+      const tried = d.findWalkableSpotNear(other.x + way[0], other.z + way[1]);
+      if (!tried) continue;
+      const metres = Math.hypot(tried.x - other.x, tried.z - other.z);
+      if (!farthest || metres > farthest.metres) farthest = { x: tried.x, z: tried.z, metres: metres };
+      if (metres > 5) { spot = tried; break; }
+    }
+    const at = spot || farthest || { x: other.x + 6, z: other.z }; // (no walkable place found at all: six metres off, wherever that is)
+    d.spawnHollow(at.x, at.z);
     d.hollow.graceTimer = 0; d.hollow.state = 4; d.hollow.listenTimer = 30; // standing, listening
-    return spot;
+    return { x: at.x, z: at.z, isFarEnough: spot !== null, capsules: d.hollow.figure.capsuleCount };
   });
   await both(1.2);
   const hollowSeen = await b.evaluate(() => { const d = window.lastReturnDebug; return { isActive: d.hollow.isActive, x: d.hollow.figure.x, z: d.hollow.figure.z, state: d.hollow.state, capsules: d.hollow.figure.capsuleCount }; });
-  check('the other is shown the host\'s Hollow where the host has it, doing what it is doing', hollowSeen.isActive && Math.hypot(hollowSeen.x - hollowAt.x, hollowSeen.z - hollowAt.z) < 0.6 && hollowSeen.state === 4 && hollowSeen.capsules > 20, [hollowAt, hollowSeen]);
+  check('the other is shown the host\'s Hollow where the host has it, doing what it is doing', hollowSeen.isActive && Math.hypot(hollowSeen.x - hollowAt.x, hollowSeen.z - hollowAt.z) < 0.6 && hollowSeen.state === 4 && hollowSeen.capsules > 0 && hollowSeen.capsules === hollowAt.capsules && hollowAt.isFarEnough,
+    hollowAt.isFarEnough ? [hollowAt, hollowSeen] : ['no walkable place more than five metres from the other in twelve directions in station ' + lobbySeed, hollowAt, hollowSeen]);
   const roarsBefore = await b.evaluate(() => { const d = window.lastReturnDebug; return (d.captionCounts.hollowFound || 0) + (d.captionCounts.hollowRoar || 0); });
   await b.evaluate(() => { const d = window.lastReturnDebug; d.emitNoise(d.player.x, d.player.z, 60); });
   await pause(150);
@@ -402,7 +426,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const fallen = await a.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0], scanner = d.looseObjects.filter((object) => object.fallenPlayerId === other.id)[0], writtenBefore = d.pointCloud.writeIndex;
     d.updateTogether(0.1);
-    return { isFallen: other.isFallen, bodyHit: d.fireScanPulse(other.x, other.eyeY - 0.4, other.z + 0.9, 0, 0, -1, false) && d.rayHit.figure === other.figure, light: d.pointCloud.writeIndex - writtenBefore,
+    return { isFallen: other.isFallen, bodyHit: d.fireScanPulse(other.x, other.eyeY - 0.4, other.z + 0.9, 0, 0, -1, false) && d.rayHit.figure === other.figure, light: (d.pointCloud.writeIndex - writtenBefore + d.pointCloud.capacity) % d.pointCloud.capacity,
       scanner: scanner ? { id: scanner.id, metresFromThem: Math.hypot(scanner.x - other.x, scanner.z - other.z) } : null };
   });
   const scannerInTheirs = await b.evaluate((id) => window.lastReturnDebug.looseObjects.some((object) => object.id === id && object.fallenPlayerId === window.lastReturnDebug.together.myId), fallen.scanner ? fallen.scanner.id : -1);
@@ -463,25 +487,61 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     return object ? { x: object.x, y: object.y, z: object.z, heldById: object.heldById, ownerId: object.ownerId, isAsleep: object.isAsleep, worth: object.worth } : null;
   }, id);
   // The other takes something light into their beam, and walks off with it. In the host's game it goes with them.
-  const carriedId = await b.evaluate(() => {
+  // (What they take is this suite's own: the test weight, put down in both games, in the same place, so that it has
+  // the same number in both. One of the station's own light things may be any shape, and roll on where it is thrown.)
+  for (const page of [a, b]) await installTogetherTestObjectKinds(page);
+  // (Where it is put: on a straight stretch of floor with nothing in the way at the height it lies at and at the
+  // height it is carried at, for five metres, whichever way that is in this station. The other stands at one end of
+  // it, with the weight a little way in front, and carries it along the stretch.)
+  const stretch = await b.evaluate(() => {
+    const d = window.lastReturnDebug, p = d.player;
+    const ways = [[1, 0], [-1, 0], [0, 1], [0, -1], [Math.SQRT1_2, Math.SQRT1_2], [-Math.SQRT1_2, -Math.SQRT1_2], [Math.SQRT1_2, -Math.SQRT1_2], [-Math.SQRT1_2, Math.SQRT1_2]];
+    for (let reach = 1; reach < 30; reach++) {
+      for (let tileZ = Math.floor(p.z) - reach; tileZ <= Math.floor(p.z) + reach; tileZ++) {
+        for (let tileX = Math.floor(p.x) - reach; tileX <= Math.floor(p.x) + reach; tileX++) {
+          if (Math.max(Math.abs(tileX - Math.floor(p.x)), Math.abs(tileZ - Math.floor(p.z))) !== reach) continue; // (the ring at this distance)
+          const x = tileX + 0.5, z = tileZ + 0.5;
+          const floor = d.getFloorHeightAt(x, z);
+          if (!d.isSpaceOpenAt(x, floor + 1, z)) continue;
+          for (const way of ways) {
+            const there = d.findWalkableSpotNear(x + way[0] * 3.5, z + way[1] * 3.5); // (the middle of a tile: within three quarters of a metre of the aim)
+            if (!there || Math.hypot(there.x - x - way[0] * 3.5, there.z - z - way[1] * 3.5) > 0.75 || Math.abs(d.getFloorHeightAt(there.x, there.z) - floor) > 0.01) continue;
+            // (Along the middle and along either side of it: what they carry hangs a little to one side, in front of the scanner in their right hand.)
+            const isClearAt = (height, aside) => !d.castScannerRay(x - way[0] * 0.6 - way[1] * aside, floor + height, z - way[1] * 0.6 + way[0] * aside, way[0], 0, way[1], 6);
+            if (!isClearAt(0.15, 0) || !isClearAt(0.9, 0) || !isClearAt(0.9, -0.4) || !isClearAt(0.9, 0.4)) continue;
+            return { x: x + way[0] * 1.2, z: z + way[1] * 1.2, y: floor + 0.2, standX: x, standZ: z, isFound: true };
+          }
+        }
+      }
+    }
+    // (None: the check below says so. The weight is put down near them all the same, at their feet if need be, so that what follows has something to go on.)
+    const spot = d.findWalkableSpotNear(p.x + 2, p.z) || d.findWalkableSpotNear(p.x, p.z + 2) || { x: p.x, z: p.z };
+    return { x: spot.x, z: spot.z, y: d.getFloorHeightAt(spot.x, spot.z) + 0.2, isFound: false };
+  });
+  const lightIds = [];
+  for (const page of [a, b]) lightIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('testWeight', spot.x, spot.y, spot.z, 0).id, stretch));
+  for (let turn = 0; turn < 10; turn++) { await both(0.9); if ((await about(b, lightIds[1])).isAsleep && (await about(a, lightIds[0])).isAsleep) break; }
+  const carriedId = await b.evaluate((stretch) => {
     const d = window.lastReturnDebug;
     d.game.flags.hasLeftLift = true;
-    const light = d.looseObjects.filter((object) => object.kind.mass <= 3 && !object.kind.use && !object.kind.shattersAt).sort((first, second) => first.id - second.id)[0];
-    const spot = d.findWalkableSpotNear(light.x + 1.2, light.z) || d.findWalkableSpotNear(light.x, light.z + 1.2);
+    const light = d.looseObjects.filter((object) => object.id === stretch.id)[0];
+    const spot = stretch.isFound ? { x: stretch.standX, z: stretch.standZ } : d.findWalkableSpotNear(light.x + 1.2, light.z) || d.findWalkableSpotNear(light.x, light.z + 1.2) || { x: light.x + 1.2, z: light.z };
     d.teleport(spot.x, spot.z, Math.atan2(light.x - spot.x, -(light.z - spot.z))); d.player.pitch = -0.5;
     d.simulate(0.1);
     d.pickUpLooseObject(light, false);
     return light.id;
-  });
+  }, Object.assign({ id: lightIds[1] }, stretch));
   await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
   const startedAt = await about(a, carriedId);
   // (They look up from the floor first. Looking down, what they carry hangs low enough to catch on what stands between here and there, and the beam loses it.)
-  // (Where they go: a place two to four and a half metres off with nothing in between at the height it is carried
-  // at, whichever way that is in this station. A place that is merely the nearest floor to "three metres east"
-  // may be the next tile.)
-  await b.evaluate(() => {
+  // (Where they go: along the stretch the weight was put on. Without one (the check below then fails and says so), they
+  // are put at a place two to four and a half metres off with nothing in between at the height it is carried at, if
+  // there is one, so that what follows has something to go on. A place that is merely the nearest floor to "three
+  // metres east" may be the next tile.)
+  await b.evaluate((stretch) => {
     const d = window.lastReturnDebug, p = d.player;
     p.pitch = 0;
+    if (stretch.isFound) return; // (they walk along it below)
     let best = null;
     for (const way of [[3, 0], [-3, 0], [0, 3], [0, -3], [2.2, 2.2], [-2.2, -2.2], [2.2, -2.2], [-2.2, 2.2]]) {
       const spot = d.findWalkableSpotNear(p.x + way[0], p.z + way[1]);
@@ -493,13 +553,22 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
       if (!best) best = spot;
     }
     if (best) d.teleport(best.x, best.z);
-  });
-  await both(2.4);
+  }, stretch);
+  // (They walk for 1.2 seconds of their game, about two and a half metres, and no more: W is held only inside these
+  // steps, so the frames their browser draws in between, as many as the machine manages, do not walk them further.)
+  if (stretch.isFound) {
+    for (let step = 0; step < 4; step++) {
+      await b.evaluate(() => { const d = window.lastReturnDebug; d.input.keysDown.add('KeyW'); for (let time = 0; time < 0.3 - 1e-9; time += 0.1) { d.simulate(0.1); d.updateTogether(0.1); } d.input.keysDown.delete('KeyW'); });
+      await play(a, 0.3); await pause(170);
+    }
+    await both(1.2);
+  } else await both(2.4);
   const carriedB = await about(b, carriedId), carriedA = await about(a, carriedId);
   const ids = { host: await a.evaluate(() => window.lastReturnDebug.together.myId), other: await b.evaluate(() => window.lastReturnDebug.together.myId) };
   check('what the other takes into their beam is theirs to move, and in the host\'s game it goes where they carry it',
-    carriedA.heldById === ids.other && carriedA.ownerId === ids.other && Math.hypot(carriedA.x - startedAt.x, carriedA.z - startedAt.z) > 1 &&
-    Math.hypot(carriedA.x - carriedB.x, carriedA.y - carriedB.y, carriedA.z - carriedB.z) < 0.5, [startedAt, carriedA, carriedB]);
+    stretch.isFound && lightIds[0] === lightIds[1] && carriedA.heldById === ids.other && carriedA.ownerId === ids.other && Math.hypot(carriedA.x - startedAt.x, carriedA.z - startedAt.z) > 1 &&
+    Math.hypot(carriedA.x - carriedB.x, carriedA.y - carriedB.y, carriedA.z - carriedB.z) < 0.5,
+    stretch.isFound ? [lightIds, startedAt, carriedA, carriedB] : ['no straight stretch of five metres with nothing in the way within thirty metres of the other in station ' + lobbySeed, carriedA]);
   // They throw it. Where it comes to lie is the same place in both games, and it is the host's to move again.
   // (The host comes within earshot first: a knock is put on the screen from twenty metres at most, and where the
   // checks above left the host depends on the station.)
@@ -513,7 +582,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   }, thrower);
   await both(0.3);
   const knocksBefore = await a.evaluate(() => { const d = window.lastReturnDebug; return (d.captionCounts.objectKnock || 0) + (d.captionCounts.objectCrash || 0); });
-  await b.evaluate(() => { const d = window.lastReturnDebug; d.player.pitch = 0.2; d.releaseHeldLooseObject(1); });
+  // (Thrown back the way they came, where there was room to carry it: thrown at a wall, it would land at their feet.)
+  await b.evaluate((startedAt) => { const d = window.lastReturnDebug; d.player.yaw = Math.atan2(startedAt.x - d.player.x, -(startedAt.z - d.player.z)); d.player.pitch = 0.2; d.releaseHeldLooseObject(1); }, startedAt);
   for (let turn = 0; turn < 14; turn++) { await both(0.9); if ((await about(b, carriedId)).isAsleep && (await about(a, carriedId)).isAsleep) break; }
   const landedB = await about(b, carriedId), landedA = await about(a, carriedId);
   check('thrown, it comes to lie in the same place in both games, and is the host\'s again',
@@ -521,14 +591,17 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     landedA.heldById === 0 && landedA.ownerId === ids.host && landedB.ownerId === ids.host && Math.hypot(landedB.x - carriedB.x, landedB.z - carriedB.z) > 0.5, [landedA, landedB]);
   const knocksHeard = await a.evaluate((before) => { const d = window.lastReturnDebug; return (d.captionCounts.objectKnock || 0) + (d.captionCounts.objectCrash || 0) - before; }, knocksBefore);
   check('the host hears it land, though it was the other\'s browser that moved it', knocksHeard >= 1, knocksHeard);
-  // A pump motor is put down in both games, in the same place (so it has the same number in both). It is the
-  // host's to move. The other walks at it for two seconds: it stops them, as it would stop the host.
-  const motorSpot = await a.evaluate(() => { const d = window.lastReturnDebug; const spot = d.findWalkableSpotNear(d.player.x + 2, d.player.z) || d.findWalkableSpotNear(d.player.x, d.player.z + 2); return { x: spot.x, z: spot.z, y: d.getFloorHeightAt(spot.x, spot.z) + 0.5 }; });
-  const motorIds = [];
-  for (const page of [a, b]) motorIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('pumpMotor', spot.x, spot.y, spot.z, 0).id, motorSpot));
-  for (let turn = 0; turn < 10; turn++) { await both(0.9); if ((await about(b, motorIds[1])).isAsleep && (await about(a, motorIds[0])).isAsleep) break; }
+  // Something too heavy to shove is put down in both games, in the same place (so it has the same number in both):
+  // this suite's own heavy block, as heavy as the game says stops you. It is the host's to move. The other walks at
+  // it for two seconds: it stops them, as it would stop the host.
+  const heavyBlockSpot = await a.evaluate(() => { const d = window.lastReturnDebug; const spot = d.findWalkableSpotNear(d.player.x + 2, d.player.z) || d.findWalkableSpotNear(d.player.x, d.player.z + 2); return spot ? { x: spot.x, z: spot.z, y: d.getFloorHeightAt(spot.x, spot.z) + 0.5 } : null; });
+  const heavyBlockIds = [];
+  // (Without a walkable place near the host there is nothing put down: the check below says so.)
+  if (heavyBlockSpot) for (const page of [a, b]) heavyBlockIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('testHeavyBlock', spot.x, spot.y, spot.z, 0).id, heavyBlockSpot));
+  if (heavyBlockSpot) for (let turn = 0; turn < 10; turn++) { await both(0.9); if ((await about(b, heavyBlockIds[1])).isAsleep && (await about(a, heavyBlockIds[0])).isAsleep) break; }
   const walkedInto = await b.evaluate((id) => {
     const d = window.lastReturnDebug, heavy = d.looseObjects.filter((object) => object.id === id)[0];
+    if (!heavy) return null;
     let from = null;
     for (const way of [[1.6, 0], [-1.6, 0], [0, 1.6], [0, -1.6]]) {
       const spot = d.findWalkableSpotNear(heavy.x + way[0], heavy.z + way[1]);
@@ -541,10 +614,17 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     d.input.keysDown.add('KeyW');
     d.simulate(2);
     d.input.keysDown.delete('KeyW');
-    return { isAsleep: heavy.isAsleep, startMetres: startMetres, endMetres: Math.hypot(d.player.x - heavy.x, d.player.z - heavy.z), isTheHosts: (heavy.ownerId || d.together.hostId) !== d.together.myId };
-  }, motorIds[1]);
+    return { isAsleep: heavy.isAsleep, playerRadius: d.tuning.playerRadius, startMetres: startMetres, endMetres: Math.hypot(d.player.x - heavy.x, d.player.z - heavy.z), isTheHosts: (heavy.ownerId || d.together.hostId) !== d.together.myId };
+  }, heavyBlockIds[1]);
+  // (Stopped means no nearer to its middle than half its width and their own radius, which is where they touch it,
+  // less five centimetres: a step can press in that far before the push back is given. They walk at it square on,
+  // and a block turned a little only keeps them further off.)
+  const touchingMetres = TEST_OBJECT_KINDS.testHeavyBlock.parts[0].half[0] + (walkedInto ? walkedInto.playerRadius : 0);
   check('something heavy that the host\'s game moves stops the other walking through it',
-    motorIds[0] === motorIds[1] && walkedInto !== null && walkedInto.isTheHosts && walkedInto.endMetres > 0.4 && walkedInto.endMetres < walkedInto.startMetres - 0.3, [motorIds, walkedInto]);
+    heavyBlockIds[0] === heavyBlockIds[1] && walkedInto !== null && walkedInto.isTheHosts && walkedInto.endMetres > touchingMetres - 0.05 && walkedInto.endMetres < walkedInto.startMetres - 0.3,
+    heavyBlockSpot ? [heavyBlockIds, touchingMetres, walkedInto] : 'no walkable place near the host to put the heavy block in station ' + lobbySeed);
+  // (Taken away again, so that it is not in the way of what comes next: a crate let go of further down landed on it.)
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, heavy = d.looseObjects.filter((object) => object.id === id)[0]; if (heavy) d.removeLooseObject(heavy); }, heavyBlockIds[0]);
   // A crate with things in it, carried by the other. While they carry it the crate is theirs to move, and what is
   // in it is the host's. So it is the host's game that has to keep those things in a crate that somebody else
   // moves, and the other's game that has to feel their weight on the beam. (The crate is this suite's own: five
@@ -553,8 +633,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // where its things are. In turns of a third of a second the crate would jump a stride at a time in the host's
   // game and leave what is in it standing in the air, and that would be the turns' doing, not the game's.
   const fine = async (seconds) => { for (let time = 0; time < seconds; time += 0.1) { await play(a, 0.1); await play(b, 0.1); await pause(60); } };
-  // A straight stretch of plain floor, six metres of it with nothing on it, nothing lying near and nobody in it:
-  // where to stand, and which way to walk.
+  // A straight stretch of plain floor, six metres of it with nothing on it and nobody in it: where to stand, and
+  // which way to walk. What lies loose in it or near it is taken away, in both games.
   const lane = await a.evaluate(() => {
     const d = window.lastReturnDebug;
     const isPlain = (x, z, floor) => d.isSpaceOpenAt(x, floor + 0.3, z) && d.isSpaceOpenAt(x, floor + 1.6, z) && Math.abs(d.getFloorHeightAt(x, z) - floor) < 0.01 && d.getTileFlagsAt(x, z) === 0 && !d.isVentAt(x, z);
@@ -563,8 +643,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
         for (let tileX = Math.floor(d.player.x) - reach; tileX <= Math.floor(d.player.x) + reach; tileX++) {
           if (Math.max(Math.abs(tileX - Math.floor(d.player.x)), Math.abs(tileZ - Math.floor(d.player.z))) !== reach) continue; // (the ring at this distance)
           const x = tileX + 0.5, z = tileZ + 0.5;
-          if (!d.isSpaceOpenAt(x, 1, z)) continue;
           const floor = d.getFloorHeightAt(x, z);
+          if (!d.isSpaceOpenAt(x, floor + 1, z)) continue;
           for (const way of [[1, 0, Math.PI / 2], [-1, 0, -Math.PI / 2], [0, 1, Math.PI], [0, -1, 0]]) {
             let isClear = true;
             for (let step = -1; step <= 6 && isClear; step++) for (const aside of [-1, 0, 1]) if (!isPlain(x + way[0] * step - way[1] * aside, z + way[1] * step + way[0] * aside, floor)) isClear = false;
@@ -576,12 +656,11 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
               const reach = Math.max(prop.boundsHalfX, prop.boundsHalfZ);
               if (along > -1.5 - reach && along < 7 + reach && across < 1.4 + reach) isClear = false;
             }
-            // (Nothing lying near it, and the host not standing in it: a crate set down against somebody's legs does not come to rest.)
-            for (const object of d.looseObjects.concat([d.player])) {
-              const along = (object.x - x) * way[0] + (object.z - z) * way[1], across = Math.abs((object.x - x) * way[1] - (object.z - z) * way[0]);
-              if (along > -2 && along < 7.5 && across < 2) isClear = false;
-            }
-            if (isClear) return { x: x, z: z, floor: floor, wayX: way[0], wayZ: way[1], yaw: way[2] };
+            // (Nothing lying near it, and the host not standing in it: a crate set down against somebody's legs does not come to rest.
+            // What lies there is taken away below; the host is not.)
+            const isNear = (object) => { const along = (object.x - x) * way[0] + (object.z - z) * way[1], across = Math.abs((object.x - x) * way[1] - (object.z - z) * way[0]); return along > -2 && along < 7.5 && across < 2; };
+            if (isNear(d.player)) isClear = false;
+            if (isClear) return { x: x, z: z, floor: floor, wayX: way[0], wayZ: way[1], yaw: way[2], lyingInIt: d.looseObjects.filter(isNear).map((object) => object.id) };
           }
         }
       }
@@ -589,103 +668,103 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     return null;
   });
   const crateIds = [];
-  for (const page of [a, b]) crateIds.push(await page.evaluate((lane) => {
-    const d = window.lastReturnDebug;
-    d.looseObjectKinds.testCrate = { label: 'test crate', mass: 3, value: 10, fragile: 0.1, material: 'case', loud: 0.6, lies: 'upright', bulky: true, bounce: 0.15, grip: 0.6,
-      parts: [{ shape: 'box', center: [0.25, 0, 0], half: [0.02, 0.2, 0.25] }, { shape: 'box', center: [-0.25, 0, 0], half: [0.02, 0.2, 0.25] },
-        { shape: 'box', center: [0, 0, 0.25], half: [0.25, 0.2, 0.02] }, { shape: 'box', center: [0, 0, -0.25], half: [0.25, 0.2, 0.02] },
-        { shape: 'box', center: [0, -0.2, 0], half: [0.25, 0.02, 0.25] }] };
-    // The heavy thing in it is this suite's own as well: a block of three kilograms. (It used to be the game's gas
-    // canister, which is the workshop's to reshape: made a rod with round ends, it rolled about in the crate and
-    // never came to rest, and this check failed for a thing that has nothing to do with playing together.)
-    d.looseObjectKinds.testWeight = { label: 'test weight', mass: 3, value: 5, fragile: 0, material: 'metal', loud: 0.8, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.7,
-      parts: [{ shape: 'box', center: [0, 0, 0], half: [0.09, 0.07, 0.09] }] };
-    if (!lane) return [];
-    const x = lane.x + lane.wayX * 1.7, z = lane.z + lane.wayZ * 1.7;
-    const crate = d.createLooseObject('testCrate', x, lane.floor + 0.24, z, 0);
-    return [crate.id, d.createLooseObject('can', x - 0.12, lane.floor + 0.2, z - 0.1, 0).id, d.createLooseObject('can', x + 0.12, lane.floor + 0.2, z - 0.1, 1).id, d.createLooseObject('testWeight', x, lane.floor + 0.35, z + 0.1, 0).id];
-  }, lane));
-  // What the crate and its things are doing in one game: where each thing is in the crate's own frame (from the
-  // middle of the top of its bottom board), and whether it is in it.
-  const crateIn = (page) => page.evaluate((ids) => {
-    const d = window.lastReturnDebug, find = (id) => d.looseObjects.filter((object) => object.id === id)[0];
-    const crate = find(ids[0]), round = (value) => Math.round(value * 1000) / 1000;
-    if (!crate) return null;
-    const m = crate.matrix, board = crate.prepared.boxes[4];
-    const things = ids.slice(1).map((id) => {
-      const thing = find(id);
-      if (!thing) return { isGone: true, isInIt: false, isAsleep: false };
-      const x = thing.x - crate.x, y = thing.y - crate.y, z = thing.z - crate.z;
-      const at = [m[0] * x + m[3] * y + m[6] * z - board.centerX, m[1] * x + m[4] * y + m[7] * z - board.centerY - board.halfY, m[2] * x + m[5] * y + m[8] * z - board.centerZ];
-      return { at: at.map(round), isInIt: Math.abs(at[0]) < 0.24 && Math.abs(at[2]) < 0.24 && at[1] > -0.02 && at[1] < 0.6, isAsleep: thing.isAsleep, x: round(thing.x), y: round(thing.y), z: round(thing.z), ownerId: thing.ownerId, mass: thing.kind.mass };
+  if (lane === null) check('a crate with things in it is carried and set down the same in both games', false, 'no straight stretch of six metres of plain floor within forty metres of the host in station ' + lobbySeed);
+  else {
+    for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const object of d.looseObjects.filter((candidate) => ids.indexOf(candidate.id) >= 0)) d.removeLooseObject(object); }, lane.lyingInIt);
+    // The heavy thing in it is this suite's own as well: the test weight, a block of three kilograms. (It used to be
+    // the game's gas canister, which is the workshop's to reshape: made a rod with round ends, it rolled about in the
+    // crate and never came to rest, and this check failed for a thing that has nothing to do with playing together.)
+    // The two light things beside it are this suite's small blocks; they used to be two of the game's empty cans.
+    for (const page of [a, b]) crateIds.push(await page.evaluate((lane) => {
+      const d = window.lastReturnDebug;
+      const x = lane.x + lane.wayX * 1.7, z = lane.z + lane.wayZ * 1.7;
+      const crate = d.createLooseObject('testCrate', x, lane.floor + 0.24, z, 0);
+      return [crate.id, d.createLooseObject('testSmallBlock', x - 0.12, lane.floor + 0.2, z - 0.1, 0).id, d.createLooseObject('testSmallBlock', x + 0.12, lane.floor + 0.2, z - 0.1, 1).id, d.createLooseObject('testWeight', x, lane.floor + 0.35, z + 0.1, 0).id];
+    }, lane));
+    // What the crate and its things are doing in one game: where each thing is in the crate's own frame (from the
+    // middle of the top of its bottom board), and whether it is in it.
+    const crateIn = (page) => page.evaluate((ids) => {
+      const d = window.lastReturnDebug, find = (id) => d.looseObjects.filter((object) => object.id === id)[0];
+      const crate = find(ids[0]), round = (value) => Math.round(value * 1000) / 1000;
+      if (!crate) return null;
+      const m = crate.matrix, board = crate.prepared.boxes[4];
+      const things = ids.slice(1).map((id) => {
+        const thing = find(id);
+        if (!thing) return { isGone: true, isInIt: false, isAsleep: false };
+        const x = thing.x - crate.x, y = thing.y - crate.y, z = thing.z - crate.z;
+        const at = [m[0] * x + m[3] * y + m[6] * z - board.centerX, m[1] * x + m[4] * y + m[7] * z - board.centerY - board.halfY, m[2] * x + m[5] * y + m[8] * z - board.centerZ];
+        return { at: at.map(round), isInIt: Math.abs(at[0]) < 0.24 && Math.abs(at[2]) < 0.24 && at[1] > -0.02 && at[1] < 0.6, isAsleep: thing.isAsleep, x: round(thing.x), y: round(thing.y), z: round(thing.z), ownerId: thing.ownerId, mass: thing.kind.mass };
+      });
+      return { x: round(crate.x), y: round(crate.y), z: round(crate.z), heldById: crate.heldById, ownerId: crate.ownerId, isAsleep: crate.isAsleep, things: things, inIt: things.filter((thing) => thing.isInIt).length,
+        asleep: things.filter((thing) => thing.isAsleep).length, held: d.getHeldLooseObject() === crate, crateMass: crate.kind.mass, load: round(d.looseState.heldLoad), speedFactor: round(d.getCarrySpeedFactor()) };
+    }, crateIds[0]);
+    const crateAtRest = async (seconds) => {
+      for (let time = 0; time < seconds; time += 0.5) {
+        await fine(0.5);
+        const inA = await crateIn(a), inB = await crateIn(b);
+        if (inA && inB && inA.isAsleep && inB.isAsleep && inA.asleep === inA.things.length && inB.asleep === inB.things.length) return true;
+      }
+      return false;
+    };
+    const crateFilled = { atRest: await crateAtRest(8), host: await crateIn(a), other: await crateIn(b) };
+    // The other takes the crate into their beam, lifts it, walks six strides with it, stops, and stands.
+    // And over a slow line: everything the host says reaches the other six tenths of a second late. So the host's
+    // word that the things in the crate are the other's to move ('carry') comes when their beam has long lifted
+    // the crate clear of where it stood, and where the host says those things are is where the crate was more than
+    // half a second ago. (Between two windows on one machine the answer comes at once, and what this is about
+    // hardly showed: on a slow machine, or with any real distance between two browsers, the things were left
+    // standing where the crate had been.)
+    await a.evaluate(() => {
+      const socket = window.lastReturnDebug.together.socket, send = socket.send.bind(socket);
+      window.undoSlowLine = () => { socket.send = send; };
+      socket.send = (text) => { setTimeout(() => send(text), 600); }; // (all of it by the same wait, so in the order it was said)
     });
-    return { x: round(crate.x), y: round(crate.y), z: round(crate.z), heldById: crate.heldById, ownerId: crate.ownerId, isAsleep: crate.isAsleep, things: things, inIt: things.filter((thing) => thing.isInIt).length,
-      asleep: things.filter((thing) => thing.isAsleep).length, held: d.getHeldLooseObject() === crate, load: round(d.looseState.heldLoad), speedFactor: round(d.getCarrySpeedFactor()) };
-  }, crateIds[0]);
-  const crateAtRest = async (seconds) => {
-    for (let time = 0; time < seconds; time += 0.5) {
-      await fine(0.5);
-      const inA = await crateIn(a), inB = await crateIn(b);
-      if (inA && inB && inA.isAsleep && inB.isAsleep && inA.asleep === inA.things.length && inB.asleep === inB.things.length) return true;
-    }
-    return false;
-  };
-  const crateFilled = { atRest: await crateAtRest(8), host: await crateIn(a), other: await crateIn(b) };
-  // The other takes the crate into their beam, lifts it, walks six strides with it, stops, and stands.
-  // And over a slow line: everything the host says reaches the other six tenths of a second late. So the host's
-  // word that the things in the crate are the other's to move ('carry') comes when their beam has long lifted
-  // the crate clear of where it stood, and where the host says those things are is where the crate was more than
-  // half a second ago. (Between two windows on one machine the answer comes at once, and what this is about
-  // hardly showed: on a slow machine, or with any real distance between two browsers, the things were left
-  // standing where the crate had been.)
-  await a.evaluate(() => {
-    const socket = window.lastReturnDebug.together.socket, send = socket.send.bind(socket);
-    window.undoSlowLine = () => { socket.send = send; };
-    socket.send = (text) => { setTimeout(() => send(text), 600); }; // (all of it by the same wait, so in the order it was said)
-  });
-  await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.3; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
-  await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, crateIds[0][0]);
-  await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
-  await fine(1.5);
-  const crateLifted = { host: await crateIn(a), other: await crateIn(b) };
-  let fewestInItForHost = 9, mostAsleepForHost = 0, fewestInItForOther = 9;
-  const carryCrate = async (seconds) => {
-    for (let time = 0; time < seconds; time += 0.3) {
-      await fine(0.3);
-      const inA = await crateIn(a), inB = await crateIn(b);
-      fewestInItForHost = Math.min(fewestInItForHost, inA.inIt); mostAsleepForHost = Math.max(mostAsleepForHost, inA.asleep); fewestInItForOther = Math.min(fewestInItForOther, inB.inIt);
-    }
-  };
-  await b.evaluate(() => window.lastReturnDebug.input.keysDown.add('KeyW'));
-  await carryCrate(1.5);
-  await b.evaluate(() => window.lastReturnDebug.input.keysDown.clear());
-  await carryCrate(2.4);
-  const crateCarried = { host: await crateIn(a), other: await crateIn(b), fewestInItForHost: fewestInItForHost, mostAsleepForHost: mostAsleepForHost, fewestInItForOther: fewestInItForOther };
-  // They set it down: look at the floor, let go.
-  await b.evaluate(() => { window.lastReturnDebug.player.pitch = -0.75; });
-  await fine(1.2);
-  await b.evaluate(() => window.lastReturnDebug.releaseHeldLooseObject(0));
-  const crateSetDown = { atRest: await crateAtRest(12), host: await crateIn(a), other: await crateIn(b) };
-  const crateWeight = crateFilled.host ? crateFilled.host.things.reduce((sum, thing) => sum + (thing.mass || 0), 0) : 0;
-  check('a crate with two cans and something heavy in it is the same crate in both games, with the same things in it',
-    lane !== null && crateIds[0].length === 4 && crateIds[0].join() === crateIds[1].join() && crateFilled.atRest && crateFilled.host.inIt === 3 && crateFilled.other.inIt === 3, [lane, crateIds, crateFilled]);
-  check('over a slow line, what is in the crate is kept in it until the host has said it is the other\'s: lifted, all of it is in the crate in both games, and theirs to move',
-    crateLifted.other.inIt === 3 && crateLifted.host.inIt === 3 && crateLifted.other.things.every((thing) => thing.ownerId === ids.other) && crateLifted.host.things.every((thing) => thing.ownerId === ids.other),
-    [crateLifted.other.things.map((thing) => [thing.isInIt, thing.ownerId]), crateLifted.host.things.map((thing) => [thing.isInIt, thing.ownerId])]);
-  check('the other carries it: in the host\'s game, where what is in it is the host\'s to move, all of it stays in the crate and goes where the crate goes, and none of it comes to rest on the way',
-    crateLifted.host.heldById === ids.other && crateLifted.host.inIt === 3 && crateCarried.fewestInItForHost === 3 && crateCarried.mostAsleepForHost === 0 &&
-    Math.hypot(crateCarried.host.x - crateFilled.host.x, crateCarried.host.z - crateFilled.host.z) > 2 && Math.hypot(crateCarried.host.x - crateCarried.other.x, crateCarried.host.z - crateCarried.other.z) < 0.3,
-    [crateLifted.host, crateCarried]);
-  check('in the other\'s own game it is all in the crate too, the beam keeps hold, and the weight of what is in it is theirs: it slows them',
-    crateCarried.other.held && crateCarried.fewestInItForOther === 3 && crateCarried.other.load > crateWeight * 0.5 && crateCarried.other.load < crateWeight * 1.5 && crateCarried.other.speedFactor < 1 / (1 + (3 + crateWeight * 0.5) * 0.03),
-    [crateWeight, crateCarried.other]);
-  check('set down, it all comes to rest in the crate, in the same places in both games, and the crate is the host\'s to move again',
-    crateSetDown.atRest && crateSetDown.host.inIt === 3 && crateSetDown.other.inIt === 3 && crateSetDown.host.ownerId === ids.host && crateSetDown.host.heldById === 0 &&
-    crateSetDown.host.things.every((thing, index) => Math.hypot(thing.x - crateSetDown.other.things[index].x, thing.y - crateSetDown.other.things[index].y, thing.z - crateSetDown.other.things[index].z) < 0.03) &&
-    Math.hypot(crateSetDown.host.x - crateSetDown.other.x, crateSetDown.host.y - crateSetDown.other.y, crateSetDown.host.z - crateSetDown.other.z) < 0.03, crateSetDown);
-  await a.evaluate(() => window.undoSlowLine());
-  await pause(800); // (what was still on its way has arrived)
-  for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } delete d.looseObjectKinds.testCrate; delete d.looseObjectKinds.testWeight; }, crateIds[0]);
+    await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.3; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+    await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, crateIds[0][0]);
+    await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
+    await fine(1.5);
+    const crateLifted = { host: await crateIn(a), other: await crateIn(b) };
+    let fewestInItForHost = 9, mostAsleepForHost = 0, fewestInItForOther = 9;
+    const carryCrate = async (seconds) => {
+      for (let time = 0; time < seconds; time += 0.3) {
+        await fine(0.3);
+        const inA = await crateIn(a), inB = await crateIn(b);
+        fewestInItForHost = Math.min(fewestInItForHost, inA.inIt); mostAsleepForHost = Math.max(mostAsleepForHost, inA.asleep); fewestInItForOther = Math.min(fewestInItForOther, inB.inIt);
+      }
+    };
+    await b.evaluate(() => window.lastReturnDebug.input.keysDown.add('KeyW'));
+    await carryCrate(1.5);
+    await b.evaluate(() => window.lastReturnDebug.input.keysDown.clear());
+    await carryCrate(2.4);
+    const crateCarried = { host: await crateIn(a), other: await crateIn(b), fewestInItForHost: fewestInItForHost, mostAsleepForHost: mostAsleepForHost, fewestInItForOther: fewestInItForOther };
+    // They set it down: look at the floor, let go.
+    await b.evaluate(() => { window.lastReturnDebug.player.pitch = -0.75; });
+    await fine(1.2);
+    await b.evaluate(() => window.lastReturnDebug.releaseHeldLooseObject(0));
+    const crateSetDown = { atRest: await crateAtRest(12), host: await crateIn(a), other: await crateIn(b) };
+    const crateWeight = crateFilled.host ? crateFilled.host.things.reduce((sum, thing) => sum + (thing.mass || 0), 0) : 0;
+    const slowdownPerKilogram = await b.evaluate(() => window.lastReturnDebug.tuning.carrySlowdownPerKilogram);
+    check('a crate with two small blocks and something heavy in it is the same crate in both games, with the same things in it',
+      crateIds[0].length === 4 && crateIds[0].join() === crateIds[1].join() && crateFilled.atRest && crateFilled.host.inIt === 3 && crateFilled.other.inIt === 3, [lane, crateIds, crateFilled]);
+    check('over a slow line, what is in the crate is kept in it until the host has said it is the other\'s: lifted, all of it is in the crate in both games, and theirs to move',
+      crateLifted.other.inIt === 3 && crateLifted.host.inIt === 3 && crateLifted.other.things.every((thing) => thing.ownerId === ids.other) && crateLifted.host.things.every((thing) => thing.ownerId === ids.other),
+      [crateLifted.other.things.map((thing) => [thing.isInIt, thing.ownerId]), crateLifted.host.things.map((thing) => [thing.isInIt, thing.ownerId])]);
+    check('the other carries it: in the host\'s game, where what is in it is the host\'s to move, all of it stays in the crate and goes where the crate goes, and none of it comes to rest on the way',
+      crateLifted.host.heldById === ids.other && crateLifted.host.inIt === 3 && crateCarried.fewestInItForHost === 3 && crateCarried.mostAsleepForHost === 0 &&
+      Math.hypot(crateCarried.host.x - crateFilled.host.x, crateCarried.host.z - crateFilled.host.z) > 2 && Math.hypot(crateCarried.host.x - crateCarried.other.x, crateCarried.host.z - crateCarried.other.z) < 0.3,
+      [crateLifted.host, crateCarried]);
+    check('in the other\'s own game it is all in the crate too, the beam keeps hold, and the weight of what is in it is theirs: it slows them',
+      crateCarried.other.held && crateCarried.fewestInItForOther === 3 && crateCarried.other.load > crateWeight * 0.5 && crateCarried.other.load < crateWeight * 1.5 && crateCarried.other.speedFactor < 1 / (1 + (crateCarried.other.crateMass + crateWeight * 0.5) * slowdownPerKilogram),
+      [crateWeight, crateCarried.other]);
+    check('set down, it all comes to rest in the crate, in the same places in both games, and the crate is the host\'s to move again',
+      crateSetDown.atRest && crateSetDown.host.inIt === 3 && crateSetDown.other.inIt === 3 && crateSetDown.host.ownerId === ids.host && crateSetDown.host.heldById === 0 &&
+      crateSetDown.host.things.every((thing, index) => Math.hypot(thing.x - crateSetDown.other.things[index].x, thing.y - crateSetDown.other.things[index].y, thing.z - crateSetDown.other.things[index].z) < 0.03) &&
+      Math.hypot(crateSetDown.host.x - crateSetDown.other.x, crateSetDown.host.y - crateSetDown.other.y, crateSetDown.host.z - crateSetDown.other.z) < 0.03, crateSetDown);
+    await a.evaluate(() => window.undoSlowLine());
+    await pause(800); // (what was still on its way has arrived)
+  }
+  for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } }, crateIds[0] || []);
+  for (const page of [a, b]) await removeTestObjectKinds(page, TEST_KINDS_OF_THIS_SUITE); // (what of them still lies about keeps working: it holds its kind itself)
 
   // ---- A fuel can: one can, one tank, in both games ----
   // (This station has no generator with an empty tank, so the tank is this suite's own: a place on the floor of
@@ -784,7 +863,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     return { x: spot.x, z: spot.z, y: d.getFloorHeightAt(spot.x, spot.z) + 1.5 };
   });
   const droppedIds = [];
-  for (const page of [a, b]) droppedIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('crate', spot.x, spot.y, spot.z, 0).id, dropSpot));
+  for (const page of [a, b]) await installTestObjectKinds(page, ['testCrate']); // (this suite's own crate: what falls is what the check is about, not the game's crate)
+  for (const page of [a, b]) droppedIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('testCrate', spot.x, spot.y, spot.z, 0).id, dropSpot));
   // Frames are drawn until it is down in both games, and no more: with the menu open a frame takes about five
   // seconds on the machine GitHub runs this on, and forty-five of them every time came to nearly four minutes.
   const hasComeDown = async (page, id) => (await about(page, id)).y < dropSpot.y - 1;
@@ -793,6 +873,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const dropped = { mode: await a.evaluate(() => window.lastReturnDebug.game.mode), from: dropSpot.y, host: await about(a, droppedIds[0]), other: await about(b, droppedIds[1]) };
   check('nor does it stop what lies loose: a crate let go of in the air while the host has the menu open comes down, in both games',
     droppedIds[0] === droppedIds[1] && dropped.mode === 'paused' && dropped.host.y < dropSpot.y - 1 && dropped.other.y < dropSpot.y - 1, dropped);
+  for (const page of [a, b]) await removeTestObjectKinds(page, ['testCrate']); // (the crate itself lies on, holding its kind)
   await a.keyboard.press('Escape');
   await a.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing');
 
@@ -960,15 +1041,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
 
   // Numbers no player could be at. They come from somebody else's browser, so they are held to the station.
   // (The host's game is kept from saying where it really is straight afterwards, which would put it right again.)
+  // (Which way they face is held to between -pi and pi as it comes in. The way they are shown facing is turned towards
+  // that from where it was, over a tenth of a second, and need not stay between those: turned past the back, it is a
+  // full turn further on, which is the same way. So what is checked is that, after half a second, they are shown
+  // facing the way that came in, whole turns aside.)
   await a.evaluate(() => { const d = window.lastReturnDebug; d.together.sendTimer = 1e9; d.together.socket.send(JSON.stringify({ t: 'say', d: { k: 'at', x: 1e300, z: -5, e: 1e9, w: 1e300, p: 9, c: 1, s: 1e9, vx: 1e300, vz: -1e300, r: 1e300 } })); });
   await b.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees > 0);
   const wild = await b.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0];
     for (let count = 0; count < 5; count++) d.updateTogether(0.1);
-    return { x: other.x, z: other.z, eyeY: other.eyeY, yaw: other.yaw, pitch: other.pitch, spread: other.spreadDegrees };
+    return { x: other.x, z: other.z, eyeY: other.eyeY, yaw: other.yaw, towardsYaw: other.toYaw, blend: other.blend, pitch: other.pitch, spread: other.spreadDegrees };
   });
-  check('a position no player could be at is held to the station, and nothing hangs on it',
-    wild.x <= 512 && wild.z === 0 && wild.eyeY <= 100 && Math.abs(wild.yaw) <= Math.PI && wild.pitch <= 1.6 && wild.spread <= 60, wild);
+  const yawApart = Math.atan2(Math.sin(wild.yaw - wild.towardsYaw), Math.cos(wild.yaw - wild.towardsYaw)); // (wrapped to plus or minus pi)
+  check('a position no player could be at is held to the station, and nothing hangs on it: they are shown there, facing the way that came in',
+    wild.x <= 512 && wild.z === 0 && wild.eyeY <= 100 && wild.blend === 1 && Math.abs(yawApart) < 1e-6 && wild.pitch <= 1.6 && wild.spread <= 60, [wild, yawApart]);
 
   // ---- Everyone down ----
   // (The host well away from the other first: it catches everyone within its reach, and both stood in the car.)

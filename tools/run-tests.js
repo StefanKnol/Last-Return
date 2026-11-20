@@ -3,6 +3,7 @@
 //   node tools/run-tests.js                     every suite
 //   node tools/run-tests.js together players    only these
 //   node tools/run-tests.js --no-second-try     a suite that fails has failed
+//   node tools/run-tests.js --other-stations=1000   every seed builds another station than it usually does
 //
 // A suite that fails is run once more, by itself, when it has finished. These suites drive real browsers that
 // draw in software, some of them two or three at once, and on a slow or busy machine a check that waits for
@@ -14,6 +15,12 @@
 // waits on the clock where it should wait on the game, or the game has a fault that only shows now and then.
 // Both are worth finding. (The whole suite is run again, not the one check: a check stands on what the checks
 // before it left behind.)
+//
+// --other-stations is for finding checks that hang on what one particular seed happens to build. It adds its
+// number (1000 if none is given) to every seed a check asks for, so every check gets stations it has never
+// seen: as it would after a new room, a new kind of loose thing or a change to how stations are planned.
+// A check that passes as usual and fails like this was written against one station, not against a rule of
+// the game. (tools/browser-harness.js does the adding.)
 //
 // The run fails (exit code 1) if any suite failed twice, or failed once with --no-second-try.
 const { spawnSync } = require('child_process');
@@ -48,6 +55,13 @@ if (process.argv.indexOf('--plan') >= 0) {
 
 const givenNames = process.argv.slice(2).filter(function (argument) { return argument.indexOf('--') !== 0; });
 const hasSecondTry = process.argv.indexOf('--no-second-try') < 0;
+const otherStationsArgument = process.argv.slice(2).filter(function (argument) { return argument.indexOf('--other-stations') === 0; })[0];
+if (otherStationsArgument !== undefined) {
+  const givenNumber = otherStationsArgument.indexOf('=') >= 0 ? Math.floor(Number(otherStationsArgument.split('=')[1])) : 1000;
+  if (!(givenNumber > 0)) { console.error('--other-stations wants a whole number above 0, for example --other-stations=1000.'); process.exit(1); }
+  process.env.TEST_OTHER_STATIONS = String(givenNumber); // the suites are started with this in their environment
+  console.log('Every seed builds another station than it usually does: ' + givenNumber + ' is added to each.');
+}
 for (const name of givenNames) {
   if (SUITES.indexOf(name) < 0) { console.error('There is no suite called "' + name + '". The suites: ' + SUITES.join(', ') + '.'); process.exit(1); }
 }

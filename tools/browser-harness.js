@@ -55,20 +55,49 @@ function installLetTheBrowserCatchUp() {
 const gamePagePath = path.join(__dirname, '..', 'index.html');
 const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 
-// Runs in the page before any of its own script. The checks are made on stations that are built from the code
-// alone: without the rooms in src/rooms/ and the loose things in src/objects/, which the workshop makes. A seed
-// then builds the same station whatever anybody makes there, and a check that was written against one station
-// (a cover lying where it can be walked over, a crate behind a door) does not have to be looked at again for
-// every new room. The game is told as soon as it puts out its test hook, so that it holds after a reload too.
-// (What the workshop makes is checked where that is the point: generated-station-test.js builds its hundred and
-// twenty stations with all of it, and workshop-test.js makes a room and an object of its own.)
-function installStationsFromCodeAlone() {
+// Runs in the page before any of its own script, and settles two things about the stations the checks build.
+// The game is told as soon as it puts out its test hook, so that both hold after a reload too.
+//
+// From the code alone. The checks are made on stations that are built without the rooms in src/rooms/ and the
+// loose things in src/objects/, which the workshop makes. Whatever anybody makes there, a check that needs a
+// particular situation (a cover lying where it can be walked over, a crate behind a door) finds the same
+// stations to look for it in. (What the workshop makes is checked where that is the point:
+// generated-station-test.js builds its hundred and twenty stations with all of it, and workshop-test.js makes
+// a room and an object of its own.)
+//
+// Other stations. No check may hang on what one particular seed happens to build: a new room in the catalogue,
+// a new kind of loose thing, a change to how stations are planned, and every seed builds another station from
+// then on. To try that without changing the game, `otherStations` (a whole number) is added to every seed a
+// check asks the test hook for, so that every check gets stations it has never seen:
+//     node tools/run-tests.js --other-stations=1000
+// A check that passes as usual and fails like this was written against one station, not against a rule. (Only
+// the stations a check builds through the test hook are other ones. A seed typed into the menu is taken as it is.)
+function installTestStations(testStations) {
   let hook;
   Object.defineProperty(window, 'lastReturnDebug', {
     configurable: true,
     get: function () { return hook; },
-    set: function (value) { hook = value; if (value && value.setWorkshopContentUsed) value.setWorkshopContentUsed(false); }
+    set: function (value) {
+      hook = value;
+      if (!value) return;
+      if (testStations.areFromCodeAlone && value.setWorkshopContentUsed) value.setWorkshopContentUsed(false);
+      if (testStations.otherStations && value.loadStation) {
+        const loadStationAsAsked = value.loadStation;
+        value.loadStation = function (kind, seed) {
+          const asked = Array.prototype.slice.call(arguments);
+          if (kind === 'generated' && typeof seed === 'number') asked[1] = seed + testStations.otherStations;
+          return loadStationAsAsked.apply(null, asked);
+        };
+      }
+    }
   });
+}
+
+// The number to add to every seed (see "Other stations" above), or 0: from `--other-stations` of run-tests.js,
+// or set by hand as TEST_OTHER_STATIONS when one suite is run by itself.
+function readOtherStations() {
+  const number = Math.floor(Number(process.env.TEST_OTHER_STATIONS || 0));
+  return number > 0 ? number : 0;
 }
 
 // `workshopContent: true` leaves the stations as the game builds them, with what the workshop made.
@@ -90,7 +119,7 @@ async function openGame(options) {
   });
   page.on('pageerror', (error) => problems.push('page error: ' + error.message));
   await page.addInitScript(installLetTheBrowserCatchUp);
-  if (!settings.workshopContent) await page.addInitScript(installStationsFromCodeAlone);
+  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations() });
   // `address` opens the game where a server has it (together-test.js); otherwise it is opened from its file.
   await page.goto(settings.address || 'file://' + (settings.dev ? devPagePath : gamePagePath));
   await page.waitForFunction((needsDebugMode) => Boolean(window.lastReturnDebug && (!needsDebugMode || window.lastReturnDebug.setDebugOption)), settings.dev);
