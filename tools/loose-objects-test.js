@@ -226,8 +226,9 @@ function installLab() {
       // within all that too, so nothing of it is further from that centre than that space is across.
       const limits = d.designedObjectLimits, furthestCorner = Math.sqrt(3) * (limits.reach + Math.max(limits.maximumHalf, limits.maximumRadius));
       if (!(prepared.boundsRadius >= prepared.smallestRadius && prepared.boundsRadius <= 2 * furthestCorner) || !(prepared.smallestRadius >= limits.minimumRadius)) wrong.push(kindKey + ': size');
-      // (A scan grenade is a tool, and a scanner is what is left of a player: neither is salvage.)
-      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scan grenade is a tool, a scanner is what is left of a player, and a fuel can with fuel in it is for a
+      // generator: none of them is salvage.)
+      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length, ofTheGame: Object.keys(d.looseObjectKinds).filter((kindKey) => testKinds.indexOf(kindKey) < 0).length };
@@ -1594,7 +1595,8 @@ function installLab() {
       d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
       // What the station asks for: litter and things worth carrying out by how many rooms it has (Kessel-9 counts as nineteen).
       const rooms = d.level.roomCount || 19;
-      const entry = { total: d.stationLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
+      // (What a quest puts out, a fuel can, is counted with them: it lies about the station like the rest.)
+      const entry = { total: d.stationLooseObjects.length + d.questLooseObjects.length, fromQuests: d.questLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
         counts: {}, value: 0, onSurfaces: 0, lowestSurface: 9, cansInHeaps: d.noisyFloorCanHeaps.reduce((sum, heap) => sum + heap.cans.length, 0), problems: d.auditStationLooseObjects(),
         mouths: d.level.ventMouths.length, wanted: { litter: Math.round(rooms * d.tuning.looseLitterPerRoom), valuables: Math.round(rooms * d.tuning.looseValuablesPerRoom) }, notOnASurface: [] };
       // At most this many of the valuables go on tables and shelves (as the game rounds it).
@@ -1643,13 +1645,13 @@ function installLab() {
   for (const stationName of Object.keys(lyingAbout)) {
     const entry = lyingAbout[stationName];
     check(stationName + ': the station has things lying about, each at rest, none in rock, a doorway, a vent, the pit or the lift car',
-      entry.total > 0 && entry.loose === entry.total && entry.asleep === entry.total && entry.problems.length === 0, entry);
-    // Besides the cans of the heaps and the vents' covers: never more litter and things worth carrying out than its
+      entry.total > 0 && entry.fromQuests <= 4 && entry.loose === entry.total && entry.asleep === entry.total && entry.problems.length === 0, entry);
+    // Besides the cans of the heaps, the vents' covers and what a quest put out: never more litter and things worth carrying out than its
     // rooms ask for, and as many where the station has floor enough to put them on (the game stops putting them out
     // when it runs out of floor: these stations have plenty). Of the valuables no more than their share on tables
     // and shelves, and each of those really lies on the top of one, 35 cm high or more (findStationSurfaces).
     // (Which kinds they are is the game's draw, from its tables: that is not looked at here.)
-    const litterAndValuables = entry.total - entry.cansInHeaps - (entry.counts.ventCover || 0);
+    const litterAndValuables = entry.total - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0);
     entry.shortOfWhatTheRoomsAskFor = entry.wanted.litter + entry.wanted.valuables - litterAndValuables;
     check(stationName + ': cans where the draw put cans, litter, and things worth carrying out, as many as its rooms ask for in a station with floor enough, and no more than their share on tables and shelves, each lying on one',
       entry.counts.can >= entry.cansInHeaps && (entry.counts.ventCover || 0) <= entry.mouths && entry.shortOfWhatTheRoomsAskFor === 0 &&

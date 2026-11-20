@@ -83,17 +83,9 @@ function check(description, condition, detail) {
         const plannedTanks = plan.needsItem.map((empty) => (empty ? 'empty' : 'full')).join(), builtTanks = generators.map((generator) => (generator.needsFuel ? 'empty' : 'full')).join();
         if (generators.length !== plan.count || builtTanks !== plannedTanks) result.notAsPlanned.push(size + ' ' + seed + ': planned ' + plannedTanks + ', built ' + builtTanks);
         for (const generator of generators) {
-          if (!generator.needsFuel) continue;
-          const can = d.findQuestItem(generator.fuelCanId), stand = d.findWalkableSpotNear(generator.x, generator.z);
-          d.teleport(stand.x, stand.z, 0);
-          result.canSteps.push(d.stepsFromPlayerTo(can.x, can.z));
+          if (generator.needsFuel) result.cans.push(howPlaced(generator.x, generator.z, d.findQuestItem(generator.fuelCanId), size + ' ' + seed));
         }
-        if (d.level.mission.needsFuel) {
-          const can = d.findQuestItem(d.missionObjectIds.fuelCan), stand = d.findWalkableSpotNear(d.generator.x, d.generator.z);
-          d.teleport(stand.x, stand.z, 0);
-          result.mainCanSteps.push(d.stepsFromPlayerTo(can.x, can.z));
-        }
-        if (d.level.mission.needsFuel) result.mainCans.push(howPlaced(d.generator.x, d.generator.z, d.findInteractable(d.missionObjectIds.fuelCan), size + ' ' + seed));
+        if (d.level.mission.needsFuel) result.mainCans.push(howPlaced(d.generator.x, d.generator.z, d.findQuestItem(d.missionObjectIds.fuelCan), size + ' ' + seed));
       }
       if (built < 16) result.bad.push('only ' + built + ' ' + size + ' stations could be built from seeds 1 to 76');
       // That a size uses its whole range is seen in what the planner picks for 500 seeds (over sixteen stations a
