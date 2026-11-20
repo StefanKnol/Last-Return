@@ -9,6 +9,7 @@
 //   20-workshop.js            this file: the panel, the camera, saving, reloading when the source changes
 //   21-workshop-rooms.js      the room tool
 //   22-workshop-creatures.js  the creature tool
+//   22-workshop-creature-shapes.js  ... and the part of it that makes a creature of your own: shapes on a skeleton
 //   23-workshop-sounds.js     the sound board
 //   24-workshop-objects.js    the object tool
 //

@@ -26,6 +26,7 @@ const renderer = {
   pointProgram: null, solidProgram: null, beamProgram: null, postProgram: null, debugWorldProgram: null,
   pointUniforms: null, solidUniforms: null, beamUniforms: null, postUniforms: null, debugWorldUniforms: null,
   debugCylinderVertexArray: null, debugCylinderVertexCount: 0, debugSphereVertexArray: null, debugSphereVertexCount: 0,
+  debugBoxVertexArray: null, debugBoxVertexCount: 0,
   debugRodVertexArray: null, debugRodVertexCount: 0, debugConeVertexArray: null, debugConeVertexCount: 0,
   debugLineVertexArray: null, debugLineBuffer: null, identityMatrix: writeIdentityMatrix(new Float32Array(16)),
   pointVertexArray: null, pointBuffer: null,
@@ -388,6 +389,23 @@ function buildShadedUnitRodVertices(farRadius) {
   return new Float32Array(vertices);
 }
 
+// A cube from -1 to 1, each side with a shade of its own: lightest on top, darkest underneath.
+function buildShadedUnitCubeVertices() {
+  const vertices = [];
+  for (let axis = 0; axis < 3; axis++) {
+    for (let sign = -1; sign <= 1; sign += 2) {
+      const first = (axis + 1) % 3, second = (axis + 2) % 3;
+      const shade = axis === 1 ? (sign > 0 ? 1 : 0.45) : (axis === 0 ? (sign > 0 ? 0.8 : 0.6) : (sign > 0 ? 0.9 : 0.7));
+      for (const corner of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) {
+        const position = [0, 0, 0];
+        position[axis] = sign; position[first] = corner[0]; position[second] = corner[1];
+        vertices.push(position[0], position[1], position[2], shade, shade, shade);
+      }
+    }
+  }
+  return new Float32Array(vertices);
+}
+
 function buildShadedUnitSphereVertices() {
   const positions = [];
   pushSphereTriangles(positions, { centerX: 0, centerY: 0, centerZ: 0, radius: 1 / 0.97 });
@@ -494,6 +512,9 @@ function initializeRenderer(canvas) {
   renderer.debugRodVertexCount = shadedRod.length / 6;
   renderer.debugConeVertexArray = createPositionAndColorVertexArray(gl, shadedCone, gl.STATIC_DRAW).vertexArray;
   renderer.debugConeVertexCount = shadedCone.length / 6;
+  const shadedCube = buildShadedUnitCubeVertices();
+  renderer.debugBoxVertexArray = createPositionAndColorVertexArray(gl, shadedCube, gl.STATIC_DRAW).vertexArray;
+  renderer.debugBoxVertexCount = shadedCube.length / 6;
   const debugLines = createPositionAndColorVertexArray(gl, new Float32Array(DEBUG_MAXIMUM_LINE_VERTICES * 6), gl.DYNAMIC_DRAW);
   renderer.debugLineVertexArray = debugLines.vertexArray;
   renderer.debugLineBuffer = debugLines.buffer;
@@ -908,7 +929,7 @@ function moveBeamLineOriginsToViewmodelLens(camera, eyeX, eyeY, eyeZ) {
 // Frame
 // ---------------------------------------------------------------------------
 
-// Debug mode only. Creatures are normally never drawn; this draws their capsule bodies in flat colours,
+// Debug mode only. Creatures are normally never drawn; this draws their bodies in flat colours,
 // and the coloured lines that show what they can sense and where they are going.
 function drawDebugOverlays(debug) {
   const gl = renderer.gl;
@@ -949,6 +970,28 @@ function drawDebugOverlays(debug) {
             gl.uniformMatrix4fv(renderer.solidUniforms.uMatrix, false, renderer.scratchMatrix);
             gl.drawArrays(gl.TRIANGLES, 0, renderer.debugSphereVertexCount);
           }
+        }
+        // What a creature made in the workshop has on its bones besides capsules.
+        const rods = entry.figure.rods, boxes = entry.figure.boxes;
+        for (let rodIndex = 0; rodIndex < entry.figure.rodCount; rodIndex++) {
+          const offset = rodIndex * FIGURE_ROD_STRIDE, isCone = rods[offset + 7] === 0;
+          writeSegmentMatrix(renderer.modelMatrix, rods[offset], rods[offset + 1], rods[offset + 2], rods[offset + 3], rods[offset + 4], rods[offset + 5], rods[offset + 6]);
+          multiplyMatrices(renderer.scratchMatrix, renderer.viewProjectionMatrix, renderer.modelMatrix);
+          gl.uniformMatrix4fv(renderer.solidUniforms.uMatrix, false, renderer.scratchMatrix);
+          gl.bindVertexArray(isCone ? renderer.debugConeVertexArray : renderer.debugRodVertexArray);
+          gl.drawArrays(gl.TRIANGLES, 0, isCone ? renderer.debugConeVertexCount : renderer.debugRodVertexCount);
+        }
+        for (let boxIndex = 0; boxIndex < entry.figure.boxCount; boxIndex++) {
+          const offset = boxIndex * FIGURE_BOX_STRIDE, model = renderer.modelMatrix;
+          for (let axis = 0; axis < 3; axis++) {
+            const half = boxes[offset + 12 + axis];
+            model[axis * 4] = boxes[offset + 3 + axis * 3] * half; model[axis * 4 + 1] = boxes[offset + 4 + axis * 3] * half; model[axis * 4 + 2] = boxes[offset + 5 + axis * 3] * half; model[axis * 4 + 3] = 0;
+          }
+          model[12] = boxes[offset]; model[13] = boxes[offset + 1]; model[14] = boxes[offset + 2]; model[15] = 1;
+          multiplyMatrices(renderer.scratchMatrix, renderer.viewProjectionMatrix, model);
+          gl.uniformMatrix4fv(renderer.solidUniforms.uMatrix, false, renderer.scratchMatrix);
+          gl.bindVertexArray(renderer.debugBoxVertexArray);
+          gl.drawArrays(gl.TRIANGLES, 0, renderer.debugBoxVertexCount);
         }
       }
     }

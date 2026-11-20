@@ -16,12 +16,9 @@
 // TWEAK: how many parts a workshop object may have, how far from its own origin a part may be (metres), and
 // how thin and how thick a part may be (a radius, or half the size of a box).
 const DESIGNED_OBJECT_LIMITS = { maximumParts: 16, reach: 1, minimumRadius: 0.01, maximumRadius: 0.5, minimumHalf: 0.01, maximumHalf: 0.75 };
-// The parts that are a rod from one place to another, `radius` thick: with round ends, with flat ends, and
-// flat at `from` with a point at `to`.
-const DESIGNED_ROD_SHAPES = ['capsule', 'cylinder', 'cone'];
 
 // What an object has besides its name and its shape. `defaultValue` is used when a file leaves one out.
-// (numberField and the others are in 03-workshop-rooms.js.)
+// (numberField and the others are in 03-workshop-rooms.js, and so is normalizeDesignedPart, which cleans up one part.)
 const DESIGNED_OBJECT_FIELDS = [
   numberField('mass', 'Weight (kg). Heavier swings wider, slows you more, throws shorter, knocks louder', 2, 0.05, 40, 0.05),
   numberField('value', 'Worth, in the station\'s credits. Everything loose is worth something, however little', 10, 1, 500, 1),
@@ -43,34 +40,6 @@ const DESIGNED_OBJECT_STATION_FIELDS = [
   numberField('onASurface', 'Worth carrying out, on a table or shelf (a jar is 5)', 0, 0, 10, 1)
 ];
 
-// A place in an object: three numbers within reach of its origin, to the tenth of a millimetre.
-function normalizeDesignedPlace(source, fallback) {
-  const reach = DESIGNED_OBJECT_LIMITS.reach;
-  return [0, 1, 2].map(function (axis) {
-    return Math.round(normalizeDesignedNumber(Array.isArray(source) ? source[axis] : undefined, fallback[axis], -reach, reach) * 10000) / 10000;
-  });
-}
-
-// Returns a clean copy of one part, or null if it is not a box, a ball, a capsule, a cylinder or a cone.
-function normalizeDesignedPart(source) {
-  const limits = DESIGNED_OBJECT_LIMITS;
-  if (!source || typeof source !== 'object') return null;
-  const radius = function (fallback) { return Math.round(normalizeDesignedNumber(source.radius, fallback, limits.minimumRadius, limits.maximumRadius) * 10000) / 10000; };
-  if (source.shape === 'box') {
-    return { shape: 'box', center: normalizeDesignedPlace(source.center, [0, 0, 0]), half: [0, 1, 2].map(function (axis) {
-      return Math.round(normalizeDesignedNumber(Array.isArray(source.half) ? source.half[axis] : undefined, 0.1, limits.minimumHalf, limits.maximumHalf) * 10000) / 10000;
-    }) };
-  }
-  if (source.shape === 'ball') return { shape: 'ball', center: normalizeDesignedPlace(source.center, [0, 0, 0]), radius: radius(0.08) };
-  if (DESIGNED_ROD_SHAPES.indexOf(source.shape) < 0) return null;
-  const part = { shape: source.shape, from: normalizeDesignedPlace(source.from, [0, -0.1, 0]), to: normalizeDesignedPlace(source.to, [0, 0.1, 0]), radius: radius(source.shape === 'cone' ? 0.08 : 0.05) };
-  // A rod with no length has no direction to be drawn in: it gets a little.
-  if (Math.abs(part.to[0] - part.from[0]) + Math.abs(part.to[1] - part.from[1]) + Math.abs(part.to[2] - part.from[2]) < 0.001) {
-    part.to[1] = part.from[1] + (part.from[1] > 0 ? -0.02 : 0.02);
-  }
-  return part;
-}
-
 // Returns a clean copy of an object file: everything present, in range, and of the right kind.
 // A file written by hand may leave things out; whatever is missing gets its default.
 function normalizeDesignedObject(source, key) {
@@ -80,10 +49,10 @@ function normalizeDesignedObject(source, key) {
   normalizeDesignedFields(object, source, DESIGNED_OBJECT_STATION_FIELDS);
   object.parts = [];
   for (const sourcePart of Array.isArray(source.parts) ? source.parts : []) {
-    const part = normalizeDesignedPart(sourcePart);
+    const part = normalizeDesignedPart(sourcePart, DESIGNED_OBJECT_LIMITS);
     if (part && object.parts.length < DESIGNED_OBJECT_LIMITS.maximumParts) object.parts.push(part);
   }
-  if (object.parts.length === 0) object.parts.push(normalizeDesignedPart({ shape: 'box' }));
+  if (object.parts.length === 0) object.parts.push(normalizeDesignedPart({ shape: 'box' }, DESIGNED_OBJECT_LIMITS));
   return object;
 }
 
