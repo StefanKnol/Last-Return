@@ -123,6 +123,20 @@ const LOOSE_OBJECT_KINDS = {
     use: { prompt: 'Switch the scanner on', promptFor: describeLooseScannerSwitch, button: 'SWITCH', activate: switchLooseScanner },
     update: updateLooseScanner
   },
+  // A survey spool: what Crew 2 recorded, on a reel the size of a fist. What a Survey order is for, and in every
+  // station whether anybody asks for it or not. It is found the first time one of you takes it into the beam
+  // (its log opens, and whatever hangs on finding it happens: noteSpoolFound, 11-game.js), and it counts once it
+  // has been brought to the lift terminal, which takes it (loadSpoolsAtTheTerminal). In between it is a thing
+  // like any other: carried, pocketed, dropped where you die, carried off by a looter. On a Survey order one
+  // that is lost for good is back where it lay.
+  spool: {
+    label: 'survey spool', mass: 0.4, value: 0, material: 'case', loud: 0.9, lies: 'upright', bulky: false, bounce: 0.2, grip: 0.7, pocket: true,
+    parts: [
+      { shape: 'box', center: [0, 0, 0], half: [0.1, 0.07, 0.1] },
+      { shape: 'box', center: [0, -0.075, 0], half: [0.14, 0.012, 0.14] },
+      { shape: 'box', center: [0, 0.075, 0], half: [0.14, 0.012, 0.14] }
+    ]
+  },
   // A fuel can: ten litres of diesel for a generator whose day tank is empty (09-quests.js, "Fuel"). Held
   // against the generator, or set down against it, it runs out into the tank: updateFuelCan below. Full, it is
   // heavy and you cannot run with it. A station only has one where a quest puts it, on a low crate; one that is
@@ -534,6 +548,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
     fuel: kindKey === 'fuelCan' ? 1 : 0, pourSeconds: 0, hasBeenTaken: false,
+    wasFound: false,                    // a survey spool: one of you has had it in the beam (and so read it)
     // Put out by a quest (09-quests.js): the number the quest knows it by, and where it stood, to be put back
     // there if it is lost while it is still needed.
     questObjectId: 0, homeEntry: null,
@@ -2319,6 +2334,22 @@ function addStationLooseObject(kindKey, x, surfaceY, z, yaw, isOnItsSide, alongX
   stationLooseObjects.push({ kindKey: kindKey, x: x, y: surfaceY + getLooseRestHeight(kindKey, orientation) + 0.001, z: z, orientation: orientation, on: on });
 }
 
+// What the rooms of this station put out as loose things themselves: the three survey spools every station
+// has, each where its room has it (addSurveySpool, 03-layout.js). They are part of the map as it was built,
+// like everything else a room puts out, and each knows the object number its quest knows it by.
+const roomLooseObjects = []; // { kindKey, x, y, z, orientation, on: 'surface', questObjectId }
+function addRoomLooseObject(kindKey, x, surfaceY, z, yaw, questObjectId) {
+  const orientation = getLooseRestOrientation(kindKey, yaw, false, false);
+  roomLooseObjects.push({ kindKey: kindKey, x: x, y: surfaceY + getLooseRestHeight(kindKey, orientation) + 0.001, z: z, orientation: orientation, on: 'surface', questObjectId: questObjectId });
+}
+
+// Where the loose thing with this object number was put out, by a room or by a quest: its entry, or null.
+function findLooseThingPutOut(questObjectId) {
+  for (const entry of roomLooseObjects) if (entry.questObjectId === questObjectId) return entry;
+  for (const entry of questLooseObjects) if (entry.questObjectId === questObjectId) return entry;
+  return null;
+}
+
 // What the quests of this station have put out besides (09-quests.js): a fuel can for a generator with an empty
 // tank. The same kind of entry, standing upright on something, with the number its quest knows it by. They are
 // a list of their own because the quests are kept apart from the map: what lies about a station is part of how
@@ -2382,6 +2413,12 @@ function isStationSurfaceClearAt(surface, x, z, halfWidth, height) {
         if (Math.abs(other.centerX - x) < other.boundsHalfX + halfWidth && Math.abs(other.centerZ - z) < other.boundsHalfZ + halfWidth) return false;
       }
     }
+  }
+  // Nor where the room itself has put something loose on it (a survey spool, which is 20 cm from its middle to
+  // a corner): nothing is stood on top of what you came for.
+  for (const entry of roomLooseObjects) {
+    if (entry.y < surface.maximumY - 0.05 || entry.y > surface.maximumY + height + 0.3) continue;
+    if (Math.abs(entry.x - x) < 0.2 + halfWidth && Math.abs(entry.z - z) < 0.2 + halfWidth) return false;
   }
   return true;
 }
@@ -2572,7 +2609,7 @@ function planStationLooseObjects() {
 // Puts the station's loose things out, at rest. Whatever was loose before is cleared away first.
 function spawnStationLooseObjects() {
   clearLooseObjects();
-  for (const entry of stationLooseObjects.concat(questLooseObjects)) {
+  for (const entry of stationLooseObjects.concat(roomLooseObjects, questLooseObjects)) {
     const object = createLooseObject(entry.kindKey, entry.x, entry.y, entry.z, 0);
     setLooseObjectOrientation(object, entry.orientation[0], entry.orientation[1], entry.orientation[2], entry.orientation[3]);
     object.isAsleep = true;
@@ -3368,6 +3405,7 @@ function emptyFuelCan(object) {
 
 // Is this something a quest cannot be finished without? (A fuel can, for as long as there is fuel in it.)
 function isLooseObjectStillNeeded(object) {
+  if (object.kindKey === 'spool') return areSpoolsOnTheOrder(); // (on any other order nobody asks for it: lost is lost)
   return object.kindKey === 'fuelCan' && object.fuel > 0;
 }
 

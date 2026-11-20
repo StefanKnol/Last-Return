@@ -12,7 +12,8 @@
 
 - inventory
   - ~~pockets for the tools: four of them, for scan grenades and first aid kits; R puts away, 4 to 7 take out; dropped where you die~~ (in: 08-pockets.js)
-  - still open: the survey spools (and core samples, crew badges) as things you carry or pocket and bring to the lift
+  - ~~the survey spools as things you carry or pocket and bring to the lift~~ (found when first in the beam, loaded by the terminal out of pockets, beam and off the floor beside it)
+  - still open: core samples and crew badges the same way; a spool the Hollow or a looter does something of its own with
 
 - shop in item collection mode (repo mode)
   - what the tools sell for is set already and is meant to be far below what they cost: a scan grenade 15, a scanner tripod 60, a first aid kit 20

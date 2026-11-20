@@ -53,11 +53,13 @@ function addNote(objectId, x, y, z, yaw) {
   registerInteractable(objectId, x, y, z, 'Read the note', [paper], { mapLabel: 'NOTE' });
 }
 
-function addSurveySpool(objectId, x, y, z, label) {
-  const reelCore = addBoxProp(x, y + 0.07, z, 0.1, 0.07, 0.1, { surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  const reelBase = addBoxProp(x, y + 0.005, z, 0.14, 0.012, 0.14, { yaw: 0.78, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  const reelCap = addBoxProp(x, y + 0.15, z, 0.14, 0.012, 0.14, { yaw: 0.78, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  registerInteractable(objectId, x, y + 0.08, z, 'Take survey spool', [reelCore, reelBase, reelCap], { removeWhenUsed: true, mapLabel: label });
+// A survey spool, lying on whatever is at height `y` there: a loose thing (LOOSE_OBJECT_KINDS.spool,
+// 08-loose-objects.js) that knows the object number its quest knows it by. One of the three a room puts out
+// is part of the map as built; one a quest adds (`isOfAQuest`) is the quest's, like a fuel can.
+function addSurveySpool(objectId, x, y, z, isOfAQuest) {
+  const placed = placePoint(x, z);
+  if (isOfAQuest) addQuestLooseObject('spool', placed[0], y + (placement.offsetY || 0), placed[1], 0.78, objectId);
+  else addRoomLooseObject('spool', placed[0], y + (placement.offsetY || 0), placed[1], 0.78, objectId);
 }
 
 
@@ -114,7 +116,7 @@ function addWinchBreaker(x, z) {
 // A survey spool that is not one of the three with a room of its own: left on a low crate.
 function addLooseSpool(objectId, x, z) {
   addBoxBetween(x - 0.28, 0, z - 0.28, x + 0.28, 0.3, z + 0.28);
-  addSurveySpool(objectId, x, 0.3, z, 'SPOOL');
+  addSurveySpool(objectId, x, 0.3, z, true);
 }
 
 // A crew badge: a hard hat left on a low crate, with the badge clipped to its brim. The badge is what you take.
@@ -426,7 +428,7 @@ function furnishControlRoom(random) {
   addBoxBetween(57.3, 0, 32.2, 57.95, 1.9, 33.4, { surfaceClass: SURFACE_METAL });
   addBoxProp(57.94, 1.5, 34.6, 0.04, 0.4, 0.6, { surfaceClass: SURFACE_METAL, blocksMovement: false });
   addCeilingLamp(53.5, 34.5, 2.8, true);
-  if (isObjectivePlacedInItsUsualRoom('spool1')) addSurveySpool(OBJECT_SPOOL_1, 53.0, 0.77, 34.3, 'SPOOL');
+  if (isObjectivePlacedInItsUsualRoom('spool1')) addSurveySpool(OBJECT_SPOOL_1, 53.0, 0.77, 34.3);
   addWallSign('PUMP CONTROL', 53, 32, WALL_NORTH, { width: 2.4, height: 0.3, centerY: 2.2 });
   if (!placement.isGenerating) addWallSign('DEEP CORRIDOR', 56, 32, WALL_NORTH, { width: 0.95, height: 0.16, centerY: 2.5 });
 }
@@ -509,7 +511,7 @@ function furnishCalibrationStore(random) {
   addTripod(30.4, 14.2);
   addTripod(35.1, 20.6);
   addBoxBetween(31.7, 0, 11.2, 32.3, 0.9, 11.8);
-  addSurveySpool(OBJECT_SPOOL_2, 32.0, 0.9, 11.5, 'SPOOL');
+  addSurveySpool(OBJECT_SPOOL_2, 32.0, 0.9, 11.5);
   addCrate(38.6, 21.9, 0.35, 0.2, 0);
   addCrate(25.0, 21.6, 0.35, -0.3, 0);
   addBoxProp(34.4, 0.03, 13.4, 0.9, 0.02, 0.6, { yaw: 0.4, blocksMovement: false });
@@ -535,7 +537,7 @@ function furnishShaftChamber(random) {
   addPipeAlongZ(7, 10, 1.05, 58.03, 0.022);
   addPipeAlongZ(7, 10, 1.05, 60.97, 0.022);
   addBoxProp(59.5, 0.25, 7.45, 0.3, 0.25, 0.2, { surfaceClass: SURFACE_METAL });
-  addSurveySpool(OBJECT_SPOOL_3, 59.5, 0.5, 7.45, 'SPOOL');
+  addSurveySpool(OBJECT_SPOOL_3, 59.5, 0.5, 7.45);
   addTripod(58.6, 7.7);
   addCylinderProp(AXIS_X, 51.4, 0.6, 12.6, 0.6, 0.35);
   addCylinderProp(AXIS_X, 51.4, 0.6, 12.6, 0.2, 0.45, CLUTTER);
@@ -722,6 +724,7 @@ function auditFacilityLayout() {
     if (index < 0 || field[index] >= NAVIGATION_UNREACHABLE) problems.push(label + ' at ' + x + ',' + z + ' is unreachable');
   };
   for (const interactable of interactables) checkReachable('interactable ' + interactable.objectId, interactable.x, interactable.z);
+  for (const entry of roomLooseObjects) checkReachable('the ' + entry.kindKey + ' ' + entry.questObjectId, entry.x, entry.z); // (the survey spools: loose things, and what you came for)
   for (const door of doors) {
     if (field[tileIndexAt(door.tileX, door.tileZ)] >= NAVIGATION_UNREACHABLE) problems.push('door ' + door.tileX + ',' + door.tileZ + ' is unreachable');
   }

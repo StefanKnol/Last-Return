@@ -917,6 +917,8 @@ function askToAct(action) {
 // The host's game: this is done now, by this one of you. Everyone is told, and it is carried out here.
 function decideAction(actorId, action) {
   if (action.what === 'fall') action.id = looseState.nextId; // a new thing: it gets the same number in every browser, the host's next
+  // The lift terminal takes the spools that have been brought to it. Which those are is said here, once, so that every game loads the same ones.
+  if (action.what === 'use' && action.objectId === OBJECT_LIFT_TERMINAL) action.spools = listSpoolsAtTheTerminal(actorId);
   sayToOthers({ k: 'did', p: actorId, a: action });
   performActionFor(actorId, action);
 }
@@ -924,7 +926,10 @@ function decideAction(actorId, action) {
 // An action as somebody else's browser sent it, checked. Returns it clean, or null.
 function readAction(data) {
   if (!data || typeof data !== 'object') return null;
-  if (data.what === 'use' && Number.isInteger(data.objectId)) return { what: 'use', objectId: data.objectId };
+  if (data.what === 'use' && Number.isInteger(data.objectId)) {
+    const hasSpools = Array.isArray(data.spools) && data.spools.length <= 32 && data.spools.every(Number.isInteger);
+    return hasSpools ? { what: 'use', objectId: data.objectId, spools: data.spools } : { what: 'use', objectId: data.objectId };
+  }
   if (data.what === 'enter' && typeof data.place === 'string' && ZONE_NAMES.indexOf(data.place) >= 0 && data.place !== '') return { what: 'enter', place: data.place };
   if (data.what === 'leaveLift' || data.what === 'ascend' || data.what === 'allDown') return { what: data.what };
   // A scanner where somebody fell, and its restarting.
@@ -975,7 +980,9 @@ function performActionFor(actorId, action) {
 function performAction(action) {
   if (action.what === 'use') {
     const interactable = findInteractableByObjectId(action.objectId);
-    if (interactable && interactable.isAvailable) useInteractable(interactable); // (gone already: somebody was quicker)
+    game.spoolIdsFromTheHost = action.spools || null;
+    try { if (interactable && interactable.isAvailable) useInteractable(interactable); } // (gone already: somebody was quicker)
+    finally { game.spoolIdsFromTheHost = null; }
   } else if (action.what === 'enter') notePlaceEntered(action.place);
   else if (action.what === 'leaveLift') noteLiftLeft();
   else if (action.what === 'ascend') beginAscent();
@@ -1090,6 +1097,8 @@ function performLooseAction(action) {
     if (game.actor) { wakeLooseObject(object); wakeLooseObjectsTouching(object); }
     else if (!pickUpLooseObjectNow(object, action.isByButton)) askToAct({ what: 'release', id: object.id }); // (your beam has something else by now)
     if (object.heldById) noteWhatRestsOnLooseObject(object); // what is in a crate goes where the crate goes, from now
+    // A survey spool that nobody has had in the beam before is found now, by whoever took it (11-game.js).
+    if (object.kindKey === 'spool' && (game.actor || looseState.held === object)) noteSpoolFound(object);
     // Yours, and with things in it that another browser moves: they are asked for now, while they count as
     // riding, and not at the next turn of the clock that asks (claimWhatRidesInYourBeam).
     if (!game.actor && object.heldById && isWorldShared()) { noteRidersForHandOver(object); claimWhatRidesInYourBeam(); }
