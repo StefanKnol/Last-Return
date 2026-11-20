@@ -4,7 +4,7 @@ const path = require('path');
 const http = require('http');
 const { WebSocket } = require('ws');
 const { startServer } = require('../server/server.js');
-const { openGame, startGame } = require('./browser-harness.js');
+const { openGame, startGame, countMouseMoves } = require('./browser-harness.js');
 const { TEST_OBJECT_KINDS, installTestObjectKinds, removeTestObjectKinds } = require('./test-objects.js');
 
 // The station the lobby goes down into. Any seed will do: the checks find in it what they need (a door, a stretch
@@ -204,6 +204,9 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   // once, and how long a frame takes goes by how many dots of screen it has. At the usual 1280 by 720, with three
   // browsers open, a frame of a page that is playing was measured at four to nineteen seconds; on the slower of
   // GitHub's machines a single picture then took longer than the thirty seconds it is given.)
+  // (Those seconds were measured in Playwright's "headless shell", and most of them were not drawing: see "Which
+  // browser the suites run in" in browser-harness.js. The windows have stayed small all the same. A frame still
+  // costs what its dots cost, and there is still nothing here that looks at one.)
   const first = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
   const second = await openGame({ address: address, width: WINDOW_WIDTH, height: WINDOW_HEIGHT });
   const a = first.page, b = second.page;
@@ -244,6 +247,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await b.keyboard.press('Enter'); // past the intro
   await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing');
   check('and is not told that the mouse cannot be captured, for want of a click', !(await b.textContent('#hud-messages')).includes('Mouse capture is not available'));
+  // The host's page holds the mouse now: it took it on "Begin descent". Nobody is moving it, so nothing should
+  // be arriving. This is a check on the browser the suite runs in, not on the game, and it is here because of
+  // what it cost when it did not hold: Playwright's "headless shell" sends a page that holds the mouse 80,000
+  // to 90,000 moves a second, and with three browsers playing at once this suite then took 14 GB and lost a
+  // browser to the kernel. browser-harness.js has the whole of it, and starts the real browser instead.
+  const stillMouse = await countMouseMoves(a, 1000);
+  check('the host\'s page holds the mouse, and with nobody moving it no mouse moves arrive', stillMouse.isMouseHeld && stillMouse.moves < 100, stillMouse);
   const station = async (page) => page.evaluate(() => { const d = window.lastReturnDebug; return { seed: d.level.seed, map: d.level.mapFingerprint, order: d.level.workOrder, difficulty: d.game.difficulty.label, players: d.players.length }; });
   const stationA = await station(a), stationB = await station(b);
   check('both are in the same station, built the same to the tile, at the host\'s threat level',
