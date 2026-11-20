@@ -1,4 +1,4 @@
-// Checks the workshop (`npm run dev`): the room tool, the creature tool, the object tool, saving into src/ and reloading
+// Checks the workshop (`npm run dev`): the room tool, the creature tool (and a creature made in it), the object tool, saving into src/ and reloading
 // when the source changes. It works on a copy of src/ in a temporary folder, so nothing here touches the project.
 const fs = require('fs');
 const os = require('os');
@@ -47,6 +47,11 @@ function checkSourcePatching() {
   const objectText = formatRoomFile({ key: 'x', label: 'x', mass: 2, parts: [{ shape: 'box', center: [0, 0, 0], half: [0.1, 0.1, 0.1] }, { shape: 'ball', center: [0, 0.2, 0], radius: 0.05 }] });
   check('an object file is laid out the same way, one part per line',
     JSON.parse(objectText).parts[1].radius === 0.05 && objectText.split('\n').filter((line) => line.includes('"shape"')).length === 2, objectText);
+  const creatureText = formatRoomFile({ key: 'x', label: 'x', skeleton: 'person', proportions: { thigh: 0.5, shin: 0.4 }, hides: ['head', 'neck'],
+    parts: [{ bone: 'head', mirror: false, shape: 'box', center: [0, 0, 0], half: [0.1, 0.1, 0.1] }, { bone: 'thighLeft', mirror: true, shape: 'cone', from: [0, 0, 0], to: [0, -0.2, 0], radius: 0.05 }] });
+  check('a creature file is laid out the same way, one shape on its bones per line, its proportions on one',
+    JSON.parse(creatureText).parts[1].bone === 'thighLeft' && JSON.parse(creatureText).hides.length === 2 && creatureText.split('\n').filter((line) => line.includes('"bone"')).length === 2 &&
+    creatureText.split('\n').filter((line) => line.includes('"thigh"')).length === 1, creatureText);
 }
 
 (async () => {
@@ -57,10 +62,12 @@ function checkSourcePatching() {
   fs.cpSync(path.join(projectRoot, 'src'), path.join(root, 'src'), { recursive: true });
   fs.rmSync(path.join(root, 'src', 'rooms'), { recursive: true, force: true }); // start without workshop rooms
   fs.rmSync(path.join(root, 'src', 'objects'), { recursive: true, force: true }); // and without workshop objects
+  fs.rmSync(path.join(root, 'src', 'creatures'), { recursive: true, force: true }); // and without workshop creatures
   fs.mkdirSync(path.join(root, 'assets'));
   const figuresPath = path.join(root, 'src', 'js', '04-figures.js');
   const roomPath = path.join(root, 'src', 'rooms', 'testRoom.json');
   const objectPath = path.join(root, 'src', 'objects', 'testThing.json');
+  const creaturePath = path.join(root, 'src', 'creatures', 'testCreature.json');
 
   const server = await startDevServer({ root: root, port: 0, quiet: true });
   const browser = await launchBrowser(); // (the same browser as every other suite: browser-harness.js says which, and why)
@@ -401,6 +408,190 @@ function checkSourcePatching() {
     const thighNowIn = (figureName, value) => new RegExp('FIGURE_PROPORTIONS_' + figureName + ' = \\{[^}]*thigh: ' + String(value).replace('.', '\\.') + ',').test(figuresWithPlayer);
     check('"Write to file" puts a player\'s number into FIGURE_PROPORTIONS_PLAYER and nowhere else',
       thighNowIn('PLAYER', playerThigh) && thighNowIn('HOLLOW', longThigh) && thighNowIn('DUMMY', dummyThigh), playerThigh);
+
+    // --- a creature of your own: a skeleton with shapes fixed to its bones ---
+    // (With the lights on and as a solid body, for the same reason as above.)
+    await turnLightsOn();
+    await page.selectOption('#workshop-creature-view', 'solid');
+    await page.selectOption('#workshop-creature', 'dummy');
+    await frames(4);
+    // What the body on screen is made of, and where its shapes are as the body itself sees them: to its right,
+    // up, and to its front, from where it stands. (So that a check does not hang on which way it happens to face.)
+    const creatureBody = () => inPage(() => {
+      const debug = window.lastReturnDebug, state = debug.creatureWorkshop, figure = state.figure, design = state.design;
+      const rightX = Math.cos(figure.yaw), rightZ = Math.sin(figure.yaw), forwardX = Math.sin(figure.yaw), forwardZ = -Math.cos(figure.yaw);
+      const seenByItself = (x, y, z) => [(x - figure.x) * rightX + (z - figure.z) * rightZ, y - figure.y, (x - figure.x) * forwardX + (z - figure.z) * forwardZ].map((value) => Math.round(value * 1000) / 1000);
+      const rods = [], boxes = [];
+      for (let index = 0; index < figure.rodCount; index++) rods.push({ from: seenByItself(figure.rods[index * 8], figure.rods[index * 8 + 1], figure.rods[index * 8 + 2]), to: seenByItself(figure.rods[index * 8 + 3], figure.rods[index * 8 + 4], figure.rods[index * 8 + 5]), farRadius: figure.rods[index * 8 + 7] });
+      for (let index = 0; index < figure.boxCount; index++) boxes.push({ center: seenByItself(figure.boxes[index * 15], figure.boxes[index * 15 + 1], figure.boxes[index * 15 + 2]) });
+      return {
+        kind: state.kind, behaviour: state.behaviour, capsules: figure.capsuleCount, rods: rods, boxes: boxes,
+        height: Math.round((figure.boundsCenterY - figure.y) * 200) / 100, holdsScanner: figure.scannerCapsule >= 0, squat: Math.round(figure.pose.squat * 100) / 100,
+        key: design ? design.key : null, savedKey: design ? design.savedKey : null, isDirty: design ? design.isDirty : null, selected: design ? design.selectedIndex : null, bone: design ? design.bone : null,
+        skeleton: design ? design.creature.skeleton : null, parts: design ? design.creature.parts : null, hides: design ? design.creature.hides : null,
+        thigh: figure.proportions.thigh, behaviours: Array.from(document.querySelectorAll('#workshop-creature-behaviour option')).map((option) => option.value)
+      };
+    });
+    const stillBody = await creatureBody();
+    await page.click('#workshop-new-creature');
+    await frames(4);
+    const newCreature = await creatureBody();
+    check('"New creature" opens a creature of your own: the skeleton of a person, standing, with every bone of it and nothing fixed to them yet, and no file',
+      newCreature.kind === 'workshopDraft' && newCreature.skeleton === 'person' && newCreature.behaviour === 'standing' && newCreature.capsules === stillBody.capsules && stillBody.capsules > 10 &&
+      newCreature.parts.length === 0 && newCreature.hides.length === 0 && newCreature.savedKey === null && newCreature.isDirty, [stillBody.capsules, newCreature]);
+
+    // A box for a head: fixed to the head bone, and the skeleton's own head left out.
+    await page.selectOption('#workshop-creature-bone', 'head');
+    await page.selectOption('#workshop-add-shape', 'box');
+    await page.click('#workshop-add-part');
+    await frames(2);
+    await page.click('#workshop-bone-shown');
+    await frames(2);
+    const boxHeaded = await creatureBody();
+    check('a box is fixed to the head and the skeleton\'s own head is left out: the body has a box where its head was, and one capsule fewer',
+      boxHeaded.boxes.length === 1 && boxHeaded.capsules === newCreature.capsules - 1 && boxHeaded.hides.join() === 'head' && boxHeaded.parts[0].bone === 'head' && boxHeaded.selected === 0 &&
+      boxHeaded.boxes[0].center[1] > boxHeaded.height * 0.8 && Math.abs(boxHeaded.boxes[0].center[0]) < 0.01, boxHeaded);
+    // The scanner lands on it: a pulse from the camera at the middle of the box is stopped by the body, short of that middle.
+    const scanOfBox = await inPage(() => {
+      const debug = window.lastReturnDebug, figure = debug.creatureWorkshop.figure, player = debug.player;
+      const eye = [player.x, player.floorY + player.eyeHeight, player.z], to = [figure.boxes[0], figure.boxes[1], figure.boxes[2]];
+      const away = Math.hypot(to[0] - eye[0], to[1] - eye[1], to[2] - eye[2]);
+      const wasHit = debug.castScannerRay(eye[0], eye[1], eye[2], (to[0] - eye[0]) / away, (to[1] - eye[1]) / away, (to[2] - eye[2]) / away, 40);
+      return { wasHit: wasHit, isTheBody: debug.rayHit.figure === figure, distance: debug.rayHit.distance, away: away, half: figure.boxes[12] };
+    });
+    check('a scanner pulse at the box lands on it: a box on a bone is as much the body as a capsule is',
+      scanOfBox.wasHit && scanOfBox.isTheBody && scanOfBox.distance < scanOfBox.away && scanOfBox.distance > scanOfBox.away - scanOfBox.half * 2, scanOfBox);
+
+    // A cone on the left forearm, with both sides alike: the right forearm gets its mirror image.
+    await page.selectOption('#workshop-creature-bone', 'foreArmLeft');
+    await page.selectOption('#workshop-add-shape', 'cone');
+    await page.click('#workshop-add-part');
+    await frames(2);
+    const coned = await creatureBody();
+    const leftCone = coned.rods.filter((rod) => rod.from[0] < 0)[0], rightCone = coned.rods.filter((rod) => rod.from[0] > 0)[0];
+    check('a cone fixed to the left forearm has its mirror image on the right one: the same height, as far to the other side',
+      coned.rods.length === 2 && Boolean(leftCone && rightCone) && leftCone.farRadius === 0 && coned.parts[1].mirror === true && coned.parts[1].bone === 'foreArmLeft' &&
+      Math.abs(leftCone.from[0] + rightCone.from[0]) < 0.002 && Math.abs(leftCone.from[1] - rightCone.from[1]) < 0.002 && Math.abs(leftCone.to[1] - rightCone.to[1]) < 0.002, coned);
+    // A shape turns with its bone: with the arms raised by hand, the cones are where the forearms now are.
+    await page.selectOption('#workshop-creature-behaviour', 'manual');
+    await frames(2);
+    await inPage(() => { window.lastReturnDebug.creatureWorkshop.figure.pose.armRaise = 1.5; });
+    await frames(2);
+    const armsRaised = await creatureBody();
+    const raisedCone = armsRaised.rods.filter((rod) => rod.from[0] < 0)[0];
+    check('a shape turns with its bone: with the arms raised forward the cones are higher and out in front, and still as long',
+      Boolean(raisedCone) && raisedCone.from[1] > leftCone.from[1] + 0.1 && raisedCone.from[2] > leftCone.from[2] + 0.1 &&
+      Math.abs(Math.hypot(raisedCone.to[0] - raisedCone.from[0], raisedCone.to[1] - raisedCone.from[1], raisedCone.to[2] - raisedCone.from[2]) -
+        Math.hypot(leftCone.to[0] - leftCone.from[0], leftCone.to[1] - leftCone.from[1], leftCone.to[2] - leftCone.from[2])) < 0.003, [leftCone, raisedCone]);
+    await page.selectOption('#workshop-creature-behaviour', 'standing');
+    await frames(2);
+
+    // Taking hold of a shape in the view: a click on the box selects it, a drag moves it along its bone's own directions.
+    const boxOnScreen = await inPage(() => {
+      const debug = window.lastReturnDebug, figure = debug.creatureWorkshop.figure, matrix = debug.renderer.viewProjectionMatrix, bounds = debug.renderer.canvas.getBoundingClientRect();
+      const x = figure.boxes[0], y = figure.boxes[1], z = figure.boxes[2];
+      const clipX = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12], clipY = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13], clipW = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+      return [bounds.left + (clipX / clipW * 0.5 + 0.5) * bounds.width, bounds.top + (0.5 - clipY / clipW * 0.5) * bounds.height];
+    });
+    await page.mouse.click(boxOnScreen[0], boxOnScreen[1]);
+    await frames(2);
+    const boxClicked = await creatureBody();
+    await page.mouse.move(boxOnScreen[0], boxOnScreen[1]);
+    await page.mouse.down();
+    await page.mouse.move(boxOnScreen[0] + 5, boxOnScreen[1] - 20, { steps: 3 });
+    await page.mouse.move(boxOnScreen[0] + 10, boxOnScreen[1] - 70, { steps: 5 });
+    await page.mouse.up();
+    await frames(2);
+    const boxDragged = await creatureBody();
+    check('a click on the box in the view selects it, and dragging it upwards moves it up its bone, on whole centimetres',
+      boxClicked.selected === 0 && boxClicked.bone === 'head' && boxDragged.selected === 0 && boxDragged.parts[0].center[1] > boxHeaded.parts[0].center[1] + 0.03 &&
+      boxDragged.boxes[0].center[1] > boxHeaded.boxes[0].center[1] + 0.03 && Math.abs(boxDragged.parts[0].center[1] * 100 - Math.round(boxDragged.parts[0].center[1] * 100)) < 1e-6,
+      [boxHeaded.parts[0], boxDragged.parts[0], boxOnScreen]);
+    await page.keyboard.press('Control+z');
+    await frames(2);
+    const dragUndone = await creatureBody();
+    check('Ctrl+Z puts the box back where it was', dragUndone.parts[0].center[1] === boxHeaded.parts[0].center[1] && dragUndone.parts.length === 2, dragUndone.parts[0]);
+
+    // Its proportions are its own: a longer thigh is a taller body, and the game's creatures are not touched.
+    const ownThigh = Math.round((dragUndone.thigh + 0.2) * 1000) / 1000;
+    await setNumber('workshop-proportion-thigh', ownThigh);
+    await frames(2);
+    const longLegged = await creatureBody();
+    longLegged.stillThigh = await inPage(() => window.lastReturnDebug.figureKinds.dummy.proportions.thigh);
+    check('a proportion slider changes the creature\'s own body and nobody else\'s', longLegged.thigh === ownThigh && longLegged.height > dragUndone.height + 0.1 && longLegged.stillThigh === stillBody.thigh,
+      [dragUndone.height, longLegged.height, longLegged.stillThigh]);
+
+    // --- saving: a file appears, the page reloads into the saved creature, and it is a kind of figure like any other ---
+    await page.fill('#workshop-creature-key', 'testCreature');
+    await page.locator('#workshop-creature-key').blur();
+    await page.fill('#workshop-creature-label', 'test creature');
+    await waitForReload(() => page.click('#workshop-save-creature'));
+    await frames(4);
+    const savedCreature = fs.existsSync(creaturePath) ? JSON.parse(fs.readFileSync(creaturePath, 'utf8')) : null;
+    check('saving writes src/creatures/testCreature.json: its skeleton, its proportions, the bone that is left out and the two shapes with the bones they are on',
+      savedCreature !== null && savedCreature.label === 'test creature' && savedCreature.skeleton === 'person' && savedCreature.playerSkin === false && savedCreature.proportions.thigh === ownThigh &&
+      savedCreature.hides.join() === 'head' && savedCreature.parts.length === 2 && savedCreature.parts[0].shape === 'box' && savedCreature.parts[0].bone === 'head' &&
+      savedCreature.parts[1].shape === 'cone' && savedCreature.parts[1].bone === 'foreArmLeft' && savedCreature.parts[1].mirror === true && savedCreature.key === undefined, savedCreature);
+    const afterCreatureSave = await creatureBody();
+    afterCreatureSave.made = await inPage(() => {
+      // The game's own way of making one: a body of that kind, built where it stands.
+      const debug = window.lastReturnDebug, kind = debug.figureKinds.testCreature;
+      if (!kind) return null;
+      const figure = debug.createFigureOfKind('testCreature');
+      figure.x = 46; figure.z = 46;
+      debug.updateFigureCapsules(figure);
+      return { isDesigned: kind.isDesigned === true, capsules: figure.capsuleCount, rods: figure.rodCount, boxes: figure.boxCount, listed: Array.from(document.querySelectorAll('#workshop-creature option')).map((option) => option.value) };
+    });
+    check('after the reload the workshop is open on the saved creature, with nothing unsaved, and the game makes one like any other kind: createFigureOfKind gives the same body',
+      afterCreatureSave.key === 'testCreature' && afterCreatureSave.savedKey === 'testCreature' && afterCreatureSave.isDirty === false && afterCreatureSave.made !== null && afterCreatureSave.made.isDesigned &&
+      afterCreatureSave.made.capsules === afterCreatureSave.capsules && afterCreatureSave.made.rods === 2 && afterCreatureSave.made.boxes === 1 &&
+      afterCreatureSave.made.listed.indexOf('testCreature') === 0 && afterCreatureSave.made.listed.indexOf('hollow') > 0, afterCreatureSave);
+
+    // --- a body a player can wear: the same creature, made as tall as a player is, with the scanner in its hand ---
+    await page.click('#workshop-creature-playerSkin');
+    await frames(8);
+    const wornStanding = await creatureBody();
+    await page.selectOption('#workshop-creature-behaviour', 'crouchedScanning');
+    await frames(30);
+    const wornCrouched = await creatureBody();
+    const playerHeights = await inPage(() => ({ standing: window.lastReturnDebug.tuning.playerHeight, crouching: window.lastReturnDebug.tuning.playerHeightCrouching }));
+    check('made a body a player can wear, it is posed as a player is: as tall as the game has you be standing and crouched, the scanner in its hand, its box and its cones still on it and made smaller with it',
+      wornStanding.holdsScanner && wornStanding.behaviours.indexOf('crouchedScanning') >= 0 && Math.abs(wornStanding.height - playerHeights.standing) < 0.011 &&
+      wornCrouched.squat > 0.2 && Math.abs(wornCrouched.height - playerHeights.crouching) < 0.015 &&
+      wornStanding.boxes.length === 1 && wornStanding.rods.length === 2 && wornStanding.boxes[0].center[1] < afterCreatureSave.boxes[0].center[1] - 0.1 && wornStanding.boxes[0].center[1] > playerHeights.standing * 0.7,
+      [playerHeights, wornStanding, wornCrouched, afterCreatureSave.boxes]);
+    await page.selectOption('#workshop-creature-behaviour', 'standing');
+    await waitForStoredWork('the unsaved change to the creature is written to the browser\'s storage',
+      (storedWork) => Boolean(storedWork.creatures && storedWork.creatures.design && storedWork.creatures.design.draft) && storedWork.creatures.design.draft.playerSkin === true && storedWork.creatures.behaviour === 'standing');
+    await waitForReload(() => page.reload());
+    await frames(4);
+    const wornAfterReload = await creatureBody();
+    check('a reload keeps the creature and the unsaved change to it', wornAfterReload.key === 'testCreature' && wornAfterReload.isDirty === true && wornAfterReload.holdsScanner, wornAfterReload);
+    await waitForReload(() => page.click('#workshop-save-creature'));
+    await frames(4);
+    const playerBodies = await inPage(() => window.lastReturnDebug.getPlayerBodyKinds());
+    check('saved, it is one of the bodies a player can be given, after the one written as code', playerBodies.join() === 'player,testCreature', playerBodies);
+
+    // --- a copy of a kind written as code: the Hollow's skeleton and proportions, to make another creature from ---
+    await page.selectOption('#workshop-creature', 'hollow');
+    await frames(4);
+    const theHollow = await creatureBody();
+    await page.click('#workshop-copy-creature');
+    await frames(4);
+    const hollowCopy = await creatureBody();
+    await page.selectOption('#workshop-creature-bone', 'jaw');
+    await page.click('#workshop-bone-shown');
+    await frames(2);
+    await page.click('#workshop-leave-out-all');
+    await frames(2);
+    const hollowBare = await creatureBody();
+    check('"Copy of this" on the Hollow makes a creature with its skeleton and its proportions; it can be given something to do the Hollow does, and all of its skeleton can be left out',
+      hollowCopy.kind === 'workshopDraft' && hollowCopy.skeleton === 'hollow' && hollowCopy.capsules === theHollow.capsules && hollowCopy.thigh === theHollow.thigh &&
+      hollowCopy.behaviours.indexOf('hunt') >= 0 && hollowCopy.savedKey === null && hollowBare.capsules === 0 && hollowBare.hides.length === theHollow.capsules, [theHollow.capsules, hollowCopy, hollowBare.hides.length]);
+    // (Back to a kind written as code, throwing the copy away: the checks below leave the tool as they found it.)
+    await page.selectOption('#workshop-creature', 'hollow');
+    await frames(4);
+    check('the copy is thrown away when another creature is chosen', (await creatureBody()).kind === 'hollow');
 
     // --- the object tool: a kind written as code to look at, then a new object put together from basic forms ---
     await page.click('#workshop-tab-objects');

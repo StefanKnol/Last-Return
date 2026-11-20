@@ -13,7 +13,9 @@
 
 - Even better models
   - player models (overdone and funny, only visible when scanning)
-  - Workshop creature builder, creating new creatures and shaping them (with more body options)
+    - a body a player can wear is made in the workshop now (creature tool, "A body a player can wear"); still to do: choosing one, and telling the others which
+  - ~~Workshop creature builder, creating new creatures and shaping them (with more body options)~~ (shapes on a skeleton's bones: boxes, balls, capsules, cylinders, cones)
+    - more skeletons than the two there are (four legs, no legs, a small thing)
     - generalize creature movements, crouching, etc
     - aggression levels
     - behavior

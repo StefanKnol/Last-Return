@@ -2,10 +2,21 @@
 // Figures: bodies built from capsules (a capsule is a rod with rounded ends).
 // They are never drawn. The only trace of one is the points a scan leaves on it,
 // frozen where it stood at that moment. Stop scanning and there is nothing to see.
+//
+// A body is a skeleton with shapes on it. The skeleton is one of the body plans below: it says where the joints
+// are for a pose, and puts a capsule on every bone. That is all the Hollow, a Still and a player are made of.
+// A creature made in the workshop (04-workshop-creatures.js) can have more: boxes, balls, capsules, cylinders
+// and cones fixed to its bones, which turn with them, and any of the skeleton's own capsules left out.
 // ---------------------------------------------------------------------------
 
-const FIGURE_MAXIMUM_CAPSULES = 26;
+const FIGURE_MAXIMUM_BONES = 26;   // the most capsules a skeleton puts on its own bones
+const FIGURE_MAXIMUM_PARTS = 24;   // TWEAK: how many shapes a creature may have fixed to its bones. Each may have a mirror image.
+const FIGURE_MAXIMUM_CAPSULES = FIGURE_MAXIMUM_BONES + FIGURE_MAXIMUM_PARTS * 2;
 const FIGURE_CAPSULE_STRIDE = 7; // startX, startY, startZ, endX, endY, endZ, radius
+// Shapes fixed to bones that are not capsules: a rod with flat ends (a cylinder, or a cone if it comes to a
+// point), and a box that lies any way.
+const FIGURE_ROD_STRIDE = 8;     // fromX, fromY, fromZ, toX, toY, toZ, radius at `from`, radius at `to`
+const FIGURE_BOX_STRIDE = 15;    // centre (3), which way its own x, y and z point (3 each), half its size along each (3)
 
 // TWEAK: body shapes, in metres. Lengths are bone lengths, radii are how thick each part is.
 // The Hollow: a hunched thing with a long neck, a hanging jaw, arms that reach its knees and three long
@@ -44,15 +55,20 @@ const FIGURE_PROPORTIONS_PLAYER = {
 //   2. add an entry below under that same name.
 // That is all it takes for it to have a body: createFigureOfKind('yourKind') makes one, and the workshop's
 // creature tool lists it by itself, with a slider for every number, "Posed by hand", and "Write to file".
+// Or make it in the workshop ("New creature"): such a creature is a file in src/creatures/, and joins this
+// list when the page loads (04-workshop-creatures.js). It can have more than capsules on its bones.
 // What it does in a station is not said here: that is code, the way the Hollow and the Stills are code in
 // 08-entities.js and the other players in 11-together.js.
 //
 //   label             what the workshop calls it
 //   proportions       its numbers, and `proportionsName`, what that object is called in this file (the workshop
 //                     writes changed numbers back under that name)
-//   bodyPlan          how the proportions are put together as capsules: 'person' (upright, two arms, two legs, a
-//                     ball at every joint: a Still, a player) or 'hollow' (hunched, long neck, jaw, three fingers).
-//                     A body of another make is a function like buildPersonCapsules, added to FIGURE_BODY_PLANS.
+//   bodyPlan          its skeleton: how the proportions are put together as capsules. 'person' (upright, two arms,
+//                     two legs, a ball at every joint: a Still, a player) or 'hollow' (hunched, long neck, jaw,
+//                     three fingers). A body of another make is a function like buildPersonCapsules, added to
+//                     FIGURE_BODY_PLANS, and its bones in FIGURE_SKELETONS.
+//   shape             (only creatures made in the workshop) what is fixed to its bones and which of the skeleton's
+//                     own capsules are left out: see prepareFigureShape.
 //   surfaceClass      the colour a scan gives it (02-world.js), and `imprintTuningKey`, the number in 00-config.js
 //                     that says how long points left on it stay
 //   color             what the workshop and debug mode draw it in: red, green, blue, each 0 to 1
@@ -65,6 +81,45 @@ const FIGURE_PROPORTIONS_PLAYER = {
 // ---------------------------------------------------------------------------
 
 const FIGURE_BODY_PLANS = { hollow: buildHollowCapsules, person: buildPersonCapsules };
+
+// The bones of each skeleton: every capsule a body plan puts down has a name, and that is what a shape is fixed
+// to and what is left out. `rest` is which way a bone points when the creature stands straight with its arms
+// hanging: up, down, forward (a foot), across (the bar between the shoulders or the hips, from its left to its
+// right), or none (a joint: a ball).
+// A shape on a bone is given in the bone's own directions, in metres from where the bone starts (from the
+// middle of a bar): x, y and z. Standing straight these are the creature's own: x to its right, y up, z the way
+// it faces. So a shape is put where it should be on a body that stands at rest, and when the bone turns (a knee
+// bends, a head tilts) the shape turns with it. See computeFigureBoneFrame.
+function listFigureBones(centreBones, sideBones) {
+  const bones = {};
+  for (const bone of centreBones) bones[bone[0]] = { label: bone[1], rest: bone[2], partner: '' };
+  for (const side of ['Left', 'Right']) {
+    for (const bone of sideBones) {
+      bones[bone[0] + side] = { label: side.toLowerCase() + ' ' + bone[1], rest: bone[2], partner: bone[0] + (side === 'Left' ? 'Right' : 'Left') };
+    }
+  }
+  return bones;
+}
+const FIGURE_SKELETONS = {
+  person: {
+    label: 'A person: upright, two arms, two legs, a ball at every joint',
+    bones: listFigureBones(
+      [['belly', 'belly', 'up'], ['chest', 'chest', 'up'], ['neck', 'neck', 'up'], ['head', 'head', 'up'],
+        ['shoulders', 'shoulders (the bar between them)', 'across'], ['hips', 'hips (the bar between them)', 'across']],
+      [['upperArm', 'upper arm', 'down'], ['foreArm', 'forearm', 'down'], ['hand', 'hand', 'down'],
+        ['shoulderJoint', 'shoulder (the ball)', 'none'], ['elbowJoint', 'elbow (the ball)', 'none'],
+        ['thigh', 'thigh', 'down'], ['shin', 'shin', 'down'], ['foot', 'foot', 'forward'], ['kneeJoint', 'knee (the ball)', 'none']])
+  },
+  hollow: {
+    label: 'The Hollow\'s: hunched, a long neck, a hanging jaw, three long fingers',
+    bones: listFigureBones(
+      [['lowerBack', 'lower back', 'up'], ['upperBack', 'upper back', 'up'], ['neck', 'neck', 'up'], ['head', 'head', 'up'], ['jaw', 'jaw', 'down'],
+        ['shoulders', 'shoulders (the bar between them)', 'across'], ['hips', 'hips (the bar between them)', 'across']],
+      [['upperArm', 'upper arm', 'down'], ['foreArm', 'forearm', 'down'], ['hand', 'hand', 'down'],
+        ['fingerOuter', 'outer finger', 'down'], ['fingerMiddle', 'middle finger', 'down'], ['fingerInner', 'inner finger', 'down'],
+        ['thigh', 'thigh', 'down'], ['shin', 'shin', 'down'], ['foot', 'foot', 'forward']])
+  }
+};
 
 const FIGURE_KINDS = {
   hollow: { label: 'The Hollow', proportions: FIGURE_PROPORTIONS_HOLLOW, proportionsName: 'FIGURE_PROPORTIONS_HOLLOW', bodyPlan: 'hollow',
@@ -97,10 +152,20 @@ function getFigureBody(figure) {
   const height = TUNING[kind.heightTuningKey], madeFor = height + JSON.stringify(proportions);
   let fitted = fittedFigureBodies.get(proportions);
   if (fitted && fitted.madeFor === madeFor) return fitted.body;
-  if (!fitted) { fitted = { madeFor: '', body: null }; fittedFigureBodies.set(proportions, fitted); }
+  if (!fitted) { fitted = { madeFor: '', body: null, share: 1 }; fittedFigureBodies.set(proportions, fitted); }
   fitted.madeFor = madeFor;
-  fitted.body = fitFigureProportionsToHeight(proportions, kind.bodyPlan, height);
+  fitted.share = findFigureShareForHeight(proportions, kind.bodyPlan, height);
+  fitted.body = scaleFigureProportions(proportions, fitted.share);
   return fitted.body;
+}
+
+// By what share a body is larger or smaller than its proportions say: 1, unless it is made to fit a height
+// (getFigureBody). The shapes fixed to its bones are made larger or smaller by the same share.
+function getFigureBodyShare(figure) {
+  const kind = FIGURE_KINDS[figure.proportions.kind];
+  if (!kind || !kind.heightTuningKey || figure === figureMeasuringFigure) return 1;
+  getFigureBody(figure);
+  return fittedFigureBodies.get(figure.proportions).share;
 }
 
 // These proportions with every length and every thickness `share` times as big: the same shape, another size.
@@ -127,12 +192,17 @@ function measureFigureHeight(proportions, bodyPlan) {
 // These proportions, made larger or smaller as a whole until the body stands `height` tall. (Not simply by the
 // share the two heights differ by: an ankle is always at least 7 cm off the floor, whatever size the leg is.)
 function fitFigureProportionsToHeight(proportions, bodyPlan, height) {
+  return scaleFigureProportions(proportions, findFigureShareForHeight(proportions, bodyPlan, height));
+}
+
+// ... and the share itself: how many times as big everything has to be.
+function findFigureShareForHeight(proportions, bodyPlan, height) {
   let smaller = 0.05, larger = 20;
   for (let halving = 0; halving < 40; halving++) {
     const middle = (smaller + larger) / 2;
     if (measureFigureHeight(scaleFigureProportions(proportions, middle), bodyPlan) < height) smaller = middle; else larger = middle;
   }
-  return scaleFigureProportions(proportions, (smaller + larger) / 2);
+  return (smaller + larger) / 2;
 }
 
 // How a player is bent when crouched, so that the body the others see is as tall as the game has you be then:
@@ -148,13 +218,16 @@ function fitFigureProportionsToHeight(proportions, bodyPlan, height) {
 const PLAYER_CROUCH_LEAN = 0.5;
 const PLAYER_CROUCH_DEEPEST_SQUAT = 0.75;
 const PLAYER_CROUCH_ON_ITS_HEELS = 1.5;
-const playerCrouchPose = { madeFor: '', squat: 0, lean: 0.04, figure: null };
+const playerCrouchPoses = new WeakMap(); // proportions -> { madeFor, squat, lean, figure }
 
-// Returns { squat, lean } for the pose. Worked out again only when the body or the height asked for has changed
-// (in the workshop, where both have sliders).
-function getPlayerCrouchPose() {
-  const body = FIGURE_PROPORTIONS_PLAYER, crouch = playerCrouchPose;
-  const madeFor = [TUNING.playerHeightCrouching, TUNING.playerHeight, body.thigh, body.shin, body.torsoLength, body.neckLength, body.headRadius, body.headLength].join();
+// Returns { squat, lean } for the pose, for a body of these proportions: a player's own, or those of a body a
+// player wears. Worked out again only when the body or the height asked for has changed (in the workshop, where
+// both have sliders).
+function getPlayerCrouchPose(proportions) {
+  const body = proportions || FIGURE_PROPORTIONS_PLAYER;
+  let crouch = playerCrouchPoses.get(body);
+  if (!crouch) { crouch = { madeFor: '', squat: 0, lean: 0.04, figure: null }; playerCrouchPoses.set(body, crouch); }
+  const madeFor = [TUNING.playerHeightCrouching, TUNING.playerHeight, body.thigh, body.shin, body.torsoLength, body.neckLength, body.headRadius, body.headLength, body.legRadius, body.jointRadius].join();
   if (madeFor === crouch.madeFor) return crouch;
   crouch.madeFor = madeFor;
   if (!crouch.figure) crouch.figure = createFigure(body, 0, 'playerImprintSeconds'); // (never shown: only measured)
@@ -181,7 +254,7 @@ function getPlayerCrouchPose() {
 
 // Sets the legs and the back of a player's body for standing up or for crouching. (The arms and the walk are the caller's.)
 function poseFigureAsPlayer(figure, isCrouching) {
-  const crouch = isCrouching ? getPlayerCrouchPose() : null;
+  const crouch = isCrouching ? getPlayerCrouchPose(figure.proportions) : null;
   figure.pose.kneeBend = 0.05;
   figure.pose.squat = crouch ? crouch.squat : 0;
   figure.pose.lean = crouch ? crouch.lean : 0.04;
@@ -193,7 +266,7 @@ const PLAYER_SCANNER_RADIUS = 0.04;
 
 // Where the light on top of the scanner in a player's hand is: halfway along it, just above. `out` gets x, y, z.
 function getFigureScannerLight(figure, out) {
-  const offset = (figure.capsuleCount - 1) * FIGURE_CAPSULE_STRIDE, capsules = figure.capsules;
+  const offset = Math.max(0, figure.scannerCapsule) * FIGURE_CAPSULE_STRIDE, capsules = figure.capsules;
   out.x = (capsules[offset] + capsules[offset + 3]) / 2;
   out.y = (capsules[offset + 1] + capsules[offset + 4]) / 2 + PLAYER_SCANNER_RADIUS + (PLAYER_SCANNER_RADIUS * 0.045);
   out.z = (capsules[offset + 2] + capsules[offset + 5]) / 2;
@@ -225,6 +298,18 @@ function createFigure(proportions, surfaceClass, imprintTuningKey) {
     pose: { legSwing: 0, kneeBend: 0, squat: 0, armSwing: 0, armRaise: 0, elbowBend: 0.1, lean: 0, headTilt: 0, stretch: 0, fingerSplay: 0.25, stoop: 0, crawl: 0 },
     capsules: new Float32Array(FIGURE_MAXIMUM_CAPSULES * FIGURE_CAPSULE_STRIDE),
     capsuleCount: 0,
+    scannerCapsule: -1, // which capsule is the scanner in its hand, if it holds one
+    // What a creature made in the workshop has besides capsules (addFigureParts): made when the first is needed.
+    rods: null, rodCount: 0,
+    boxes: null, boxCount: 0,
+    // For the workshop, where a body is taken hold of bone by bone and shape by shape: which bone each capsule
+    // is (or '' for a shape fixed to one), and which of its shape's parts (prepareFigureShape) each capsule, rod
+    // and box is (or null).
+    capsuleBones: [], capsuleParts: [], rodParts: [], boxParts: [],
+    builtShape: null,   // the shape it was last built with (its kind's), or null
+    // Where each bone was when the body was last built: name -> [start, end, direction]. Only kept for a body
+    // with shapes on it, or one that asks for it (`keepsBones`, the workshop).
+    bones: {}, keepsBones: false,
     headHeight: 1.6,
     boundsCenterY: 1,
     boundsRadius: 1.5,
@@ -257,6 +342,186 @@ function writeFigureCapsule(figure, capsuleIndex, startLocal, endLocal, radius) 
   capsules[offset + 6] = radius;
 }
 
+// ---------------------------------------------------------------------------
+// Bones, and the shapes fixed to them
+// ---------------------------------------------------------------------------
+
+// A body plan calls this before it puts down its first bone.
+function beginFigureBody(figure) {
+  const kind = FIGURE_KINDS[figure.proportions.kind];
+  figure.builtShape = (kind && kind.shape) || null;
+  figure.capsuleCount = 0; figure.rodCount = 0; figure.boxCount = 0;
+  figure.scannerCapsule = -1;
+}
+
+// One bone of the skeleton: a capsule from `start` to `end`, unless the creature leaves that one out. Where the
+// bone is, is kept for the shapes that are fixed to it. `direction` is only given for a bone that may have no
+// length to tell it by (a head that is a ball). Returns which capsule it became, or -1.
+function addFigureBone(figure, bone, start, end, radius, direction) {
+  const shape = figure.builtShape;
+  if (figure.keepsBones === true || (shape !== null && shape.parts.length > 0)) figure.bones[bone] = [start, end, direction || null];
+  if (shape !== null && shape.hides[bone] === true) return -1;
+  const capsuleIndex = figure.capsuleCount++;
+  figure.capsuleBones[capsuleIndex] = bone; figure.capsuleParts[capsuleIndex] = null;
+  writeFigureCapsule(figure, capsuleIndex, start, end, radius);
+  return capsuleIndex;
+}
+
+// What a creature has on its skeleton, made ready to be put on a body many times a second.
+//   bodyPlan  which skeleton: its bones are the names that count
+//   hides     names of bones whose own capsule is left out
+//   parts     shapes as an object file has them (`shape`, and `center` with `half` or `radius`, or `from`, `to`
+//             and `radius`: see 08-workshop-objects.js), each with the `bone` it is fixed to, in that bone's
+//             own directions (FIGURE_SKELETONS), and `mirror`: true for one that has a mirror image. On an arm
+//             or a leg that is the same shape on the other arm or leg; on the head or the body, the same shape
+//             on its other side.
+function prepareFigureShape(bodyPlan, hides, parts) {
+  const bones = FIGURE_SKELETONS[bodyPlan].bones;
+  const shape = { hides: {}, parts: [] };
+  for (const bone of hides || []) if (bones[bone]) shape.hides[bone] = true;
+  (parts || []).forEach(function (part, partIndex) {
+    if (!bones[part.bone] || partIndex >= FIGURE_MAXIMUM_PARTS) return;
+    const isRod = part.from !== undefined;
+    const first = isRod ? part.from : part.center, second = isRod ? part.to : part.center;
+    const put = function (bone, side) { // side -1: the mirror image
+      shape.parts.push({ bone: bone, rest: bones[bone].rest, shape: part.shape, partIndex: partIndex, isMirror: side < 0,
+        firstX: first[0] * side, firstY: first[1], firstZ: first[2], secondX: second[0] * side, secondY: second[1], secondZ: second[2],
+        radius: part.radius || 0, halfX: part.half ? part.half[0] : 0, halfY: part.half ? part.half[1] : 0, halfZ: part.half ? part.half[2] : 0 });
+    };
+    put(part.bone, 1);
+    // (In the middle of the head or the body its mirror image is itself.)
+    if (part.mirror === true && (bones[part.bone].partner || first[0] !== 0 || second[0] !== 0)) put(bones[part.bone].partner || part.bone, -1);
+  });
+  // Bone by bone, so that where a bone is has to be worked out once for all that is on it.
+  shape.parts.sort(function (one, other) { return one.bone < other.bone ? -1 : (one.bone > other.bone ? 1 : one.partIndex - other.partIndex); });
+  return shape;
+}
+
+// The unit vector nearest to one of the figure's own directions (0: its right, 1: up, 2: the way it faces) that
+// is square to `along`. If `along` points that very way there is none: then `otherwise` is tried instead.
+function squareFigureDirection(out, along, wanted, otherwise) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const axis = attempt === 0 ? wanted : otherwise, dot = along[axis];
+    out[0] = -dot * along[0]; out[1] = -dot * along[1]; out[2] = -dot * along[2];
+    out[axis] += 1;
+    const length = Math.sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+    if (length > 0.001) { out[0] /= length; out[1] /= length; out[2] /= length; return out; }
+  }
+  return out;
+}
+
+function crossFigureDirections(out, first, second) {
+  out[0] = first[1] * second[2] - first[2] * second[1];
+  out[1] = first[2] * second[0] - first[0] * second[2];
+  out[2] = first[0] * second[1] - first[1] * second[0];
+  return out;
+}
+
+// Where a bone is and which way its own x, y and z point, in the figure's local frame (X its right, Y up, Z the
+// way it faces). `bone` is [start, end, direction] as addFigureBone kept it, `rest` which way the bone points on
+// a body standing at rest (FIGURE_SKELETONS). The bone's directions are the figure's own, turned as the bone is
+// turned from there: a shin that hangs straight down has them exactly, and one bent back at the knee has its
+// "up" along itself and its "front" tipped down with it. Its "right" stays as near the figure's right as it can.
+// Fills and returns `frame`: { origin, x, y, z }.
+const figureBoneFrame = { origin: [0, 0, 0], x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+function computeFigureBoneFrame(bone, rest, frame) {
+  const start = bone[0], end = bone[1], given = bone[2];
+  const origin = frame.origin, x = frame.x, y = frame.y, z = frame.z;
+  let alongX = given ? given[0] : end[0] - start[0], alongY = given ? given[1] : end[1] - start[1], alongZ = given ? given[2] : end[2] - start[2];
+  const length = Math.sqrt(alongX * alongX + alongY * alongY + alongZ * alongZ);
+  // A bar is held by its middle, anything else by where it starts: the joint nearer the body.
+  const isBar = rest === 'across';
+  origin[0] = isBar ? (start[0] + end[0]) / 2 : start[0]; origin[1] = isBar ? (start[1] + end[1]) / 2 : start[1]; origin[2] = isBar ? (start[2] + end[2]) / 2 : start[2];
+  if (rest === 'none' || length < 0.000001) {
+    x[0] = 1; x[1] = 0; x[2] = 0; y[0] = 0; y[1] = 1; y[2] = 0; z[0] = 0; z[1] = 0; z[2] = 1;
+    return frame;
+  }
+  alongX /= length; alongY /= length; alongZ /= length;
+  if (isBar) {
+    x[0] = alongX; x[1] = alongY; x[2] = alongZ;
+    crossFigureDirections(z, x, squareFigureDirection(y, x, 1, 2));
+  } else if (rest === 'forward') {
+    z[0] = alongX; z[1] = alongY; z[2] = alongZ;
+    crossFigureDirections(y, z, squareFigureDirection(x, z, 0, 1));
+  } else {
+    const sign = rest === 'down' ? -1 : 1;
+    y[0] = alongX * sign; y[1] = alongY * sign; y[2] = alongZ * sign;
+    crossFigureDirections(z, squareFigureDirection(x, y, 0, 2), y);
+  }
+  return frame;
+}
+
+// Puts the shapes that are fixed to the bones where the bones now are. A ball and a capsule join the body's
+// capsules; a cylinder and a cone are kept as rods, a box as a box.
+function addFigureParts(figure, shape) {
+  const share = getFigureBodyShare(figure), frame = figureBoneFrame;
+  const origin = frame.origin, x = frame.x, y = frame.y, z = frame.z;
+  // From the figure's local frame to the station, as writeFigureCapsule does it.
+  const forwardX = Math.sin(figure.yaw), forwardZ = -Math.cos(figure.yaw), rightX = Math.cos(figure.yaw), rightZ = Math.sin(figure.yaw);
+  const first = [0, 0, 0], second = [0, 0, 0];
+  let framedBone = '';
+  for (let index = 0; index < shape.parts.length; index++) {
+    const part = shape.parts[index], bone = figure.bones[part.bone];
+    if (bone === undefined) continue;
+    if (part.bone !== framedBone) { computeFigureBoneFrame(bone, part.rest, frame); framedBone = part.bone; }
+    for (let axis = 0; axis < 3; axis++) {
+      first[axis] = origin[axis] + (part.firstX * x[axis] + part.firstY * y[axis] + part.firstZ * z[axis]) * share;
+      second[axis] = origin[axis] + (part.secondX * x[axis] + part.secondY * y[axis] + part.secondZ * z[axis]) * share;
+    }
+    if (part.shape === 'ball' || part.shape === 'capsule') {
+      const capsuleIndex = figure.capsuleCount++;
+      figure.capsuleBones[capsuleIndex] = ''; figure.capsuleParts[capsuleIndex] = part;
+      writeFigureCapsule(figure, capsuleIndex, first, second, part.radius * share);
+    } else if (part.shape === 'box') {
+      if (figure.boxes === null) figure.boxes = new Float32Array(FIGURE_MAXIMUM_PARTS * 2 * FIGURE_BOX_STRIDE);
+      const boxes = figure.boxes, offset = figure.boxCount * FIGURE_BOX_STRIDE;
+      figure.boxParts[figure.boxCount++] = part;
+      boxes[offset] = figure.x + first[0] * rightX + first[2] * forwardX; boxes[offset + 1] = first[1]; boxes[offset + 2] = figure.z + first[0] * rightZ + first[2] * forwardZ;
+      boxes[offset + 3] = x[0] * rightX + x[2] * forwardX; boxes[offset + 4] = x[1]; boxes[offset + 5] = x[0] * rightZ + x[2] * forwardZ;
+      boxes[offset + 6] = y[0] * rightX + y[2] * forwardX; boxes[offset + 7] = y[1]; boxes[offset + 8] = y[0] * rightZ + y[2] * forwardZ;
+      boxes[offset + 9] = z[0] * rightX + z[2] * forwardX; boxes[offset + 10] = z[1]; boxes[offset + 11] = z[0] * rightZ + z[2] * forwardZ;
+      boxes[offset + 12] = part.halfX * share; boxes[offset + 13] = part.halfY * share; boxes[offset + 14] = part.halfZ * share;
+    } else {
+      if (figure.rods === null) figure.rods = new Float32Array(FIGURE_MAXIMUM_PARTS * 2 * FIGURE_ROD_STRIDE);
+      const rods = figure.rods, offset = figure.rodCount * FIGURE_ROD_STRIDE;
+      figure.rodParts[figure.rodCount++] = part;
+      rods[offset] = figure.x + first[0] * rightX + first[2] * forwardX; rods[offset + 1] = first[1]; rods[offset + 2] = figure.z + first[0] * rightZ + first[2] * forwardZ;
+      rods[offset + 3] = figure.x + second[0] * rightX + second[2] * forwardX; rods[offset + 4] = second[1]; rods[offset + 5] = figure.z + second[0] * rightZ + second[2] * forwardZ;
+      rods[offset + 6] = part.radius * share; rods[offset + 7] = part.shape === 'cone' ? 0 : part.radius * share;
+    }
+  }
+}
+
+// Builds the whole body as it is posed: the skeleton by its body plan, then what is fixed to the bones.
+// It stands at height 0, where the figure is and facing the way it faces. Returns how high the top of its head is.
+function buildFigureBody(figure) {
+  // (A body whose proportions name no kind, such as an apparition's, is a person unless it says it is a Hollow.)
+  const kind = FIGURE_KINDS[figure.proportions.kind];
+  const topHeight = FIGURE_BODY_PLANS[kind ? kind.bodyPlan : (figure.proportions.kind === 'hollow' ? 'hollow' : 'person')](figure);
+  const shape = figure.builtShape;
+  if (shape !== null && shape.parts.length > 0) addFigureParts(figure, shape);
+  return topHeight;
+}
+
+// How high the highest point of a body is, of everything it is made of: its head, or a horn on it.
+function getFigureTop(figure) {
+  let top = 0;
+  const capsules = figure.capsules, rods = figure.rods, boxes = figure.boxes;
+  for (let capsuleIndex = 0; capsuleIndex < figure.capsuleCount; capsuleIndex++) {
+    const offset = capsuleIndex * FIGURE_CAPSULE_STRIDE, radius = capsules[offset + 6];
+    top = Math.max(top, capsules[offset + 1] + radius, capsules[offset + 4] + radius);
+  }
+  for (let rodIndex = 0; rodIndex < figure.rodCount; rodIndex++) {
+    const offset = rodIndex * FIGURE_ROD_STRIDE;
+    top = Math.max(top, rods[offset + 1] + rods[offset + 6], rods[offset + 4] + rods[offset + 7]);
+  }
+  for (let boxIndex = 0; boxIndex < figure.boxCount; boxIndex++) {
+    const offset = boxIndex * FIGURE_BOX_STRIDE;
+    top = Math.max(top, boxes[offset + 1] + Math.abs(boxes[offset + 4]) * boxes[offset + 12] + Math.abs(boxes[offset + 7]) * boxes[offset + 13] + Math.abs(boxes[offset + 10]) * boxes[offset + 14]);
+  }
+  return top;
+}
+
 function addLocalPoints(point, direction, length) {
   return [point[0] + direction[0] * length, point[1] + direction[1] * length, point[2] + direction[2] * length];
 }
@@ -282,8 +547,8 @@ function buildHollowCapsules(figure) {
   const crawl = clampNumber(pose.crawl || 0, 0, 1);
   const CRAWL_THIGH = 0.55, CRAWL_SHIN = -1.5, CRAWL_LOWER_BACK = 1.5, CRAWL_UPPER_BACK = 1.62, CRAWL_NECK = 1.45;
   const CRAWL_ELBOW_OUT = 0.26, CRAWL_ELBOW_DROP = 0.22; // metres the elbow sits out from and below the shoulder
-  let next = 0;
-  const add = function (start, end, radius) { writeFigureCapsule(figure, next++, start, end, radius); };
+  beginFigureBody(figure);
+  const add = function (bone, start, end, radius, direction) { return addFigureBone(figure, bone, start, end, radius, direction); };
 
   // Legs: knees pushed forward, shins sloping back, like something that was not built to stand upright.
   const legs = [];
@@ -309,8 +574,8 @@ function buildHollowCapsules(figure) {
   const upperLean = interpolateLinear(pose.lean * 1.5 + 0.6 * hunch + STOOP_UPPER_BACK * stoop, CRAWL_UPPER_BACK, crawl);
   const midSpine = addLocalPoints(pelvis, [0, Math.cos(lowerLean), Math.sin(lowerLean)], body.lowerSpine);
   const chest = addLocalPoints(midSpine, [0, Math.cos(upperLean), Math.sin(upperLean)], body.upperSpine);
-  add(pelvis, midSpine, body.torsoRadius);
-  add(midSpine, chest, body.torsoRadius * 1.08);
+  add('lowerBack', pelvis, midSpine, body.torsoRadius);
+  add('upperBack', midSpine, chest, body.torsoRadius * 1.08);
 
   // Neck jutting forward, head cocked hard to one side, jaw hanging.
   const neckLean = interpolateLinear(upperLean * 0.6 + 0.55 * hunch, CRAWL_NECK, crawl);
@@ -318,22 +583,22 @@ function buildHollowCapsules(figure) {
   const headBase = addLocalPoints(chest, neckDirection, body.neckLength);
   const headDirection = normalizeLocalVector([Math.sin(pose.headTilt), Math.cos(pose.headTilt) * Math.cos(neckLean * 0.6), Math.sin(neckLean * 0.6)]);
   const headTop = addLocalPoints(headBase, headDirection, body.headLength);
-  add(chest, headBase, body.limbRadius * 1.15);
-  add(headBase, headTop, body.headRadius);
+  add('neck', chest, headBase, body.limbRadius * 1.15);
+  add('head', headBase, headTop, body.headRadius, headDirection);
   const jawStart = [headBase[0], headBase[1] - 0.02, headBase[2] + 0.07];
-  add(jawStart, [jawStart[0] - Math.sin(pose.headTilt) * 0.03, jawStart[1] - body.jawLength - 0.06 * splay, jawStart[2] + 0.05], 0.028);
+  add('jaw', jawStart, [jawStart[0] - Math.sin(pose.headTilt) * 0.03, jawStart[1] - body.jawLength - 0.06 * splay, jawStart[2] + 0.05], 0.028);
   figure.headHeight = (headBase[1] + headTop[1]) / 2;
 
   // Shoulders, one hanging lower than the other.
   const droop = 0.07 * hunch;
   const shoulderLeft = [-body.shoulderWidth / 2, chest[1] - 0.02 - droop, chest[2] + 0.02];
   const shoulderRight = [body.shoulderWidth / 2, chest[1] - 0.02 + droop * 0.3, chest[2] + 0.02];
-  add(shoulderLeft, shoulderRight, body.limbRadius * 1.3);
-  add(legs[0].hip, legs[1].hip, body.legRadius * 1.1);
+  add('shoulders', shoulderLeft, shoulderRight, body.limbRadius * 1.3);
+  add('hips', legs[0].hip, legs[1].hip, body.legRadius * 1.1);
 
   // Arms that reach its knees, ending in three long fingers.
   for (let side = -1; side <= 1; side += 2) {
-    const shoulder = side < 0 ? shoulderLeft : shoulderRight;
+    const shoulder = side < 0 ? shoulderLeft : shoulderRight, sideName = side < 0 ? 'Left' : 'Right';
     const armAngle = pose.armRaise + upperLean * 0.5 + pose.armSwing * (side < 0 ? -1 : 1);
     const elbow = [shoulder[0] + side * 0.08 * (1 + stretch), shoulder[1] - Math.cos(armAngle) * body.upperArm, shoulder[2] + Math.sin(armAngle) * body.upperArm];
     const foreArmAngle = armAngle + pose.elbowBend + (side < 0 ? 0.14 * hunch : 0);
@@ -354,24 +619,26 @@ function buildHollowCapsules(figure) {
     // The hand follows the forearm, except when crawling, where it lies along the floor.
     const foreArmDirection = normalizeLocalVector([wrist[0] - elbow[0], (wrist[1] - elbow[1]) * (1 - 0.9 * crawl), wrist[2] - elbow[2] + crawl * 0.4]);
     const knuckles = addLocalPoints(wrist, foreArmDirection, body.handLength);
-    add(shoulder, elbow, body.limbRadius);
-    add(elbow, wrist, body.limbRadius * 0.9);
-    add(wrist, knuckles, body.limbRadius * 0.8);
+    add('upperArm' + sideName, shoulder, elbow, body.limbRadius);
+    add('foreArm' + sideName, elbow, wrist, body.limbRadius * 0.9);
+    add('hand' + sideName, wrist, knuckles, body.limbRadius * 0.8);
     for (let finger = -1; finger <= 1; finger++) {
       const fingerDirection = normalizeLocalVector([
         foreArmDirection[0] + finger * 0.42 * (0.3 + 0.7 * splay),
         foreArmDirection[1],
         foreArmDirection[2] + 0.2 * (1 - splay)]);
-      add(knuckles, addLocalPoints(knuckles, fingerDirection, body.fingerLengths[finger + 1]), body.fingerRadius);
+      // (The fingers are named for where they are: the one furthest from the body is the outer one, on either hand.)
+      add((finger === 0 ? 'fingerMiddle' : (finger === side ? 'fingerOuter' : 'fingerInner')) + sideName,
+        knuckles, addLocalPoints(knuckles, fingerDirection, body.fingerLengths[finger + 1]), body.fingerRadius);
     }
   }
 
   for (const leg of legs) {
-    add(leg.hip, leg.knee, body.legRadius);
-    add(leg.knee, leg.ankle, body.legRadius * 0.85);
-    add(leg.ankle, [leg.ankle[0] + leg.side * 0.03, 0.035, leg.ankle[2] + body.footLength * (1 - 2 * crawl)], 0.035); // crawling, the toes trail behind
+    const sideName = leg.side < 0 ? 'Left' : 'Right';
+    add('thigh' + sideName, leg.hip, leg.knee, body.legRadius);
+    add('shin' + sideName, leg.knee, leg.ankle, body.legRadius * 0.85);
+    add('foot' + sideName, leg.ankle, [leg.ankle[0] + leg.side * 0.03, 0.035, leg.ankle[2] + body.footLength * (1 - 2 * crawl)], 0.035); // crawling, the toes trail behind
   }
-  figure.capsuleCount = next;
   return headTop[1] + body.headRadius;
 }
 
@@ -379,8 +646,8 @@ function buildHollowCapsules(figure) {
 // is the same make with a scanner in one hand.
 function buildPersonCapsules(figure) {
   const body = getFigureBody(figure), pose = figure.pose;
-  let next = 0;
-  const add = function (start, end, radius) { writeFigureCapsule(figure, next++, start, end, radius); };
+  beginFigureBody(figure);
+  const add = function (bone, start, end, radius, direction) { return addFigureBone(figure, bone, start, end, radius, direction); };
 
   const legs = [];
   let lowestFoot = 0;
@@ -400,7 +667,7 @@ function buildPersonCapsules(figure) {
     // (Far down on its haunches and in mid-stride, the knee of the leg behind is lower than its foot: then it is
     // the knee that is on the floor. 0.07 is how far an ankle is above the floor.)
     if (squat > 0) lowestFoot = Math.min(lowestFoot, knee[1] + ankleHeight - body.jointRadius);
-    legs.push({ hip: hip, knee: knee, ankle: ankle });
+    legs.push({ hip: hip, knee: knee, ankle: ankle, sideName: side < 0 ? 'Left' : 'Right' });
   }
   const pelvisHeight = -lowestFoot + ankleHeight;
   for (const leg of legs) { leg.hip[1] += pelvisHeight; leg.knee[1] += pelvisHeight; leg.ankle[1] += pelvisHeight; }
@@ -412,23 +679,23 @@ function buildPersonCapsules(figure) {
   const neckDirection = [Math.sin(pose.headTilt), Math.cos(neckLean) * Math.cos(pose.headTilt), Math.sin(neckLean)];
   const headBase = addLocalPoints(chest, neckDirection, body.neckLength + body.headRadius);
   const headTop = addLocalPoints(headBase, neckDirection, body.headLength);
-  add(pelvis, waist, body.torsoRadius * 0.9);
-  add(waist, chest, body.torsoRadius * 1.1);
-  add(chest, headBase, body.limbRadius);
-  add(headBase, headTop, body.headRadius);
+  add('belly', pelvis, waist, body.torsoRadius * 0.9);
+  add('chest', waist, chest, body.torsoRadius * 1.1);
+  add('neck', chest, headBase, body.limbRadius);
+  add('head', headBase, headTop, body.headRadius, neckDirection); // (a head may have no length: it points the way the neck does)
   figure.headHeight = (headBase[1] + headTop[1]) / 2;
 
   const shoulderLeft = [-body.shoulderWidth / 2, chest[1] - 0.03, chest[2]];
   const shoulderRight = [body.shoulderWidth / 2, chest[1] - 0.03, chest[2]];
-  add(shoulderLeft, shoulderRight, body.limbRadius * 1.3);
-  add(legs[0].hip, legs[1].hip, body.legRadius);
+  add('shoulders', shoulderLeft, shoulderRight, body.limbRadius * 1.3);
+  add('hips', legs[0].hip, legs[1].hip, body.legRadius);
 
   // A player holds a scanner in the right hand. That arm goes by armRaise and elbowBend, and is held steady;
   // the other hangs at their side and swings as they walk.
   const isPlayer = Boolean(FIGURE_KINDS[body.kind] && FIGURE_KINDS[body.kind].holdsScanner);
   let scannerHand = null, scannerAngle = 0;
   for (let side = -1; side <= 1; side += 2) {
-    const shoulder = side < 0 ? shoulderLeft : shoulderRight;
+    const shoulder = side < 0 ? shoulderLeft : shoulderRight, sideName = side < 0 ? 'Left' : 'Right';
     const isScannerArm = isPlayer && side > 0, isFreeArm = isPlayer && side < 0;
     // (A player's free arm comes forward as they go down on their haunches, to lie along the thigh: hanging
     // straight down from a shoulder that low, the hand would be in the floor.)
@@ -439,55 +706,73 @@ function buildPersonCapsules(figure) {
     const wrist = [elbow[0], elbow[1] - Math.cos(foreArmAngle) * body.foreArm, elbow[2] + Math.sin(foreArmAngle) * body.foreArm];
     const hand = [wrist[0], wrist[1] - Math.cos(foreArmAngle) * body.handLength, wrist[2] + Math.sin(foreArmAngle) * body.handLength];
     if (isScannerArm) { scannerHand = hand; scannerAngle = foreArmAngle; }
-    add(shoulder, elbow, body.limbRadius);
-    add(elbow, wrist, body.limbRadius * 0.9);
-    add(wrist, hand, body.limbRadius * 1.15);
-    add(shoulder, shoulder, body.jointRadius);
-    add(elbow, elbow, body.jointRadius * 0.85);
+    add('upperArm' + sideName, shoulder, elbow, body.limbRadius);
+    add('foreArm' + sideName, elbow, wrist, body.limbRadius * 0.9);
+    add('hand' + sideName, wrist, hand, body.limbRadius * 1.15);
+    add('shoulderJoint' + sideName, shoulder, shoulder, body.jointRadius);
+    add('elbowJoint' + sideName, elbow, elbow, body.jointRadius * 0.85);
   }
   for (const leg of legs) {
-    add(leg.hip, leg.knee, body.legRadius);
-    add(leg.knee, leg.ankle, body.legRadius * 0.85);
-    add(leg.ankle, [leg.ankle[0], 0.04, leg.ankle[2] + body.footLength], 0.04);
-    add(leg.knee, leg.knee, body.jointRadius);
+    add('thigh' + leg.sideName, leg.hip, leg.knee, body.legRadius);
+    add('shin' + leg.sideName, leg.knee, leg.ankle, body.legRadius * 0.85);
+    add('foot' + leg.sideName, leg.ankle, [leg.ankle[0], 0.04, leg.ankle[2] + body.footLength], 0.04);
+    add('kneeJoint' + leg.sideName, leg.knee, leg.knee, body.jointRadius);
   }
   if (isPlayer) {
-    // The scanner: it goes on from the hand the way the forearm points. It is the last part of the body, which
-    // is how getFigureScannerLight finds it.
-    add(scannerHand, [scannerHand[0], scannerHand[1] - Math.cos(scannerAngle) * PLAYER_SCANNER_LENGTH, scannerHand[2] + Math.sin(scannerAngle) * PLAYER_SCANNER_LENGTH], PLAYER_SCANNER_RADIUS);
+    // The scanner: it goes on from the hand the way the forearm points. It is not a bone: it is what they
+    // carry, and no body a player wears can leave it out. getFigureScannerLight finds it by `scannerCapsule`.
+    figure.scannerCapsule = add('scanner', scannerHand, [scannerHand[0], scannerHand[1] - Math.cos(scannerAngle) * PLAYER_SCANNER_LENGTH, scannerHand[2] + Math.sin(scannerAngle) * PLAYER_SCANNER_LENGTH], PLAYER_SCANNER_RADIUS);
   }
-  figure.capsuleCount = next;
   return headTop[1] + body.headRadius;
 }
 
 function updateFigureCapsules(figure) {
-  // (A body whose proportions name no kind, such as an apparition's, is a person unless it says it is a Hollow.)
-  const kind = FIGURE_KINDS[figure.proportions.kind];
-  const topHeight = FIGURE_BODY_PLANS[kind ? kind.bodyPlan : (figure.proportions.kind === 'hollow' ? 'hollow' : 'person')](figure);
+  const topHeight = buildFigureBody(figure);
 
   // The body is built standing at height 0; lift or lower it onto the floor it is really on.
-  const capsules = figure.capsules;
+  const capsules = figure.capsules, rods = figure.rods, boxes = figure.boxes;
   figure.y = getFloorHeightAt(figure.x, figure.z);
   if (figure.y !== 0) {
     for (let capsuleIndex = 0; capsuleIndex < figure.capsuleCount; capsuleIndex++) {
       capsules[capsuleIndex * FIGURE_CAPSULE_STRIDE + 1] += figure.y;
       capsules[capsuleIndex * FIGURE_CAPSULE_STRIDE + 4] += figure.y;
     }
+    for (let rodIndex = 0; rodIndex < figure.rodCount; rodIndex++) {
+      rods[rodIndex * FIGURE_ROD_STRIDE + 1] += figure.y;
+      rods[rodIndex * FIGURE_ROD_STRIDE + 4] += figure.y;
+    }
+    for (let boxIndex = 0; boxIndex < figure.boxCount; boxIndex++) boxes[boxIndex * FIGURE_BOX_STRIDE + 1] += figure.y;
   }
 
-  // Bounding sphere for quick rejection in the ray caster.
+  // Bounding sphere for quick rejection in the ray caster: round the middle of the body, and as far out as
+  // the furthest thing it is made of reaches.
   figure.boundsCenterY = figure.y + topHeight / 2;
-  let largestDistanceSquared = 0;
+  let reach = 0;
   for (let capsuleIndex = 0; capsuleIndex < figure.capsuleCount; capsuleIndex++) {
     const offset = capsuleIndex * FIGURE_CAPSULE_STRIDE;
     for (let endIndex = 0; endIndex < 2; endIndex++) {
       const deltaX = capsules[offset + endIndex * 3] - figure.x;
       const deltaY = capsules[offset + endIndex * 3 + 1] - figure.boundsCenterY;
       const deltaZ = capsules[offset + endIndex * 3 + 2] - figure.z;
-      largestDistanceSquared = Math.max(largestDistanceSquared, deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+      reach = Math.max(reach, Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) + capsules[offset + 6]);
     }
   }
-  figure.boundsRadius = Math.sqrt(largestDistanceSquared) + 0.16;
+  for (let rodIndex = 0; rodIndex < figure.rodCount; rodIndex++) {
+    const offset = rodIndex * FIGURE_ROD_STRIDE;
+    for (let endIndex = 0; endIndex < 2; endIndex++) {
+      const deltaX = rods[offset + endIndex * 3] - figure.x;
+      const deltaY = rods[offset + endIndex * 3 + 1] - figure.boundsCenterY;
+      const deltaZ = rods[offset + endIndex * 3 + 2] - figure.z;
+      reach = Math.max(reach, Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) + rods[offset + 6]);
+    }
+  }
+  for (let boxIndex = 0; boxIndex < figure.boxCount; boxIndex++) {
+    const offset = boxIndex * FIGURE_BOX_STRIDE;
+    const deltaX = boxes[offset] - figure.x, deltaY = boxes[offset + 1] - figure.boundsCenterY, deltaZ = boxes[offset + 2] - figure.z;
+    const halfX = boxes[offset + 12], halfY = boxes[offset + 13], halfZ = boxes[offset + 14];
+    reach = Math.max(reach, Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) + Math.sqrt(halfX * halfX + halfY * halfY + halfZ * halfZ));
+  }
+  figure.boundsRadius = reach + 0.02;
 }
 
 // Height of the head above the lift's floor level (not above the figure's own feet).
@@ -502,13 +787,8 @@ function measureHollowTop(figure, stretch, stoop, crawl) {
   spare.pose.stretch = stretch; spare.pose.stoop = stoop; spare.pose.crawl = crawl || 0;
   spare.pose.legSwing = 0; // or the answer would bob up and down with every step
   spare.x = 0; spare.z = 0; spare.yaw = 0;
-  buildHollowCapsules(spare);
-  let top = 0;
-  for (let capsuleIndex = 0; capsuleIndex < spare.capsuleCount; capsuleIndex++) {
-    const offset = capsuleIndex * FIGURE_CAPSULE_STRIDE, radius = spare.capsules[offset + 6];
-    top = Math.max(top, spare.capsules[offset + 1] + radius, spare.capsules[offset + 4] + radius);
-  }
-  return top;
+  buildFigureBody(spare); // with whatever is fixed to its bones: it ducks its horns too
+  return getFigureTop(spare);
 }
 
 // Decides how the Hollow must hold itself to fit under a ceiling `headroom` metres above its feet:
@@ -560,17 +840,40 @@ function getFigureHeadHeight(figure) {
 
 // Sprays points straight onto a figure's surface. Used for the moment it reaches you.
 function emitFigureRevealPoints(figure, pointCount, surfaceClass, lifeCode) {
-  const capsules = figure.capsules;
+  const capsules = figure.capsules, rods = figure.rods, boxes = figure.boxes;
+  const shapeCount = figure.capsuleCount + figure.rodCount + figure.boxCount;
+  if (shapeCount === 0) return; // a creature with all of its skeleton left out and nothing on its bones
   for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
-    const offset = Math.floor(Math.random() * figure.capsuleCount) * FIGURE_CAPSULE_STRIDE;
+    const shapeIndex = Math.floor(Math.random() * shapeCount);
     const along = Math.random();
     let directionX = Math.random() - 0.5, directionY = Math.random() - 0.5, directionZ = Math.random() - 0.5;
     const length = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ) || 1;
-    const radius = capsules[offset + 6];
-    addScanPoint(
-      capsules[offset] + (capsules[offset + 3] - capsules[offset]) * along + directionX / length * radius,
-      capsules[offset + 1] + (capsules[offset + 4] - capsules[offset + 1]) * along + directionY / length * radius,
-      capsules[offset + 2] + (capsules[offset + 5] - capsules[offset + 2]) * along + directionZ / length * radius,
-      0.6 + Math.random() * 0.4, surfaceClass, lifeCode);
+    if (shapeIndex < figure.capsuleCount) {
+      const offset = shapeIndex * FIGURE_CAPSULE_STRIDE, radius = capsules[offset + 6];
+      addScanPoint(
+        capsules[offset] + (capsules[offset + 3] - capsules[offset]) * along + directionX / length * radius,
+        capsules[offset + 1] + (capsules[offset + 4] - capsules[offset + 1]) * along + directionY / length * radius,
+        capsules[offset + 2] + (capsules[offset + 5] - capsules[offset + 2]) * along + directionZ / length * radius,
+        0.6 + Math.random() * 0.4, surfaceClass, lifeCode);
+    } else if (shapeIndex < figure.capsuleCount + figure.rodCount) {
+      // A cylinder or a cone: as thick as it is at that place along it.
+      const offset = (shapeIndex - figure.capsuleCount) * FIGURE_ROD_STRIDE, radius = rods[offset + 6] + (rods[offset + 7] - rods[offset + 6]) * along;
+      addScanPoint(
+        rods[offset] + (rods[offset + 3] - rods[offset]) * along + directionX / length * radius,
+        rods[offset + 1] + (rods[offset + 4] - rods[offset + 1]) * along + directionY / length * radius,
+        rods[offset + 2] + (rods[offset + 5] - rods[offset + 2]) * along + directionZ / length * radius,
+        0.6 + Math.random() * 0.4, surfaceClass, lifeCode);
+    } else {
+      // A box: somewhere on one of its six sides.
+      const offset = (shapeIndex - figure.capsuleCount - figure.rodCount) * FIGURE_BOX_STRIDE;
+      const place = [Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1];
+      place[Math.floor(Math.random() * 3)] = Math.random() < 0.5 ? -1 : 1;
+      const alongX = place[0] * boxes[offset + 12], alongY = place[1] * boxes[offset + 13], alongZ = place[2] * boxes[offset + 14];
+      addScanPoint(
+        boxes[offset] + boxes[offset + 3] * alongX + boxes[offset + 6] * alongY + boxes[offset + 9] * alongZ,
+        boxes[offset + 1] + boxes[offset + 4] * alongX + boxes[offset + 7] * alongY + boxes[offset + 10] * alongZ,
+        boxes[offset + 2] + boxes[offset + 5] * alongX + boxes[offset + 8] * alongY + boxes[offset + 11] * alongZ,
+        0.6 + Math.random() * 0.4, surfaceClass, lifeCode);
+    }
   }
 }

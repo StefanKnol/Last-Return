@@ -133,6 +133,30 @@ function intersectRayWithCapsule(capsules, offset, originX, originY, originZ, di
   return -1;
 }
 
+// A box that lies any way: `boxes` holds, from `offset`, its centre, which way its own x, y and z point, and half
+// its size along each (FIGURE_BOX_STRIDE in 04-figures.js). Returns how far along the ray it is met from
+// outside, or -1 (also for a ray that starts inside it).
+function intersectRayWithTurnedBox(boxes, offset, originX, originY, originZ, directionX, directionY, directionZ) {
+  const offsetX = originX - boxes[offset], offsetY = originY - boxes[offset + 1], offsetZ = originZ - boxes[offset + 2];
+  let nearest = -Infinity, farthest = Infinity;
+  for (let axis = 0; axis < 3; axis++) {
+    const axisOffset = offset + 3 + axis * 3;
+    const place = offsetX * boxes[axisOffset] + offsetY * boxes[axisOffset + 1] + offsetZ * boxes[axisOffset + 2];
+    const speed = directionX * boxes[axisOffset] + directionY * boxes[axisOffset + 1] + directionZ * boxes[axisOffset + 2];
+    const half = boxes[offset + 12 + axis];
+    if (Math.abs(speed) < 1e-9) {
+      if (place < -half || place > half) return -1; // it runs beside the box, level with these two sides
+      continue;
+    }
+    let enters = (-half - place) / speed, leaves = (half - place) / speed;
+    if (enters > leaves) { const swapped = enters; enters = leaves; leaves = swapped; }
+    if (enters > nearest) nearest = enters;
+    if (leaves < farthest) farthest = leaves;
+    if (nearest > farthest) return -1;
+  }
+  return nearest > 0 ? nearest : -1;
+}
+
 // A rod with flat ends, lying any way: `radiusFrom` thick at one end and `radiusTo` at the other. The same at
 // both is a cylinder, nothing at the far end is a cone. Returns how far along the ray it is met from outside,
 // or -1 (also for a ray that starts inside it).
@@ -326,6 +350,17 @@ function castRayAgainstThings(originX, originY, originZ, directionX, directionY,
     for (let capsuleIndex = 0; capsuleIndex < figure.capsuleCount; capsuleIndex++) {
       const distance = intersectRayWithCapsule(figure.capsules, capsuleIndex * FIGURE_CAPSULE_STRIDE,
         originX, originY, originZ, directionX, directionY, directionZ);
+      if (distance > 0.05 && distance < bestDistance) { bestDistance = distance; bestFigure = figure; }
+    }
+    // What a creature made in the workshop has on its bones besides capsules: cylinders and cones, and boxes.
+    for (let rodIndex = 0; rodIndex < figure.rodCount; rodIndex++) {
+      const rods = figure.rods, offset = rodIndex * FIGURE_ROD_STRIDE;
+      const distance = intersectRayWithTaperedRod(rods[offset], rods[offset + 1], rods[offset + 2], rods[offset + 3], rods[offset + 4], rods[offset + 5], rods[offset + 6], rods[offset + 7],
+        originX, originY, originZ, directionX, directionY, directionZ);
+      if (distance > 0.05 && distance < bestDistance) { bestDistance = distance; bestFigure = figure; }
+    }
+    for (let boxIndex = 0; boxIndex < figure.boxCount; boxIndex++) {
+      const distance = intersectRayWithTurnedBox(figure.boxes, boxIndex * FIGURE_BOX_STRIDE, originX, originY, originZ, directionX, directionY, directionZ);
       if (distance > 0.05 && distance < bestDistance) { bestDistance = distance; bestFigure = figure; }
     }
   }

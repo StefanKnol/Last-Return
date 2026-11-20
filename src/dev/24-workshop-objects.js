@@ -357,7 +357,7 @@ function addObjectWorkshopPart(shape) {
   // On top of what is there, half sunk into it: it can be seen, and it is joined on.
   const top = getObjectWorkshopExtents(state.object.parts).high[1];
   beginObjectWorkshopEdit('add');
-  state.object.parts.push(normalizeDesignedPart({ shape: shape, center: [0, top, 0], from: [0, top, 0], to: [0, top + 0.2, 0] }));
+  state.object.parts.push(normalizeDesignedPart({ shape: shape, center: [0, top, 0], from: [0, top, 0], to: [0, top + 0.2, 0] }, DESIGNED_OBJECT_LIMITS));
   finishObjectWorkshopEdit();
   selectObjectWorkshopPart(state.object.parts.length - 1, true);
 }
@@ -373,13 +373,35 @@ function deleteSelectedObjectWorkshopPart() {
   renderWorkshopPanel();
 }
 
-// A copy of a part, moved by [x, y, z].
-function shiftObjectWorkshopPart(part, shift) {
+// A copy of a part, moved by [x, y, z]. Not yet cleaned up: that goes by the limits of what the part is a part
+// of. (The creature tool moves the shapes on a creature's bones with this too.)
+function shiftWorkshopPart(part, shift) {
   const moved = JSON.parse(JSON.stringify(part));
   for (const name of isObjectWorkshopRod(moved) ? ['from', 'to'] : ['center']) {
     for (let axis = 0; axis < 3; axis++) moved[name][axis] += shift[axis];
   }
-  return normalizeDesignedPart(moved);
+  return moved;
+}
+
+function shiftObjectWorkshopPart(part, shift) {
+  return normalizeDesignedPart(shiftWorkshopPart(part, shift), DESIGNED_OBJECT_LIMITS);
+}
+
+// A copy of a part after a quarter turn about its own middle: about the upright line, or (`isTippedOver`) about
+// the line that points at you. The two together reach every way a part can lie along the directions it is
+// given in. A ball stays as it is. Not yet cleaned up, like shiftWorkshopPart.
+function turnWorkshopPart(part, isTippedOver) {
+  const turned = JSON.parse(JSON.stringify(part));
+  if (part.shape === 'box') {
+    const other = isTippedOver ? 1 : 2;
+    turned.half[0] = part.half[other]; turned.half[other] = part.half[0];
+  } else if (part.shape !== 'ball') {
+    const middle = [0, 1, 2].map(function (axis) { return (part.from[axis] + part.to[axis]) / 2; });
+    const half = [0, 1, 2].map(function (axis) { return (part.to[axis] - part.from[axis]) / 2; });
+    const turnedHalf = isTippedOver ? [-half[1], half[0], half[2]] : [half[2], half[1], -half[0]];
+    for (let axis = 0; axis < 3; axis++) { turned.from[axis] = middle[axis] - turnedHalf[axis]; turned.to[axis] = middle[axis] + turnedHalf[axis]; }
+  }
+  return turned;
 }
 
 function duplicateSelectedObjectWorkshopPart() {
@@ -402,23 +424,12 @@ function replaceSelectedObjectWorkshopPart(part, editLabel) {
   for (const fieldKey in state.selectedSetters) state.selectedSetters[fieldKey].setValue(part[fieldKey.slice(0, -1)][Number(fieldKey.slice(-1))]);
 }
 
-// A quarter turn of the selected part about its own middle: about the upright line, or (`isTippedOver`) about
-// the line that points at you. The two together reach every way a part can lie along the object's own directions.
+// A quarter turn of the selected part (turnWorkshopPart).
 function turnSelectedObjectWorkshopPart(isTippedOver) {
   const state = objectWorkshop;
   const part = state.object && state.object.parts[state.selectedIndex];
   if (!part || part.shape === 'ball') return;
-  const turned = JSON.parse(JSON.stringify(part));
-  if (part.shape === 'box') {
-    const other = isTippedOver ? 1 : 2;
-    turned.half[0] = part.half[other]; turned.half[other] = part.half[0];
-  } else {
-    const middle = [0, 1, 2].map(function (axis) { return (part.from[axis] + part.to[axis]) / 2; });
-    const half = [0, 1, 2].map(function (axis) { return (part.to[axis] - part.from[axis]) / 2; });
-    const turnedHalf = isTippedOver ? [-half[1], half[0], half[2]] : [half[2], half[1], -half[0]];
-    for (let axis = 0; axis < 3; axis++) { turned.from[axis] = middle[axis] - turnedHalf[axis]; turned.to[axis] = middle[axis] + turnedHalf[axis]; }
-  }
-  replaceSelectedObjectWorkshopPart(normalizeDesignedPart(turned), 'turn');
+  replaceSelectedObjectWorkshopPart(normalizeDesignedPart(turnWorkshopPart(part, isTippedOver), DESIGNED_OBJECT_LIMITS), 'turn');
   renderWorkshopPanel(); // a box's sizes have changed places
 }
 

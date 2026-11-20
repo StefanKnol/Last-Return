@@ -4,7 +4,7 @@
 //
 // `node build.js --dev` (or `npm run dev`, which also serves it and rebuilds on every change) builds a third:
 //   build/workshop.html               the game plus everything in src/dev/: debug mode, and the workshop
-//                                     with its room, object and creature editors
+//                                     with its room, object and creature tools
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -35,8 +35,8 @@ function readBuildStamp(root) {
   return stamp;
 }
 
-// Reads every .json file in src/rooms/ or src/objects/. These are rooms and loose objects made in the workshop;
-// the file name is the key.
+// Reads every .json file in src/rooms/, src/objects/ or src/creatures/. These are rooms, loose objects and
+// creatures made in the workshop; the file name is the key.
 function readDesignedFiles(sourceDirectory, folder) {
   const designed = {};
   const directory = path.join(sourceDirectory, folder);
@@ -93,9 +93,12 @@ function build(options) {
   // So are loose objects made there: 08-workshop-objects.js turns them into kinds of loose object.
   const designedRooms = readDesignedFiles(sourceDirectory, 'rooms');
   const designedObjects = readDesignedFiles(sourceDirectory, 'objects');
-  const roomScript = '// ===== rooms from src/rooms and objects from src/objects (packed by build.js) =====\n' +
+  // ... and creatures: 04-workshop-creatures.js turns them into kinds of figure.
+  const designedCreatures = readDesignedFiles(sourceDirectory, 'creatures');
+  const roomScript = '// ===== rooms from src/rooms, objects from src/objects and creatures from src/creatures (packed by build.js) =====\n' +
     'const DESIGNED_ROOMS = ' + JSON.stringify(designedRooms, null, 1) + ';\n' +
-    'const DESIGNED_OBJECTS = ' + JSON.stringify(designedObjects, null, 1) + ';\n';
+    'const DESIGNED_OBJECTS = ' + JSON.stringify(designedObjects, null, 1) + ';\n' +
+    'const DESIGNED_CREATURES = ' + JSON.stringify(designedCreatures, null, 1) + ';\n';
 
   const buildStamp = readBuildStamp(settings.root);
   const wrapScript = function (scripts, isDevBuild) {
@@ -156,6 +159,8 @@ function build(options) {
   if (roomCount > 0) messages.push('Packed ' + roomCount + ' room(s) from src/rooms.');
   const objectCount = Object.keys(designedObjects).length;
   if (objectCount > 0) messages.push('Packed ' + objectCount + ' object(s) from src/objects.');
+  const creatureCount = Object.keys(designedCreatures).length;
+  if (creatureCount > 0) messages.push('Packed ' + creatureCount + ' creature(s) from src/creatures.');
   messages.push('Built index.html (' + (standalonePage.length / 1024).toFixed(0) + ' KB) from ' + gameScripts.length + ' scripts.');
   messages.push('Stamped as version ' + (buildStamp.version || 'unknown') + ', build ' + (buildStamp.number || 'unknown') +
     ', commit ' + (buildStamp.commit || 'unknown') + '.');

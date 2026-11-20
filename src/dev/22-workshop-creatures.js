@@ -7,10 +7,16 @@
 // when you are down there together, with the scanner in its hand.
 // It can be shown as a solid body, or the way the game shows it: as nothing but the points a scan leaves.
 //
-// The sliders change the FIGURE_PROPORTIONS_... objects themselves, so the whole game uses the new
-// numbers at once. They are kept in the browser across reloads until they are written to 04-figures.js
-// ("Write to file") or thrown away ("Back to the file"). A number changed by hand in the file wins over
-// a slider that was set before.
+// Two kinds of creature can be opened:
+//   kinds written as code (FIGURE_KINDS in 04-figures.js: the Hollow, a Still, a player). Their proportions can
+//                       be changed. The sliders change the FIGURE_PROPORTIONS_... objects themselves, so the
+//                       whole game uses the new numbers at once. They are kept in the browser across reloads
+//                       until they are written to 04-figures.js ("Write to file") or thrown away ("Back to the
+//                       file"). A number changed by hand in the file wins over a slider that was set before.
+//   creatures made here saved to src/creatures/<key>.json (04-workshop-creatures.js). These can be changed in
+//                       every way: their skeleton, their proportions, which of the skeleton's own capsules they
+//                       leave out, and the shapes that are fixed to their bones. That part of the tool is in
+//                       22-workshop-creature-shapes.js.
 // ---------------------------------------------------------------------------
 
 const CREATURE_WORKSHOP_STAGE_SIZE = 13;      // the test room is this many metres square
@@ -19,8 +25,12 @@ const CREATURE_WORKSHOP_SCAN_RAYS = 2600;     // pulses fired at the creature ev
 // Short, so the cloud is the shape of the body now and not a smear of where it has been.
 TUNING.workshopImprintSeconds = 0.5;
 
-// What each kind can be set to be doing here, posed by the game's own code (updateCreatureWorkshopPose). A kind
-// that is not named can be stood up and posed by hand, which is enough to look at it and to change its numbers.
+// The kind the working copy of a creature made here is, for as long as it is open.
+const CREATURE_WORKSHOP_DRAFT_KEY = 'workshopDraft';
+
+// What a body can be set to be doing here, posed by the game's own code (updateCreatureWorkshopPose). The game
+// has three ways of posing a body, and each creature is posed by the one that fits it: the Hollow's for a body
+// on the Hollow's skeleton, a player's for a body that holds a scanner, a Still's for any other.
 const CREATURE_WORKSHOP_BEHAVIOURS = {
   hollow: [['roam', 'Roaming'], ['investigate', 'Walking to a noise'], ['hunt', 'Hunting'], ['enraged', 'Enraged'],
     ['listen', 'Standing still, listening'], ['held', 'Held in the beam'], ['caught', 'Reaching you (the last thing you see)'], ['manual', 'Posed by hand']],
@@ -29,18 +39,27 @@ const CREATURE_WORKSHOP_BEHAVIOURS = {
     ['crouched', 'Crouched'], ['crouchedScanning', 'Crouched, scanning'], ['crouchedWalking', 'Creeping along, crouched'], ['manual', 'Posed by hand']]
 };
 
-// The creatures the tool has: every kind in FIGURE_KINDS (04-figures.js). One added there turns up here by itself.
-const CREATURE_WORKSHOP_KINDS = {};
-for (const kindKey in FIGURE_KINDS) {
+// What the tool goes by for one kind of FIGURE_KINDS.
+function describeCreatureWorkshopKind(kindKey) {
   const kind = FIGURE_KINDS[kindKey];
-  CREATURE_WORKSHOP_KINDS[kindKey] = {
+  const actsLike = kind.bodyPlan === 'hollow' ? 'hollow' : (kind.holdsScanner ? 'player' : 'dummy');
+  return {
     label: kind.label, proportions: kind.proportions, constantName: kind.proportionsName.replace(/^FIGURE_PROPORTIONS_/, ''),
     surfaceClass: kind.surfaceClass, imprintTuningKey: kind.imprintTuningKey, color: kind.color,
     hasHollowBody: kind.bodyPlan === 'hollow', bodyPlan: kind.bodyPlan, heightTuningKey: kind.heightTuningKey || '',
+    isDesigned: kind.isDesigned === true, actsLike: actsLike,
     // The numbers in 00-config.js that are this creature's as well: how tall it is, standing and crouched.
-    settingKeys: [kind.heightTuningKey, kind.crouchHeightTuningKey].filter(Boolean),
-    behaviours: CREATURE_WORKSHOP_BEHAVIOURS[kindKey] || [['standing', 'Standing'], ['manual', 'Posed by hand']]
+    // (A body a player can wear is as tall as a player: those numbers are set at the player, not at each body.)
+    settingKeys: kind.isDesigned ? [] : [kind.heightTuningKey, kind.crouchHeightTuningKey].filter(Boolean),
+    behaviours: CREATURE_WORKSHOP_BEHAVIOURS[actsLike]
   };
+}
+
+// The kinds written as code: every such kind in FIGURE_KINDS (04-figures.js). One added there turns up here by
+// itself. (The creature made here that is open joins them as CREATURE_WORKSHOP_DRAFT_KEY.)
+const CREATURE_WORKSHOP_KINDS = {};
+for (const kindKey in FIGURE_KINDS) {
+  if (!FIGURE_KINDS[kindKey].isDesigned) CREATURE_WORKSHOP_KINDS[kindKey] = describeCreatureWorkshopKind(kindKey);
 }
 
 // Which creature is stood beside the one being worked on, for scale: a Still (person-sized) beside everything
@@ -91,7 +110,8 @@ const creatureWorkshop = {
   walkedDistance: 0,
   orbit: { yaw: Math.PI + 0.5, pitch: -0.1, distance: 4.4, height: 1.15 },
   drag: null,
-  readoutElement: null, readoutTimer: 0, saveButton: null
+  readoutElement: null, readoutTimer: 0, saveButton: null,
+  design: null            // a creature made here, when one is open: its working copy and what is selected on it (22-workshop-creature-shapes.js)
 };
 
 function cloneCreatureWorkshopValue(value) {
@@ -112,6 +132,8 @@ function getCreatureWorkshopChangedSettings(kindKey) {
 }
 
 function hasCreatureWorkshopChanges(kindKey) {
+  // (A creature made here: changed since it was saved. One that has no file yet has no file's shape to show.)
+  if (kindKey === CREATURE_WORKSHOP_DRAFT_KEY) return creatureWorkshop.design.isDirty && Boolean(creatureWorkshop.design.savedKey);
   return Object.keys(creatureWorkshop.overrides[kindKey]).length > 0 || getCreatureWorkshopChangedSettings(kindKey).length > 0;
 }
 
@@ -122,6 +144,7 @@ function hasCreatureWorkshopChanges(kindKey) {
 function refreshCreatureWorkshopSaveButton() {
   const state = creatureWorkshop;
   if (!state.saveButton) return;
+  if (state.design) { state.saveButton.textContent = state.design.isDirty ? 'Save *' : 'Saved'; return; }
   const count = Object.keys(state.overrides[state.kind]).length + getCreatureWorkshopChangedSettings(state.kind).length;
   state.saveButton.textContent = count > 0 ? 'Write to file * (' + count + ')' : 'Same as the file';
 }
@@ -129,6 +152,7 @@ function refreshCreatureWorkshopSaveButton() {
 // `fingerIndex` is only given for one entry of a list (fingerLengths).
 function setCreatureWorkshopProportion(key, value, fingerIndex) {
   const state = creatureWorkshop;
+  if (state.design) { setCreatureWorkshopDesignProportion(key, value, fingerIndex); return; }
   const live = CREATURE_WORKSHOP_KINDS[state.kind].proportions, file = state.fileProportions[state.kind], overrides = state.overrides[state.kind];
   if (fingerIndex !== undefined) {
     live[key] = live[key].slice();
@@ -161,6 +185,7 @@ function getCreatureWorkshopStandingHeight() {
 // set like so many sliders moved at once, and written to the file like them.
 function setCreatureWorkshopHeight(height) {
   const state = creatureWorkshop, kind = CREATURE_WORKSHOP_KINDS[state.kind];
+  if (state.design) { setCreatureWorkshopDesignHeight(height); return; } // (what is fixed to its bones is made larger or smaller with it)
   const fitted = fitFigureProportionsToHeight(kind.proportions, kind.bodyPlan, height);
   const round = function (value) { return Math.round(value * 1000) / 1000; };
   for (const key in fitted) {
@@ -193,6 +218,7 @@ function describeCreatureWorkshopChanges() {
 
 function saveCreatureWorkshop() {
   const state = creatureWorkshop;
+  if (state.design) { saveCreatureWorkshopDesign(); return; }
   const kind = CREATURE_WORKSHOP_KINDS[state.kind], overrides = state.overrides[state.kind];
   const keys = Object.keys(overrides), settingKeys = getCreatureWorkshopChangedSettings(state.kind);
   if (keys.length === 0 && settingKeys.length === 0) { setWorkshopStatus('Nothing to write: the body is the same as in 04-figures.js.', 'info'); return; }
@@ -244,7 +270,10 @@ function rebuildCreatureWorkshopStage() {
   const center = getCreatureWorkshopStageCenter();
   const otherKind = CREATURE_WORKSHOP_KINDS[getCreatureWorkshopOtherKindKey()];
   state.figure = createFigure(kind.proportions, kind.surfaceClass, state.hasGameImprints ? kind.imprintTuningKey : 'workshopImprintSeconds');
-  state.originalFigure = createFigure(state.fileProportions[state.kind], kind.surfaceClass, kind.imprintTuningKey);
+  state.figure.keepsBones = true; // a creature made here is taken hold of bone by bone
+  // (The file's shape of a creature made here is the kind its file became: its proportions, and what is on its bones.
+  // One that has no file yet has no other shape than its own.)
+  state.originalFigure = createFigure(state.design ? FIGURE_KINDS[state.design.savedKey || CREATURE_WORKSHOP_DRAFT_KEY].proportions : state.fileProportions[state.kind], kind.surfaceClass, kind.imprintTuningKey);
   state.otherFigure = createFigure(otherKind.proportions, otherKind.surfaceClass, otherKind.imprintTuningKey);
   state.figure.x = center[0]; state.figure.z = center[1];
   state.originalFigure.x = center[0] + 1.5; state.originalFigure.z = center[1];
@@ -272,6 +301,7 @@ function applyCreatureWorkshopStoredPose() {
 function updateCreatureWorkshopPose(dt) {
   const state = creatureWorkshop;
   const figure = state.figure, pose = figure.pose, standIn = state.standIn;
+  const actsLike = CREATURE_WORKSHOP_KINDS[state.kind].actsLike;
   const center = getCreatureWorkshopStageCenter();
   const towardCamera = Math.atan2(player.x - figure.x, -(player.z - figure.z));
   const behaviour = state.behaviour;
@@ -281,7 +311,7 @@ function updateCreatureWorkshopPose(dt) {
 
   if (behaviour === 'manual') {
     // Left exactly as the sliders put it.
-  } else if (state.kind === 'player') {
+  } else if (actsLike === 'player') {
     // What 11-together.js does with one of the others: the arm with the scanner goes out while they scan, the
     // legs go with how far they came, crouched they are bent at the knees and lean, and the forearm (and the
     // scanner on it) points where they look.
@@ -301,7 +331,7 @@ function updateCreatureWorkshopPose(dt) {
     pose.fingerSplay = 1;
     pose.headTilt = (Math.random() - 0.5) * 1.1;
     facesCamera = true;
-  } else if (state.kind === 'hollow') { // (posed as the Hollow itself is: by what it is doing)
+  } else if (actsLike === 'hollow') { // (posed as the Hollow itself is: by what it is doing)
     const isHunting = behaviour === 'hunt' || behaviour === 'enraged' || behaviour === 'held';
     const isListening = behaviour === 'listen';
     standIn.heldAmount = approachValue(standIn.heldAmount, behaviour === 'held' ? 1 : 0, dt * 5);
@@ -333,7 +363,7 @@ function updateCreatureWorkshopPose(dt) {
   }
 
   if (facesCamera) figure.yaw += clampNumber(wrapAngleToPi(towardCamera - figure.yaw), -dt * 6, dt * 6);
-  else if (state.isTurning && !(state.kind === 'player' && behaviour !== 'manual')) figure.yaw = wrapAngleToPi(figure.yaw + dt * 0.6); // (a player was turned above, with the rest of its pose)
+  else if (state.isTurning && !(actsLike === 'player' && behaviour !== 'manual')) figure.yaw = wrapAngleToPi(figure.yaw + dt * 0.6); // (a player was turned above, with the rest of its pose)
   updateFigureCapsules(figure);
 
   // The file's shape stands beside it in the same pose, so the two can be compared limb for limb.
@@ -356,7 +386,7 @@ function buildCreatureWorkshopReadout() {
   if (hasCreatureWorkshopChanges(state.kind)) lines.push('with the file  ' + getCreatureWorkshopHeight(state.originalFigure).toFixed(2) + ' m  (grey, beside it)');
   const fittedTo = CREATURE_WORKSHOP_KINDS[state.kind].heightTuningKey;
   if (fittedTo) lines.push('made to be     ' + TUNING[fittedTo].toFixed(2) + ' m  (' + fittedTo + ', 00-config.js: the sliders give it its shape, not its height)');
-  if (state.kind === 'player') {
+  if (CREATURE_WORKSHOP_KINDS[state.kind].actsLike === 'player') {
     // The body is what the others see. Where you bump your head and where you see from are numbers of their
     // own, in 00-config.js: these lines are for keeping the three in step. (Marked on the pole as well.)
     const isCrouched = state.behaviour.indexOf('crouched') === 0, figure = state.figure;
@@ -366,7 +396,8 @@ function buildCreatureWorkshopReadout() {
     lines.push('head, middle   ' + (getFigureHeadHeight(figure) - figure.y).toFixed(2) + ' m');
     lines.push('scanner light  ' + (light.y - figure.y).toFixed(2) + ' m');
   }
-  lines.push('body parts     ' + state.figure.capsuleCount + ' of ' + FIGURE_MAXIMUM_CAPSULES);
+  const onItsBones = state.figure.builtShape ? state.figure.builtShape.parts.length : 0;
+  lines.push('made of        ' + (state.figure.capsuleCount + state.figure.rodCount + state.figure.boxCount) + ' shapes' + (onItsBones > 0 ? ', ' + onItsBones + ' of them fixed to its bones' : ''));
   lines.push('moving at      ' + state.standIn.currentSpeed.toFixed(1) + ' m/s  (you sprint ' + TUNING.sprintSpeed + ')');
   lines.push('pole           a mark every 0.5 m');
   return lines.join('\n');
@@ -444,13 +475,14 @@ function addCreatureWorkshopOverlays(data) {
   }
   const top = getCreatureWorkshopHeight(state.figure);
   pushDebugLine(poleX, top, poleZ, state.figure.x, top, state.figure.z, 1.0, 0.8, 0.2);
-  if (state.kind === 'player') {
+  if (kind.actsLike === 'player') {
     // A player: where the game has you bump your head (red) and where it has you see from (teal), for this pose.
     const isCrouched = state.behaviour.indexOf('crouched') === 0;
     const bump = isCrouched ? TUNING.playerHeightCrouching : TUNING.playerHeight, eye = isCrouched ? (TUNING.playerHeightCrouching * TUNING.playerEyeHeightToCrouchedBody) : (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
     pushDebugLine(poleX, bump, poleZ, state.figure.x, bump, state.figure.z, 1.0, 0.35, 0.3);
     pushDebugLine(poleX, eye, poleZ, state.figure.x, eye, state.figure.z, 0.3, 0.9, 0.85);
   }
+  if (state.design) addCreatureWorkshopDesignOverlays();
 }
 
 // ---------------------------------------------------------------------------
@@ -463,7 +495,8 @@ function describeCreatureWorkshopKey(key) {
 
 function addCreatureWorkshopProportionField(body, key, value, fingerIndex) {
   const file = creatureWorkshop.fileProportions[creatureWorkshop.kind][key];
-  const fileValue = fingerIndex === undefined ? file : file[fingerIndex];
+  // (A creature made here that has just been given another skeleton has numbers its file does not.)
+  const fileValue = file === undefined ? value : (fingerIndex === undefined ? file : file[fingerIndex]);
   const isThickness = /Radius$/.test(key);
   const label = describeCreatureWorkshopKey(key).replace(/ radius$/, ' thickness (radius)') +
     (fingerIndex === undefined ? '' : ': ' + CREATURE_WORKSHOP_FINGER_NAMES[fingerIndex] + ' finger');
@@ -472,7 +505,7 @@ function addCreatureWorkshopProportionField(body, key, value, fingerIndex) {
   const field = addWorkshopNumber(body, label, value, isThickness ? 0.005 : 0, maximum, 0.005, function (newValue) {
     setCreatureWorkshopProportion(key, newValue, fingerIndex);
   });
-  field.element.title = 'In 04-figures.js: ' + formatWorkshopNumber(fileValue);
+  field.element.title = (creatureWorkshop.design ? 'In its file: ' : 'In 04-figures.js: ') + formatWorkshopNumber(fileValue);
   field.element.id = 'workshop-proportion-' + key + (fingerIndex === undefined ? '' : '-' + fingerIndex);
 }
 
@@ -480,24 +513,36 @@ function renderCreatureWorkshopPanel(body) {
   const state = creatureWorkshop;
   const kind = CREATURE_WORKSHOP_KINDS[state.kind];
 
-  addWorkshopSelect(body, 'Creature', state.kind, Object.keys(CREATURE_WORKSHOP_KINDS).map(function (key) { return [key, CREATURE_WORKSHOP_KINDS[key].label]; }), function (kindKey) {
-    state.kind = kindKey;
-    state.behaviour = CREATURE_WORKSHOP_KINDS[kindKey].behaviours[0][0];
-    state.needsStage = true;
-    markWorkshopStateChanged();
+  addWorkshopSelect(body, 'Creature', state.design ? state.design.key : state.kind, getCreatureWorkshopChoices(), function (key) {
+    if (key !== (state.design ? state.design.key : state.kind) && mayDiscardCreatureWorkshopChanges()) openCreatureInWorkshop(key);
     renderWorkshopPanel();
   }).id = 'workshop-creature';
   let row = addWorkshopRow(body);
-  state.saveButton = addWorkshopButton(row, 'Write to file', saveCreatureWorkshop,
-    workshop.hasServer ? 'Ctrl+S: writes the changed numbers into FIGURE_PROPORTIONS_' + kind.constantName + ' in src/js/04-figures.js' : 'No dev server: copies the changed numbers instead');
+  addWorkshopButton(row, 'New creature', function () { createNewWorkshopCreature(false); }, 'A body of your own: a skeleton, and the shapes you fix to its bones').id = 'workshop-new-creature';
+  addWorkshopButton(row, 'Copy of this', function () { createNewWorkshopCreature(true); }, 'A new creature that starts out as this one').id = 'workshop-copy-creature';
+  if (state.design) addWorkshopButton(row, 'Delete', deleteCreatureWorkshopDesign);
+  row = addWorkshopRow(body);
+  if (state.design) {
+    state.saveButton = addWorkshopButton(row, 'Save', saveCreatureWorkshop, workshop.hasServer ? 'Ctrl+S: writes src/creatures/' + state.design.key + '.json' : 'No dev server: downloads the file instead');
+    addWorkshopButton(row, 'Undo', function () { stepCreatureWorkshopHistory(state.design.undoStack, state.design.redoStack); }, 'Ctrl+Z');
+    addWorkshopButton(row, 'Redo', function () { stepCreatureWorkshopHistory(state.design.redoStack, state.design.undoStack); }, 'Ctrl+Y');
+    addWorkshopButton(row, 'Revert', revertCreatureWorkshopDesign, 'Back to the last saved state');
+    state.design.problemsElement = body.appendChild(createDebugElement('ul', 'workshop-problems'));
+    state.design.problemsElement.id = 'workshop-problems';
+    refreshCreatureWorkshopProblems();
+  } else {
+    state.saveButton = addWorkshopButton(row, 'Write to file', saveCreatureWorkshop,
+      workshop.hasServer ? 'Ctrl+S: writes the changed numbers into FIGURE_PROPORTIONS_' + kind.constantName + ' in src/js/04-figures.js' : 'No dev server: copies the changed numbers instead');
+    addWorkshopButton(row, 'Copy changes', function () {
+      if (hasCreatureWorkshopChanges(state.kind)) copyWorkshopText(describeCreatureWorkshopChanges(), 'changed values');
+      else setWorkshopStatus('Nothing has been changed.', 'info');
+    }, 'The changed numbers as text, to paste into the source');
+    addWorkshopButton(row, 'Back to the file', resetCreatureWorkshopProportions, 'Throws the changes away').id = 'workshop-reset-creature';
+    addWorkshopNote(body, 'This kind is written as code: its proportions can be changed here, and are written to 04-figures.js. To leave parts of it out or to fix other shapes to its bones, make a creature of your own from it: "Copy of this".');
+  }
   state.saveButton.id = 'workshop-save-creature';
   state.saveButton.classList.add('workshop-main-button');
   refreshCreatureWorkshopSaveButton();
-  addWorkshopButton(row, 'Copy changes', function () {
-    if (hasCreatureWorkshopChanges(state.kind)) copyWorkshopText(describeCreatureWorkshopChanges(), 'changed values');
-    else setWorkshopStatus('Nothing has been changed.', 'info');
-  }, 'The changed numbers as text, to paste into the source');
-  addWorkshopButton(row, 'Back to the file', resetCreatureWorkshopProportions, 'Throws the changes away').id = 'workshop-reset-creature';
   state.readoutElement = body.appendChild(createDebugElement('pre', 'debug-readout'));
   state.readoutElement.id = 'workshop-creature-readout';
   state.readoutTimer = 0;
@@ -511,7 +556,9 @@ function renderCreatureWorkshopPanel(body) {
       field.element.title = 'In 00-config.js: ' + formatWorkshopNumber(state.fileSettings[key]);
       field.element.id = key === kind.heightTuningKey ? 'workshop-creature-height' : 'workshop-creature-height-crouched';
     }
-    addWorkshopNote(body, 'The body is made to fit these, whatever its proportions are: they give it its shape.');
+    addWorkshopNote(body, state.design
+      ? 'A body a player can wear is as tall as a player is: playerHeight in 00-config.js, and playerHeightCrouching crouched (both are set at "A player"). The whole body is made to fit, with everything on its bones, so its proportions and the sizes of its shapes are shares of one another.'
+      : 'The body is made to fit these, whatever its proportions are: they give it its shape.');
   } else {
     const field = addWorkshopNumber(body, 'Standing (m): every number below, larger or smaller by the same share', Math.round(getCreatureWorkshopStandingHeight() * 100) / 100, 0.3, 4, 0.01, function (value) {
       setCreatureWorkshopHeight(value);
@@ -557,12 +604,15 @@ function renderCreatureWorkshopPanel(body) {
         markWorkshopStateChanged();
       });
     }
-  } else if (state.kind === 'player') {
+  } else if (kind.actsLike === 'player') {
     addWorkshopNumber(body, 'Looking up or down (radians: the scanner points there)', state.playerPitch, -1.45, 1.45, 0.01, function (value) { state.playerPitch = value; markWorkshopStateChanged(); }).element.id = 'workshop-creature-pitch';
     addWorkshopNote(body, 'The pose is the game\'s own, from 11-together.js: what the others see of you down there. How tall you are is said once, in 00-config.js: playerHeight standing, playerHeightCrouching crouched (and playerEyeHeightToBody and playerEyeHeightToCrouchedBody for how far up those your eyes are). The body is made to fit both. Standing, all of it is made larger or smaller until it is playerHeight tall, so the sliders below give it its shape and not its height. Crouched, it goes down on its haunches as far as it takes. Red and teal on the pole are where you bump your head and where you see from. Choose "Posed by hand" to set every joint yourself.');
   } else {
     addWorkshopNote(body, 'The pose is the game\'s own, from 08-entities.js. Choose "Posed by hand" to set every joint yourself.');
   }
+
+  // A creature made here: what is on its bones, and what it is.
+  if (state.design) renderCreatureWorkshopDesignPanel(body);
 
   // Every number of the proportions object gets a slider, so one added to 04-figures.js shows up here by itself.
   const live = kind.proportions;
@@ -586,20 +636,28 @@ function renderCreatureWorkshopPanel(body) {
 // ---------------------------------------------------------------------------
 
 function onCreatureWorkshopPointerDown(event) {
-  creatureWorkshop.drag = { lastClientX: event.clientX, lastClientY: event.clientY };
+  creatureWorkshop.drag = { lastClientX: event.clientX, lastClientY: event.clientY, grab: null };
+  // A creature made here: a click on it takes hold of a bone, or of a shape that is fixed to one.
+  if (creatureWorkshop.design && event.button === 0) takeHoldOfCreatureWorkshopDesign(event);
 }
 
 function onCreatureWorkshopPointerMove(event) {
   const state = creatureWorkshop;
   if (!state.drag) return;
+  if (state.drag.grab) { dragCreatureWorkshopPart(event); return; }
   state.orbit.yaw = wrapAngleToPi(state.orbit.yaw + (event.clientX - state.drag.lastClientX) * 0.007);
   state.orbit.pitch -= (event.clientY - state.drag.lastClientY) * 0.005;
   state.drag.lastClientX = event.clientX; state.drag.lastClientY = event.clientY;
 }
 
 function onCreatureWorkshopPointerUp() {
-  if (creatureWorkshop.drag) markWorkshopStateChanged();
-  creatureWorkshop.drag = null;
+  const state = creatureWorkshop;
+  if (!state.drag) return;
+  const wasMoving = state.drag.grab && state.drag.grab.isMoving;
+  state.drag = null;
+  if (state.design) state.design.lastEditLabel = ''; // the next drag is its own step to undo
+  markWorkshopStateChanged();
+  if (wasMoving) renderWorkshopPanel(); // the list shows where the shapes are
 }
 
 function onCreatureWorkshopWheel(event) {
@@ -643,7 +701,9 @@ workshop.tools.creatures = {
   },
   open: function (stored) {
     const state = creatureWorkshop;
-    if (CREATURE_WORKSHOP_KINDS[stored.kind]) state.kind = stored.kind;
+    // The creature that was open: a kind written as code, a creature made here, or work on one that is not saved yet.
+    restoreCreatureWorkshopDesign(stored);
+    if (!state.design && CREATURE_WORKSHOP_KINDS[stored.kind] && stored.kind !== CREATURE_WORKSHOP_DRAFT_KEY) state.kind = stored.kind;
     const kind = CREATURE_WORKSHOP_KINDS[state.kind];
     state.behaviour = kind.behaviours.some(function (choice) { return choice[0] === stored.behaviour; }) ? stored.behaviour : kind.behaviours[0][0];
     if (stored.view === 'solid' || stored.view === 'scanned' || stored.view === 'both') state.view = stored.view;
@@ -659,10 +719,14 @@ workshop.tools.creatures = {
     rebuildCreatureWorkshopStage();
     placeCreatureWorkshopCamera();
   },
-  close: function () { creatureWorkshop.drag = null; creatureWorkshop.readoutElement = null; creatureWorkshop.saveButton = null; },
+  close: function () {
+    creatureWorkshop.drag = null; creatureWorkshop.readoutElement = null; creatureWorkshop.saveButton = null;
+    if (creatureWorkshop.design) creatureWorkshop.design.problemsElement = null;
+  },
   storeState: function (stored) {
     const state = creatureWorkshop;
-    stored.kind = state.kind;
+    stored.kind = state.design ? state.design.key : state.kind;
+    storeCreatureWorkshopDesign(stored);
     stored.behaviour = state.behaviour;
     stored.view = state.view;
     stored.showsOriginal = state.showsOriginal;
@@ -685,5 +749,5 @@ workshop.tools.creatures = {
   onPointerMove: onCreatureWorkshopPointerMove,
   onPointerUp: onCreatureWorkshopPointerUp,
   onWheel: onCreatureWorkshopWheel,
-  onKey: function () { return false; }
+  onKey: function (event) { return creatureWorkshop.design ? onCreatureWorkshopDesignKey(event) : false; }
 };

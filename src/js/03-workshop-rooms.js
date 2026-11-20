@@ -184,6 +184,44 @@ function normalizeDesignedFields(target, source, fields) {
   return target;
 }
 
+// ---------------------------------------------------------------------------
+// The basic forms that things made in the workshop are put together from: a loose object (08-workshop-objects.js)
+// and what a creature has on its bones (04-workshop-creatures.js). A part is a box, a ball, or a rod from one
+// place to another.
+// ---------------------------------------------------------------------------
+
+// The parts that are a rod from one place to another, `radius` thick: with round ends, with flat ends, and
+// flat at `from` with a point at `to`.
+const DESIGNED_ROD_SHAPES = ['capsule', 'cylinder', 'cone'];
+
+// A place in a thing: three numbers within `reach` of its origin, to the tenth of a millimetre.
+function normalizeDesignedPlace(source, fallback, reach) {
+  return [0, 1, 2].map(function (axis) {
+    return Math.round(normalizeDesignedNumber(Array.isArray(source) ? source[axis] : undefined, fallback[axis], -reach, reach) * 10000) / 10000;
+  });
+}
+
+// Returns a clean copy of one part, or null if it is not a box, a ball, a capsule, a cylinder or a cone.
+// `limits` says how far from the origin a part may be and how thin and thick: { reach, minimumRadius,
+// maximumRadius, minimumHalf, maximumHalf }.
+function normalizeDesignedPart(source, limits) {
+  if (!source || typeof source !== 'object') return null;
+  const radius = function (fallback) { return Math.round(normalizeDesignedNumber(source.radius, fallback, limits.minimumRadius, limits.maximumRadius) * 10000) / 10000; };
+  if (source.shape === 'box') {
+    return { shape: 'box', center: normalizeDesignedPlace(source.center, [0, 0, 0], limits.reach), half: [0, 1, 2].map(function (axis) {
+      return Math.round(normalizeDesignedNumber(Array.isArray(source.half) ? source.half[axis] : undefined, 0.1, limits.minimumHalf, limits.maximumHalf) * 10000) / 10000;
+    }) };
+  }
+  if (source.shape === 'ball') return { shape: 'ball', center: normalizeDesignedPlace(source.center, [0, 0, 0], limits.reach), radius: radius(0.08) };
+  if (DESIGNED_ROD_SHAPES.indexOf(source.shape) < 0) return null;
+  const part = { shape: source.shape, from: normalizeDesignedPlace(source.from, [0, -0.1, 0], limits.reach), to: normalizeDesignedPlace(source.to, [0, 0.1, 0], limits.reach), radius: radius(source.shape === 'cone' ? 0.08 : 0.05) };
+  // A rod with no length has no direction to be drawn in: it gets a little.
+  if (Math.abs(part.to[0] - part.from[0]) + Math.abs(part.to[1] - part.from[1]) + Math.abs(part.to[2] - part.from[2]) < 0.001) {
+    part.to[1] = part.from[1] + (part.from[1] > 0 ? -0.02 : 0.02);
+  }
+  return part;
+}
+
 // Returns a clean copy of one item, or null if it is not something the catalogue above knows.
 function normalizeDesignedItem(source, room) {
   if (!source || !ROOM_ITEM_TYPES[source.type]) return null;

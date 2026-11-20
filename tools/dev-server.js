@@ -3,8 +3,9 @@
 //   - builds the game with the workshop added (build.js --dev) and serves it
 //   - rebuilds whenever something in src/ or assets/ changes and tells the open page to reload,
 //     so a number changed in the source shows up in the workshop a moment later
-//   - lets the workshop save: a room becomes src/rooms/<key>.json, a loose object src/objects/<key>.json,
-//     and creature proportions are written into the FIGURE_PROPORTIONS_... blocks of src/js/04-figures.js
+//   - lets the workshop save: a room becomes src/rooms/<key>.json, a loose object src/objects/<key>.json, a
+//     creature made there src/creatures/<key>.json, and the proportions of a creature that is written as code
+//     are written into the FIGURE_PROPORTIONS_... blocks of src/js/04-figures.js
 //   - keeps lobbies, as the real server does (server/server.js), so that "Descend together" can be tried
 //     between two windows on this machine. Both have to be the same page: the workshop build and the plain
 //     game are different builds, and a lobby holds one. A rebuild reloads the pages, which ends their lobby.
@@ -72,7 +73,7 @@ function patchObjectNumbers(source, constantName, values) {
 }
 
 // A room file is ordinary JSON, laid out with one door and one item per line so changes read well in a diff.
-// An object file is laid out the same way: one part per line.
+// An object file is laid out the same way: one part per line. So is a creature file: one shape on its bones per line.
 function formatRoomFile(room) {
   const oneLine = function (value) {
     return '{ ' + Object.keys(value).map((key) => JSON.stringify(key) + ': ' + JSON.stringify(value[key])).join(', ') + ' }';
@@ -92,7 +93,7 @@ function formatRoomFile(room) {
   return '{\n' + lines.join(',\n') + '\n}\n';
 }
 
-// `folder` is 'rooms' or 'objects': what the workshop makes is one file per thing in src/<folder>/.
+// `folder` is 'rooms', 'objects' or 'creatures': what the workshop makes is one file per thing in src/<folder>/.
 function saveDesignedFile(root, folder, key, content) {
   if (!ROOM_KEY_PATTERN.test(key)) throw new Error('A file name starts with a small letter and has only letters and digits: "' + key + '" will not do.');
   if (!content || typeof content !== 'object' || Array.isArray(content)) throw new Error('That is not something to save.');
@@ -234,6 +235,8 @@ function startDevServer(options) {
     '/dev/delete-room': function (body) { return { file: deleteDesignedFile(root, 'rooms', String(body.key)) }; },
     '/dev/save-object': function (body) { return { file: saveDesignedFile(root, 'objects', String(body.key), body.object) }; },
     '/dev/delete-object': function (body) { return { file: deleteDesignedFile(root, 'objects', String(body.key)) }; },
+    '/dev/save-creature': function (body) { return { file: saveDesignedFile(root, 'creatures', String(body.key), body.creature) }; },
+    '/dev/delete-creature': function (body) { return { file: deleteDesignedFile(root, 'creatures', String(body.key)) }; },
     '/dev/save-proportions': function (body) { return saveProportions(root, String(body.figure), body.values || {}, body.settings || {}); }
   };
 
