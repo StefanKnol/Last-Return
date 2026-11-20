@@ -1,8 +1,60 @@
-// Shared helper for the scripts in this folder: opens the built game in headless Chromium.
+// Shared helper for the scripts in this folder: opens the built game in Chromium without a window.
 // `openGame({ dev: true })` opens the dev build instead (build/workshop.html), which has debug mode in it.
 // Needs Playwright (npm install, then npx playwright install chromium).
 const path = require('path');
 const { chromium } = require('playwright');
+
+// Which browser the suites run in: the real one, and not the one Playwright would pick by itself.
+//
+// Playwright comes with two Chromiums. Left to itself, with no window to show, it starts the "headless shell":
+// a small build made for servers, with a windowing layer of its own. Asked for `channel: 'chromium'` it starts
+// the browser itself, the one players have, only without a window. `npx playwright install chromium` fetches both.
+//
+// The shell has a fault that this game walks straight into. While a page holds the mouse (the game takes it
+// on "Begin descent", and gives it back at the menu, when you die, when the lift goes up and at the title
+// screen), the shell sends that page mouse moves without end: 80,000 to 90,000 a second, every one of them a
+// move of nothing, with nobody touching anything. (Its main process makes up a mouse move, and dealing with
+// that one makes up the next: a trace shows some 50,000 tasks a second there, all posted by
+// `PostSynthesizeMouseMove`.) The page makes an object of every one of them, and they are handed to the game
+// a frame's worth at a time.
+//
+// What that cost, measured on a machine with four cores:
+//   - One browser: a core and more in the browser's main process and another in the page, for nothing, and
+//     the game running at a quarter to four fifths of its speed.
+//   - Three browsers playing at once, as in together-test.js: no page keeps up any more. The moves pile up
+//     faster than they are dealt with, a frame takes seconds, and within three minutes the pages have grown
+//     to 2.5 to 4 GB and the browsers' main processes to 1 to 2 GB each. (In together-test.js that came to
+//     14 GB on a machine with 15, where the kernel then killed a browser: "Target crashed".) The same three
+//     browsers with the mouse not held: 0.2 GB a page, and flat.
+//   - It is let go the moment the mouse is: which is why the memory fell at the title screen, and why it
+//     looked like something a descent left behind.
+// The real browser sends a page that holds a still mouse nothing at all (the same version of Chromium, 158,
+// was tried as both). In it together-test.js takes two minutes where it took six to eight, and its pages stay
+// at 0.4 GB where they reached 2 to 3.7; most of the other suites are quicker as well, by a third to a half.
+// together-test.js checks that no moves arrive, so that this cannot come back unnoticed.
+//
+// `launchBrowser()` is the one place a suite gets its browser from. The frames are drawn in software
+// (SwiftShader), so a machine without a graphics card will do.
+function launchBrowser() {
+  return chromium.launch({
+    channel: 'chromium',
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
+  });
+}
+
+// How many mouse moves reach a page in a stretch of time, with whether it holds the mouse. Every move the
+// browser was sent is counted, also the ones it puts together into one event a frame.
+function countMouseMoves(page, milliseconds) {
+  return page.evaluate((milliseconds) => new Promise((resolve) => {
+    let moves = 0;
+    const countMove = (event) => { moves += Math.max(1, event.getCoalescedEvents().length); };
+    window.addEventListener('pointermove', countMove, true);
+    window.setTimeout(() => {
+      window.removeEventListener('pointermove', countMove, true);
+      resolve({ moves: moves, isMouseHeld: document.pointerLockElement !== null });
+    }, milliseconds);
+  }), milliseconds);
+}
 
 // A long stretch of script, and the browser's own housekeeping.
 //
@@ -19,6 +71,10 @@ const { chromium } = require('playwright');
 //     await window.letTheBrowserCatchUp();
 // With one of those after every door, the chases stay at 1.1 to 1.4 GB. quests-test.js and generators-test.js
 // take one before every station they build, 286 and 64 of them: 2.6 and 2.3 GB came down to 1.1 to 1.6.
+// (All of those figures were measured in Playwright's headless shell, where a page that holds the mouse was
+// being sent mouse moves by the ten thousand as well: see "Which browser the suites run in" above. They piled
+// up during a long stretch of script like everything else. In the real browser, with the pauses in, the three
+// suites peak at 0.5 to 1.0 GB.)
 //
 // The game draws nothing in such a pause, and does not move on in it. Left alone it would: a frame of its own
 // comes up in nearly every pause, and drawing one is slow in these tests. With those frames drawn, the pauses
@@ -103,9 +159,7 @@ function readOtherStations() {
 // `workshopContent: true` leaves the stations as the game builds them, with what the workshop made.
 async function openGame(options) {
   const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false }, options || {});
-  const browser = await chromium.launch({
-    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
-  });
+  const browser = await launchBrowser();
   const context = await browser.newContext({
     viewport: { width: settings.width, height: settings.height },
     deviceScaleFactor: settings.deviceScaleFactor,
@@ -160,4 +214,4 @@ async function carryFuelToTank(page, canQuestObjectId, machineObjectId, mostSeco
   return page.evaluate((given) => window.lastReturnDebug.carryFuelToTank(given[0], given[1], given[2]), [canQuestObjectId, machineObjectId || 0, mostSeconds || 12]);
 }
 
-module.exports = { openGame, startGame, drawFrames, carryFuelToTank };
+module.exports = { launchBrowser, openGame, startGame, drawFrames, countMouseMoves, carryFuelToTank };
