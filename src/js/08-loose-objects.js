@@ -991,6 +991,44 @@ function addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, rad
   }
 }
 
+// What a ball touches of one thing that stands in the station (a box, a cylinder or a ball: see 02-world.js).
+function addLooseContactsWithProp(prop, positionX, positionY, positionZ, radius) {
+  if (prop.kind === PROP_KIND_BOX) addLooseContactsWithBoxProp(prop, positionX, positionY, positionZ, radius);
+  else if (prop.kind === PROP_KIND_CYLINDER) addLooseContactsWithCylinderProp(prop, positionX, positionY, positionZ, radius);
+  else {
+    const offsetX = positionX - prop.centerX, offsetY = positionY - prop.centerY, offsetZ = positionZ - prop.centerZ;
+    const distance = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
+    if (distance < radius + prop.radius && distance > 1e-6) addLooseContact(offsetX / distance, offsetY / distance, offsetZ / distance, radius + prop.radius - distance);
+  }
+}
+
+// What a ball touches of another loose object, where that one is now.
+function addLooseContactsWithLooseObject(other, positionX, positionY, positionZ, radius, isOfBox) {
+  const offsetX = positionX - other.x, offsetY = positionY - other.y, offsetZ = positionZ - other.z;
+  const reach = radius + other.prepared.boundsRadius;
+  if (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ >= reach * reach) return;
+  // Its boxes as they are, and of whatever else it is made of the balls that stand in for it. (A ball that
+  // stands in for a box of this object is not held against those: the other's balls are held against the box
+  // itself, in gatherLooseTouchesOnOwnBoxes, and the two answers would not agree.)
+  if (other.prepared.boxes.length > 0) addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, radius);
+  if (isOfBox) return;
+  const shell = other.prepared.shell, shellIsOfBox = other.prepared.shellIsOfBox, matrix = other.matrix;
+  for (let ballIndex = 0; ballIndex < other.prepared.shellCount; ballIndex++) {
+    if (shellIsOfBox[ballIndex] === 1) continue;
+    const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], otherRadius = shell[ballIndex * 4 + 3];
+    const otherX = other.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
+    const otherY = other.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
+    const otherZ = other.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
+    const deltaX = positionX - otherX, deltaY = positionY - otherY, deltaZ = positionZ - otherZ;
+    const distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ, both = radius + otherRadius;
+    if (distanceSquared >= both * both || distanceSquared < 1e-10) continue;
+    const distance = Math.sqrt(distanceSquared);
+    const contact = addLooseContact(deltaX / distance, deltaY / distance, deltaZ / distance, both - distance);
+    if (!contact) return;
+    contact.other = other;
+  }
+}
+
 // `isOfBox`: the ball is one of those that stand in for a box of the object.
 function collectLooseContacts(object, positionX, positionY, positionZ, radius, isOfBox) {
   looseContactCount = 0;
@@ -1061,13 +1099,7 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius, i
         prop.collisionStamp = stamp;
         if (prop.isRemoved) continue;
         if (positionY - radius > prop.maximumY || positionY + radius < prop.minimumY) continue;
-        if (prop.kind === PROP_KIND_BOX) addLooseContactsWithBoxProp(prop, positionX, positionY, positionZ, radius);
-        else if (prop.kind === PROP_KIND_CYLINDER) addLooseContactsWithCylinderProp(prop, positionX, positionY, positionZ, radius);
-        else {
-          const offsetX = positionX - prop.centerX, offsetY = positionY - prop.centerY, offsetZ = positionZ - prop.centerZ;
-          const distance = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
-          if (distance < radius + prop.radius && distance > 1e-6) addLooseContact(offsetX / distance, offsetY / distance, offsetZ / distance, radius + prop.radius - distance);
-        }
+        addLooseContactsWithProp(prop, positionX, positionY, positionZ, radius);
       }
     }
   }
@@ -1077,30 +1109,7 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius, i
   const neighbours = ballTileX >= 0 && ballTileZ >= 0 && ballTileX < GRID_WIDTH && ballTileZ < GRID_DEPTH ? tileLooseLists[ballTileZ * GRID_WIDTH + ballTileX] : null;
   for (let objectIndex = 0; neighbours !== null && objectIndex < neighbours.length; objectIndex++) {
     const other = neighbours[objectIndex];
-    if (other === object) continue;
-    const offsetX = positionX - other.x, offsetY = positionY - other.y, offsetZ = positionZ - other.z;
-    const reach = radius + other.prepared.boundsRadius;
-    if (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ >= reach * reach) continue;
-    // Its boxes as they are, and of whatever else it is made of the balls that stand in for it. (A ball that
-    // stands in for a box of this object is not held against those: the other's balls are held against the box
-    // itself, in gatherLooseTouchesOnOwnBoxes, and the two answers would not agree.)
-    if (other.prepared.boxes.length > 0) addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, radius);
-    if (isOfBox) continue;
-    const shell = other.prepared.shell, shellIsOfBox = other.prepared.shellIsOfBox, matrix = other.matrix;
-    for (let ballIndex = 0; ballIndex < other.prepared.shellCount; ballIndex++) {
-      if (shellIsOfBox[ballIndex] === 1) continue;
-      const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], otherRadius = shell[ballIndex * 4 + 3];
-      const otherX = other.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
-      const otherY = other.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
-      const otherZ = other.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
-      const deltaX = positionX - otherX, deltaY = positionY - otherY, deltaZ = positionZ - otherZ;
-      const distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ, both = radius + otherRadius;
-      if (distanceSquared >= both * both || distanceSquared < 1e-10) continue;
-      const distance = Math.sqrt(distanceSquared);
-      const contact = addLooseContact(deltaX / distance, deltaY / distance, deltaZ / distance, both - distance);
-      if (!contact) break;
-      contact.other = other;
-    }
+    if (other !== object) addLooseContactsWithLooseObject(other, positionX, positionY, positionZ, radius, isOfBox);
   }
 
   // You and the Hollow. What you are carrying passes through you: the beam has it. A kind with a step-over
@@ -2799,20 +2808,124 @@ function updateHollowAtVentCovers() {
   }
 }
 
+// Would a ball of a thing's shell, at this place, be in something that is in its way: rock, the side of a step,
+// the wall over a doorway or a vent, the shaft, something that stands in the station, or another loose thing
+// that is heavy enough to slow you when you walk into it? What lies lower than five centimetres does not count
+// (the floor the thing stands on, a plate on the floor), nor does a vent cover lying flat: something thrown
+// clears those.
+// `looseThingsInTheWay` are the loose things to ask about: see measureRoomForLooseObject, which picks them out.
+const LOOSE_ROOM_CLEARS_METRES = 0.05;
+function isSomethingInTheWayOfLooseBall(positionX, positionY, positionZ, radius, looseThingsInTheWay) {
+  const bottom = positionY - radius + LOOSE_ROOM_CLEARS_METRES, top = positionY + radius - LOOSE_ROOM_CLEARS_METRES;
+  for (let tileZ = Math.floor(positionZ - radius); tileZ <= Math.floor(positionZ + radius); tileZ++) {
+    for (let tileX = Math.floor(positionX - radius); tileX <= Math.floor(positionX + radius); tileX++) {
+      const deltaX = positionX - clampNumber(positionX, tileX, tileX + 1), deltaZ = positionZ - clampNumber(positionZ, tileZ, tileZ + 1);
+      if (deltaX * deltaX + deltaZ * deltaZ >= radius * radius) continue; // the ball does not reach this tile
+      if (!isInsideGrid(tileX, tileZ)) return true;
+      const index = tileZ * GRID_WIDTH + tileX;
+      if (tileIsOpen[index] === 0 || (tileFlags[index] & TILE_FLAG_PIT)) return true; // rock, or the shaft: what goes down there is gone
+      if (tileFloorHeight[index] > bottom || tileCeilingHeight[index] < top) return true; // a step up, or too low a ceiling
+      const list = tilePropLists[index];
+      if (list === null) continue;
+      for (let listIndex = 0; listIndex < list.length; listIndex++) {
+        const prop = list[listIndex];
+        if (prop.isRemoved || bottom > prop.maximumY || top < prop.minimumY) continue;
+        // (Asked the way a ball that is really there is asked what it touches: anything at all is in the way.)
+        looseContactCount = 0;
+        addLooseContactsWithProp(prop, positionX, positionY, positionZ, radius);
+        if (looseContactCount > 0) return true;
+      }
+    }
+  }
+  for (let otherIndex = 0; otherIndex < looseThingsInTheWay.length; otherIndex++) {
+    looseContactCount = 0;
+    addLooseContactsWithLooseObject(looseThingsInTheWay[otherIndex], positionX, positionY, positionZ, radius, false);
+    if (looseContactCount > 0) return true;
+  }
+  return false;
+}
+
+// How much room is there for this thing to go this way? It is moved along the way as it stands, a little at a
+// time, and asked at each place whether any of it would be in something. Returns how far it got, in metres:
+// `furthestMetres` if nothing was in its way that far. (The way is over the ground: `towardsX` and `towardsZ`
+// are one metre long together.)
+const LOOSE_ROOM_STEP_METRES = 0.08; // finer than anything in a station is thin, so that nothing is stepped over
+function measureRoomForLooseObject(object, towardsX, towardsZ, furthestMetres) {
+  const shell = object.prepared.shell, matrix = object.matrix;
+  // The other loose things it could reach that far: a station has hundreds, and nearly all of them are rooms away.
+  const looseThingsInTheWay = [];
+  for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
+    const other = looseObjects[objectIndex], reach = furthestMetres + object.prepared.boundsRadius + other.prepared.boundsRadius;
+    if (other === object || other.isRemoved || other.isHeld || other.heldById || other.kind.mass < TUNING.looseShoveFreeMass) continue; // (not what somebody has in a beam: that is on its way somewhere else)
+    if ((other.x - object.x) * (other.x - object.x) + (other.z - object.z) * (other.z - object.z) >= reach * reach || isLooseObjectLyingLow(other)) continue;
+    looseThingsInTheWay.push(other);
+  }
+  for (let metres = LOOSE_ROOM_STEP_METRES; metres < furthestMetres + LOOSE_ROOM_STEP_METRES; metres += LOOSE_ROOM_STEP_METRES) {
+    const moved = Math.min(metres, furthestMetres);
+    for (let ballIndex = 0; ballIndex < object.prepared.shellCount; ballIndex++) {
+      const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2];
+      if (isSomethingInTheWayOfLooseBall(
+        object.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ + towardsX * moved,
+        object.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ,
+        object.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ + towardsZ * moved, shell[ballIndex * 4 + 3], looseThingsInTheWay)) return metres - LOOSE_ROOM_STEP_METRES;
+    }
+  }
+  return furthestMetres;
+}
+
+// Which way the Hollow throws a cover that stands in front of this mouth.
+//
+// The ways it may throw are a fan, measured round from "straight out of the mouth into the room". Coming out of
+// the duct: straight out, or up to about fifty degrees to either side. Going in from the room it stands where
+// that would hit it, so it throws the cover away along the wall, to one side or the other, and a little out
+// into the room.
+//
+// It looks where there is room. Along the fan, one way every `hollowThrowsCoverWayApart`, it measures how far
+// the cover could go before it hit something. A way with `hollowThrowsCoverRoomMetres` of room is as good as
+// any other such way. If no way has that much, only the way with the most room will do. So a cover is not
+// thrown into the wall or the shelf beside the mouth while another way is open.
+//
+// Among the ways that will do, the draw decides, and the draw is not left to chance: it belongs to this mouth
+// of this station, and to whether the Hollow is coming out or going in (createNamedRandomGenerator in
+// 01-math.js). The same station, the same mouth and the same room round it: the same throw, every time.
+//
+// Returns the way it takes: its angle, where that points (one metre long) and how much room it has. With it
+// come `ways`, all the ways it looked along, each described like that; and `random`, the rest of the same draw,
+// for how the cover turns as it leaves the Hollow's hands.
+function chooseVentCoverThrow(object, mouth, isHollowInTheRoom) {
+  const random = createNamedRandomGenerator(level.seed, 'vent cover ' + level.ventMouths.indexOf(mouth) + (isHollowInTheRoom ? ' thrown aside' : ' thrown out'));
+  const angles = [], apart = TUNING.hollowThrowsCoverWayApart;
+  if (isHollowInTheRoom) {
+    const from = TUNING.hollowThrowsCoverAsideFrom, to = TUNING.hollowThrowsCoverAsideTo, gaps = Math.max(1, Math.round((to - from) / apart));
+    for (let side = -1; side <= 1; side += 2) for (let gap = 0; gap <= gaps; gap++) angles.push(side * (from + (to - from) * gap / gaps));
+  } else {
+    const spread = TUNING.hollowThrowsCoverOutSpread, gaps = Math.max(1, Math.round(2 * spread / apart));
+    for (let gap = 0; gap <= gaps; gap++) angles.push(-spread + 2 * spread * gap / gaps);
+  }
+  const ways = [];
+  let mostRoom = 0;
+  for (const angle of angles) {
+    const cosine = Math.cos(angle), sine = Math.sin(angle);
+    const way = { angle: angle, towardsX: -mouth.outwardX * cosine + mouth.outwardZ * sine, towardsZ: -mouth.outwardZ * cosine - mouth.outwardX * sine, roomMetres: 0 };
+    // (Measured no further than "room enough": every way that has it comes out the same, and so as good as another.)
+    way.roomMetres = measureRoomForLooseObject(object, way.towardsX, way.towardsZ, TUNING.hollowThrowsCoverRoomMetres);
+    mostRoom = Math.max(mostRoom, way.roomMetres);
+    ways.push(way);
+  }
+  // (Room is measured in steps, so "the most" is the same number wherever it was found: no rounding to allow for.)
+  const waysThatWillDo = ways.filter(function (way) { return way.roomMetres >= mostRoom; });
+  const taken = waysThatWillDo[Math.floor(random() * waysThatWillDo.length)];
+  return { angle: taken.angle, towardsX: taken.towardsX, towardsZ: taken.towardsZ, roomMetres: taken.roomMetres, ways: ways, random: random };
+}
+
 function throwVentCoverFromHollow(object, mouth, isHollowInTheRoom) {
-  // Coming out of the duct, it throws the cover straight out into the room, or up to about fifty degrees to
-  // either side of that. Going in from the room it stands where that would hit it: it throws the cover away
-  // along the wall, to one side or the other, and a little out into the room.
-  const side = Math.random() < 0.5 ? -1 : 1;
-  const angle = isHollowInTheRoom ? side * (1.1 + Math.random() * 0.3) : (Math.random() * 2 - 1) * 0.9;
-  const cosine = Math.cos(angle), sine = Math.sin(angle);
-  const outX = -mouth.outwardX * cosine + mouth.outwardZ * sine, outZ = -mouth.outwardZ * cosine - mouth.outwardX * sine;
+  const way = chooseVentCoverThrow(object, mouth, isHollowInTheRoom), outX = way.towardsX, outZ = way.towardsZ, spin = TUNING.hollowThrowsCoverSpin;
   changePointsOnLooseObject(object, TUNING.looseImprintSeconds); // what you scanned of it where it stood fades
   wakeLooseObjectsTouching(object);
   wakeLooseObject(object);
   object.velocityX = outX * TUNING.hollowThrowsCoverSpeed; object.velocityZ = outZ * TUNING.hollowThrowsCoverSpeed;
   object.velocityY = TUNING.hollowThrowsCoverLift;
-  object.spinX = (Math.random() - 0.5) * 8; object.spinY = (Math.random() - 0.5) * 8; object.spinZ = (Math.random() - 0.5) * 8;
+  object.spinX = (way.random() * 2 - 1) * spin; object.spinY = (way.random() * 2 - 1) * spin; object.spinZ = (way.random() * 2 - 1) * spin;
   object.kickedByHollowTime = game.time;
   object.wasHandled = false; object.isIgnoredByHollow = true;
   object.chaseUntil = undefined; object.chasedSince = game.time;

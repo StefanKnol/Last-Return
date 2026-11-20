@@ -1837,31 +1837,45 @@ function installLab() {
 
     // A station with five that stand, for the rest. A massive one: a large one has three vents at most, six
     // mouths, and five of six covers standing is a draw that forty seeds can miss (seeds 2001 to 2040 did).
-    // The Hollow throws a cover by chance (throwVentCoverFromHollow, in 08-loose-objects.js): coming out of the duct
-    // straight out into the room or up to 0.9 of a radian to either side of that; going in from the room along the
-    // wall, 1.1 to 1.4 radians to one side or the other. It does not look where there is room. So the cover for
-    // each of those two checks is one with room for every throw the game may make: open floor two and a half metres
-    // out along every way it may go (every twentieth of a radian), at shin, waist and shoulder height (a cover is
-    // 1.2 m high), from a third of a metre in front of the cover, its middle and either end of it (it is 1.12 m wide). Anything in the way counts, a loose thing too.
-    const hasRoomForEveryThrow = function (cover, angles) {
+    // The Hollow throws a cover where there is room (chooseVentCoverThrow, in 08-loose-objects.js). The ways it
+    // may throw are a fan: coming out of the duct, straight out into the room or up to hollowThrowsCoverOutSpread
+    // to either side of that; going in from the room, along the wall to one side or the other, from
+    // hollowThrowsCoverAsideFrom to hollowThrowsCoverAsideTo round. Of those it looks along one way every
+    // hollowThrowsCoverWayApart, and takes one that has room. So the cover for these checks needs room along a
+    // stretch of its fan, not along all of it: a stretch wider than the gap between two ways the game looks
+    // along, so that one of them lies in it.
+    // Room is measured here with the scanner's ray, not with the game's own measure, which is what is being
+    // checked: open floor two and a half metres out, at shin, waist and shoulder height (a cover is 1.2 m high),
+    // from a third of a metre in front of the cover, its middle and either end of it (it is 1.12 m wide).
+    // Anything in the way counts, a loose thing too.
+    const hasRoomAlong = function (cover, angle) {
       const mouth = mouthOf(cover), outX = mouth.outwardX, outZ = mouth.outwardZ;
-      for (const angle of angles) {
-        const towardsX = -outX * Math.cos(angle) + outZ * Math.sin(angle), towardsZ = -outZ * Math.cos(angle) - outX * Math.sin(angle);
-        for (const alongTheWall of [-0.56, 0, 0.56]) {
-          const fromX = cover.x - outX * 0.35 + outZ * alongTheWall, fromZ = cover.z - outZ * 0.35 - outX * alongTheWall;
-          for (const height of [0.3, 0.9, 1.4]) {
-            if (d.castScannerRay(fromX, mouth.floorY + height, fromZ, towardsX, 0, towardsZ, 2.5) && d.rayHit.distance < 2.5) return false;
-          }
+      const towardsX = -outX * Math.cos(angle) + outZ * Math.sin(angle), towardsZ = -outZ * Math.cos(angle) - outX * Math.sin(angle);
+      for (const alongTheWall of [-0.56, 0, 0.56]) {
+        const fromX = cover.x - outX * 0.35 + outZ * alongTheWall, fromZ = cover.z - outZ * 0.35 - outX * alongTheWall;
+        for (const height of [0.3, 0.9, 1.4]) {
+          if (d.castScannerRay(fromX, mouth.floorY + height, fromZ, towardsX, 0, towardsZ, 2.5) && d.rayHit.distance < 2.5) return false;
         }
       }
       return true;
     };
-    const anglesFrom = function (first, last) { const angles = []; for (let angle = first; angle <= last + 1e-9; angle += 0.05) angles.push(angle); return angles; };
-    const throwsOut = anglesFrom(-0.9, 0.9), throwsAside = anglesFrom(1.1, 1.4).concat(anglesFrom(-1.4, -1.1));
-    // Of the covers that stand, one with room for the throws out of the duct and another with room for the throws aside, or null.
+    // Is there such a stretch between these two angles: four ways in a row, half a gap apart, each with room?
+    // (Four, which is a gap and a half: the game spreads its ways evenly over the fan, and where the fan is not
+    // a whole number of gaps wide they come out up to half as far apart again as hollowThrowsCoverWayApart says.)
+    const hasStretchWithRoom = function (cover, first, last) {
+      let inARow = 0;
+      for (let angle = first; angle <= last + 1e-9; angle += d.tuning.hollowThrowsCoverWayApart / 2) {
+        inARow = hasRoomAlong(cover, angle) ? inARow + 1 : 0;
+        if (inARow === 4) return true;
+      }
+      return false;
+    };
+    const outSpread = d.tuning.hollowThrowsCoverOutSpread, asideFrom = d.tuning.hollowThrowsCoverAsideFrom, asideTo = d.tuning.hollowThrowsCoverAsideTo;
+    // Of the covers that stand: one with room somewhere out of its duct, and another with room along the wall
+    // on both sides (so that there is another side to throw to when something is put on one). Or null.
     const roomyPair = function (standingCovers) {
-      for (const outward of standingCovers.filter((cover) => hasRoomForEveryThrow(cover, throwsOut))) {
-        const aside = standingCovers.find((cover) => cover !== outward && hasRoomForEveryThrow(cover, throwsAside));
+      for (const outward of standingCovers.filter((cover) => hasStretchWithRoom(cover, -outSpread, outSpread))) {
+        const aside = standingCovers.find((cover) => cover !== outward && hasStretchWithRoom(cover, asideFrom, asideTo) && hasStretchWithRoom(cover, -asideTo, -asideFrom));
         if (aside) return { outward: outward, aside: aside };
       }
       return null;
@@ -1869,12 +1883,42 @@ function installLab() {
     let standing = survey('massive', (all) => { const standingCovers = all.filter((entry) => entry.item.on === 'vent').map((entry) => entry.object); return standingCovers.length >= 5 && roomyPair(standingCovers) !== null; })
       .filter((entry) => entry.item.on === 'vent').map((entry) => entry.object);
     const roomy = roomyPair(standing);
-    if (standing.length < 5 || !roomy) { result.notFound = 'no massive station among the first forty seeds has five covers standing, among them one with room for every throw out of its duct and another with room for every throw aside'; return result; }
+    if (standing.length < 5 || !roomy) { result.notFound = 'no massive station among the first forty seeds has five covers standing, among them one with room somewhere out of its duct and another with room along the wall on both sides'; return result; }
     // (Those two last: the fourth for the Hollow coming out, the fifth for the Hollow going in.)
     standing = standing.filter((cover) => cover !== roomy.outward && cover !== roomy.aside).concat([roomy.outward, roomy.aside]);
-    // The station as it was when it was looked at, again, and that cover in it: for the Hollow's throws, which need
-    // the room that was looked for, and not a cover moved into it by the checks before (one taken off and put down,
-    // or the one the Hollow threw out of its duct a moment ago).
+
+    // The rule itself, asked of every cover that stands in that station, both ways through its mouth: the ways
+    // it looks along run from one end of the fan to the other and nowhere else, about as far apart as the game
+    // says (never half as far again); each has the room the game measures along it when asked again; the way it
+    // takes is one of them, and has as much room as any of them (room is measured no further than "room enough",
+    // so every way with room enough is as good as another); and asked twice, it takes the same way and turns the
+    // cover the same.
+    result.rule = { covers: standing.length, asked: 0, withRoomEnough: 0, withLess: 0, wrong: [] };
+    for (const cover of standing) {
+      for (const isHollowInTheRoom of [false, true]) {
+        const mouth = mouthOf(cover), taken = d.chooseVentCoverThrow(cover, mouth, isHollowInTheRoom), again = d.chooseVentCoverThrow(cover, mouth, isHollowInTheRoom);
+        const where = (isHollowInTheRoom ? 'going in at' : 'coming out at') + ' the cover at ' + cover.x.toFixed(1) + ', ' + cover.z.toFixed(1) + ': ';
+        const angles = taken.ways.map((way) => way.angle), enough = d.tuning.hollowThrowsCoverRoomMetres, apart = d.tuning.hollowThrowsCoverWayApart;
+        result.rule.asked++;
+        if (taken.roomMetres >= enough) result.rule.withRoomEnough++; else result.rule.withLess++;
+        const sides = isHollowInTheRoom ? [angles.filter((angle) => angle < 0).map((angle) => -angle), angles.filter((angle) => angle > 0)] : [angles];
+        const first = isHollowInTheRoom ? asideFrom : -outSpread, last = isHollowInTheRoom ? asideTo : outSpread;
+        for (const side of sides) {
+          if (side.length < 2 || Math.abs(side[0] - first) > 1e-9 || Math.abs(side[side.length - 1] - last) > 1e-9) result.rule.wrong.push(where + 'the ways it looks along do not run from one end of the fan to the other');
+          for (let index = 1; index < side.length; index++) if (side[index] - side[index - 1] > apart * 1.5 + 1e-9 || side[index] <= side[index - 1]) result.rule.wrong.push(where + 'two ways it looks along are further apart than the game says, or out of order');
+        }
+        for (const way of taken.ways) {
+          if (Math.abs(way.roomMetres - d.measureRoomForLooseObject(cover, way.towardsX, way.towardsZ, enough)) > 1e-9) result.rule.wrong.push(where + 'a way does not have the room the game measures along it');
+          if (way.roomMetres > taken.roomMetres + 1e-9) result.rule.wrong.push(where + 'it takes a way with ' + taken.roomMetres.toFixed(2) + ' m of room while another has ' + way.roomMetres.toFixed(2));
+        }
+        if (!taken.ways.some((way) => way.angle === taken.angle && way.roomMetres === taken.roomMetres && way.towardsX === taken.towardsX && way.towardsZ === taken.towardsZ)) result.rule.wrong.push(where + 'the way it takes is not one of the ways it looked along');
+        if (again.angle !== taken.angle || again.random() !== taken.random() || again.random() !== taken.random() || again.random() !== taken.random()) result.rule.wrong.push(where + 'asked twice, it does not take the same way or turn the cover the same');
+      }
+    }
+
+    // The station as it was when it was looked at, again, and that cover in it: for the Hollow's throws. They are
+    // made from the same beginning each time, because the same beginning is what must give the same throw; and
+    // so that no cover lies in the way that the checks before moved there.
     const chosenSeed = result.counts[result.counts.length - 1].seed;
     const indexOf = new Map(standing.map((cover) => [cover, d.looseObjects.indexOf(cover)])); // (where each is in the station's list)
     const asItWas = function (cover) {
@@ -1882,7 +1926,9 @@ function installLab() {
       d.loadStation('generated', chosenSeed, 'massive', 'mixed', 'one');
       d.game.flags.hasLeftLift = true; d.game.flags.powerOn = true;
       d.setDebugOption('freezeCreatures', true); d.hollow.isActive = false;
-      return d.looseObjects[index];
+      const again = d.looseObjects[index];
+      indexOf.set(again, index);
+      return again;
     };
 
     // One taken off with the beam: quietly, and then the vent is open.
@@ -1949,14 +1995,41 @@ function installLab() {
       }
       d.hollow.isActive = false;
       for (let step = 0; step < 240 && !cover.isAsleep; step++) d.simulate(1 / 30);
+      // Which way it was thrown, as the game measures it: round from "straight out of the mouth into the room",
+      // in radians. More than nothing is to the one side along the wall, less than nothing to the other.
+      // (Nothing at all if it was not thrown.)
+      const thrown = d.looseState.lastCoverThrown, wasThrown = d.looseState.statistics.coversThrown > thrownBefore;
+      const angle = wasThrown ? Math.atan2(thrown.towardsX * mouth.outwardZ - thrown.towardsZ * mouth.outwardX, -(thrown.towardsX * mouth.outwardX + thrown.towardsZ * mouth.outwardZ)) : null;
       return { thrown: d.looseState.statistics.coversThrown - thrownBefore, metres: lab.round(Math.hypot(cover.x - stoodAt.x, cover.z - stoodAt.z)), itEndedAt: along(mouth, cover.x, cover.z), itInTheVent: d.isVentAt(cover.x, cover.z),
-        knocks: lab.since(knocksBefore), said: d.captionCounts.hollowFling, startledIt: lab.noises.length };
+        knocks: lab.since(knocksBefore), said: d.captionCounts.hollowFling, startledIt: lab.noises.length, angle: wasThrown ? lab.round(angle) : null,
+        // Where it came to rest and how it lies, to the last digit: for "the same throw twice".
+        exactly: [cover.x, cover.y, cover.z, cover.orientationX, cover.orientationY, cover.orientationZ, cover.orientationW] };
     };
-    cover = asItWas(standing[3]); mouth = mouthOf(cover);
-    result.hollowPast = hollowGoes(cover, mouth, -0.75, -2.5, 0, 3, 50);     // along the wall, three quarters of a metre off it, past the mouth
-    result.hollowOut = hollowGoes(cover, mouth, 1.5, 0, -3, 0, 45);          // from inside the duct, out through the mouth
-    cover = asItWas(standing[4]); mouth = mouthOf(cover);
-    result.hollowIn = hollowGoes(cover, mouth, -2.6, 0, 3, 0, 45);           // from the room, in through the mouth
+    result.fans = { outSpread: outSpread, asideFrom: asideFrom, asideTo: asideTo };
+    // Each walk in the station as it was. The last two are made twice, for "the same throw twice".
+    const walksPast = function () { cover = asItWas(standing[3]); mouth = mouthOf(cover); return hollowGoes(cover, mouth, -0.75, -2.5, 0, 3, 50); }; // along the wall, three quarters of a metre off it, past the mouth
+    const comesOut = function () { cover = asItWas(standing[3]); mouth = mouthOf(cover); return hollowGoes(cover, mouth, 1.5, 0, -3, 0, 45); };     // from inside the duct, out through the mouth
+    const goesIn = function () { cover = asItWas(standing[4]); mouth = mouthOf(cover); return hollowGoes(cover, mouth, -2.6, 0, 3, 0, 45); };       // from the room, in through the mouth
+    result.hollowPast = walksPast();
+    result.hollowOut = comesOut();
+    result.hollowIn = goesIn();
+    result.again = { hollowOut: comesOut(), hollowIn: goesIn() };
+
+    // Something heavy standing beside the mouth, first on one side and then on the other: going in from the
+    // room, the Hollow throws the cover to the side that is open. (The box of tools/test-objects.js, which
+    // weighs more than the game's looseShoveFreeMass: light things are not in a thrown cover's way.) It stands
+    // against the wall, its middle 95 cm along from the cover's: just past the cover's end.
+    result.besideABox = [];
+    for (const side of [-1, 1]) {
+      cover = asItWas(standing[4]); mouth = mouthOf(cover);
+      const boxX = cover.x + mouth.outwardZ * side * 0.95 - mouth.outwardX * 0.2, boxZ = cover.z - mouth.outwardX * side * 0.95 - mouth.outwardZ * 0.2;
+      const box = d.createLooseObject('testBox', boxX, mouth.floorY + 0.24, boxZ, 0);
+      for (let step = 0; step < 90 && !box.isAsleep; step++) d.simulate(1 / 30);
+      const boxStoodWithin = lab.round(Math.hypot(box.x - boxX, box.z - boxZ)), gameSeesNoRoomOnThatSide = d.chooseVentCoverThrow(cover, mouth, true).ways.filter((way) => way.angle * side > 0).every((way) => way.roomMetres < 1);
+      const went = hollowGoes(cover, mouth, -2.6, 0, 3, 0, 45);
+      result.besideABox.push({ boxOnSide: side, boxWeighs: d.looseObjectKinds.testBox.mass, lightIsUnder: d.tuning.looseShoveFreeMass, boxAtRest: box.isAsleep && boxStoodWithin < 0.1, boxStoodWithin: boxStoodWithin,
+        gameSeesNoRoomOnThatSide: gameSeesNoRoomOnThatSide, thrown: went.thrown, angle: went.angle, metres: went.metres, itInTheVent: went.itInTheVent });
+    }
     lab.reset();
     return result;
   });
@@ -1976,11 +2049,23 @@ function installLab() {
     Boolean(covers.hollowIn) && !covers.fromTheRoom.youInTheVent && !covers.fromTheRoom.itInTheVent && covers.fromTheRoom.youGotAsFarAs < 0 && covers.fromTheRoom.itGotAsFarAs < 0.05, covers.fromTheRoom);
   check('crawl out through one from inside and it goes over into the room with a clang that carries; it lies flat out there, and you are out',
     Boolean(covers.hollowIn) && covers.fromInside.liesFlat && !covers.fromInside.itInTheVent && covers.fromInside.itLies < -0.3 && covers.fromInside.knocks.heard >= 1 && covers.fromInside.carries > 10 && covers.fromInside.youAre < -0.5, covers.fromInside);
+  // (Which way: within the fan the game's numbers give, with a hundredth of a radian for the rounding here.)
   check('the Hollow walking past a covered vent leaves the cover alone; coming out through the vent it throws the cover out across the room: you hear that, with a direction, and it does not startle the Hollow',
     Boolean(covers.hollowIn) && covers.hollowPast.thrown === 0 && covers.hollowPast.metres === 0 && covers.hollowOut.thrown === 1 && covers.hollowOut.metres > 0.8 && !covers.hollowOut.itInTheVent && covers.hollowOut.itEndedAt < -0.3 &&
+    Math.abs(covers.hollowOut.angle) <= covers.fans.outSpread + 0.01 &&
     covers.hollowOut.knocks.heard >= 1 && covers.hollowOut.said >= 1 && covers.hollowOut.startledIt === 0, [covers.hollowPast, covers.hollowOut]);
   check('going into a vent from the room, it throws the cover aside along the wall, and the cover does not end up in the duct',
-    Boolean(covers.hollowIn) && covers.hollowIn.thrown === 1 && covers.hollowIn.metres > 0.8 && !covers.hollowIn.itInTheVent && covers.hollowIn.startledIt === 0, covers.hollowIn);
+    Boolean(covers.hollowIn) && covers.hollowIn.thrown === 1 && covers.hollowIn.metres > 0.8 && !covers.hollowIn.itInTheVent && covers.hollowIn.startledIt === 0 &&
+    Math.abs(covers.hollowIn.angle) >= covers.fans.asideFrom - 0.01 && Math.abs(covers.hollowIn.angle) <= covers.fans.asideTo + 0.01, covers.hollowIn);
+  check('which way it throws a cover is not left to chance: the same station and the same mouth, and the cover goes the same way and comes to rest in exactly the same place, coming out and going in',
+    Boolean(covers.again) && covers.hollowOut.thrown === 1 && covers.hollowIn.thrown === 1 &&
+    JSON.stringify(covers.again.hollowOut) === JSON.stringify(covers.hollowOut) && JSON.stringify(covers.again.hollowIn) === JSON.stringify(covers.hollowIn),
+    covers.again ? { comingOut: [covers.hollowOut.exactly, covers.again.hollowOut.exactly], goingIn: [covers.hollowIn.exactly, covers.again.hollowIn.exactly] } : undefined);
+  check('it looks where there is room: with something heavy standing beside the mouth on one side it throws the cover to the other side, whichever side that is',
+    Boolean(covers.besideABox) && covers.besideABox.length === 2 && covers.besideABox.every((went) => went.boxWeighs >= went.lightIsUnder && went.boxAtRest && went.gameSeesNoRoomOnThatSide &&
+      went.thrown === 1 && went.angle * went.boxOnSide < 0 && went.metres > 0.8 && !went.itInTheVent), covers.besideABox);
+  check('of the ways it may throw a cover it takes one with the most room, and every way with room enough is as good as another: so for every cover that stands in that station, coming out and going in',
+    Boolean(covers.rule) && covers.rule.asked === covers.rule.covers * 2 && covers.rule.covers >= 5 && covers.rule.wrong.length === 0, covers.rule);
 
   // --- what a knock costs ---
   const breakage = await inGame((spot) => {

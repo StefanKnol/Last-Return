@@ -332,10 +332,10 @@ function getQuestObjectId(definition, index, isItem) {
 }
 
 // A sequence of random numbers that belongs to one quest (or pool) in one station.
+// (The numbers are those of createNamedRandomGenerator in 01-math.js, which was taken from here: every quest
+// is drawn exactly as it always was.)
 function createQuestRandom(seed, name) {
-  let hash = 2166136261;
-  for (let index = 0; index < name.length; index++) hash = Math.imul(hash ^ name.charCodeAt(index), 16777619);
-  return createSeededRandomGenerator((Math.imul(seed + 1, 0x9e3779b1) ^ hash) >>> 0);
+  return createNamedRandomGenerator(seed, name);
 }
 
 // ---------------------------------------------------------------------------

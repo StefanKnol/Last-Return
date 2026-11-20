@@ -222,6 +222,14 @@ const TUNING = {
   hollowThrowsCoverMetres: 1.2,     // the Hollow, going into a vent or coming out of one, has the cover that stands there in its hands from this near ...
   hollowThrowsCoverSpeed: 8,        // ... and throws it out across the room at this speed over the ground (m/s) ...
   hollowThrowsCoverLift: 2.2,       // ... and this much upwards
+  hollowThrowsCoverSpin: 4,         // it leaves the Hollow's hands turning: by up to this much about each of its three axes (radians a second)
+  // Which way it throws. Angles are in radians, measured round from "straight out of the mouth into the room"
+  // (0.9 is about fifty degrees; 1.57 would be flat along the wall).
+  hollowThrowsCoverOutSpread: 0.9,  // coming out of the duct: straight out into the room, or up to this far to either side of that
+  hollowThrowsCoverAsideFrom: 1.1,  // going in from the room it stands where that would hit it, so it throws along the wall, to one side or the other: from this far round ...
+  hollowThrowsCoverAsideTo: 1.4,    // ... to this far round
+  hollowThrowsCoverWayApart: 0.1,   // of those ways it looks along one every this far apart (about six degrees), for room ...
+  hollowThrowsCoverRoomMetres: 3,   // ... and room enough is this far along a way with nothing for the cover to hit. It throws along a way that has it; if none has, along the way with the most.
   looseLitterPerRoom: 0.7,          // boxes, plates and stray cans: this many for every room and corridor
   looseValuablesPerRoom: 0.4,       // things worth carrying out: this many for every room and corridor
   haulShareOfValue: 0.4,            // the salvage quest asks for this share of what everything within walking reach of the lift is worth
