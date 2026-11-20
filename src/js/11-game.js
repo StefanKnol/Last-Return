@@ -112,6 +112,7 @@ function fireGameEvent(eventName) {
   for (const cue of DISPATCH_CUES) {
     if (cue.when !== eventName) continue;
     if (cue.onlyWithHollow && !game.difficulty.hollowEnabled) continue;
+    if (cue.ifItWasAsleep && hollow.isActive) continue;
     if ((cue.ifCarLeaves && game.isCarStaying) || (cue.ifCarStays && !game.isCarStaying)) continue;
     // (Two of the recordings count the spools, which is only true where there are three and they are what you
     // came for. On any other work order the station counts as one where that is not so.)
@@ -149,6 +150,7 @@ function resetWorldState() {
   flags.spoolsUploaded = false;
   game.placesEntered = {};
   resetQuests();
+  resetArrivals();
   game.liftCountdown = -1;
   game.isLiftDoorClosingBehindYou = false;
   game.scheduledEvents.length = 0;
@@ -506,13 +508,8 @@ function startGenerator(interactable) {
   refreshObjective();
   showMessage('Generator 2 running. Mains restored.', 4, 'info');
   fireGameEvent('mainsOn');
-  if (game.difficulty.hollowEnabled) {
-    scheduleEvent(TUNING.hollowWakeDelaySeconds, function () {
-      activateHollow(HOLLOW_SPAWN_POSITION.x, HOLLOW_SPAWN_POSITION.z, 3);
-      hollow.state = HOLLOW_STATE_INVESTIGATE;
-      hollow.targetX = level.generatorApproachX; hollow.targetZ = level.generatorApproachZ;
-    });
-  }
+  // Whatever is still asleep down there wakes, a few seconds on (08-arrivals.js). It may be about already.
+  scheduleEvent(TUNING.hollowWakeDelaySeconds, letCreaturesArriveWithTheMains);
 }
 
 // The lines on the way down, for the station that is loaded. The one that names the work order is this
@@ -897,6 +894,7 @@ function updateStation(dt) {
   if (debugState.options.freezeCreatures || game.mode === 'dying') {
     hollow.figure.hitsThisFrame = 0;
   } else {
+    updateArrivals(dt); // what is not here yet may come now (08-arrivals.js)
     shareWorldSoundsDuring(function () { updateHollow(dt); updateStills(dt); });
   }
 }
@@ -1224,6 +1222,9 @@ function startApplication() {
     sizePresets: GENERATED_SIZE_PRESETS,
     grantSpools: function () { game.flags.spoolsCollected = level.spoolCount; refreshObjective(); },
     spawnHollow: function (x, z) { activateHollow(x, z, 2); },
+    // Arrivals (08-arrivals.js): how each wait stands, what can arrive, and the questions the game asks of them.
+    arrivals: arrivals, creatureArrivals: CREATURE_ARRIVALS, getSecondsUntilArrival: getSecondsUntilArrival, resetArrivals: resetArrivals,
+    doCreaturesArriveByThemselves: doCreaturesArriveByThemselves, findUnpoweredStartTiles: findUnpoweredStartTiles, hollowSpawn: HOLLOW_SPAWN_POSITION,
     // The Hollow and locked doors: its ceiling hatches, what is shut to it right now, and its way round.
     hollowHatches: hollowHatches, tileBlocksHollow: tileBlocksHollow, auditHollowRoutes: auditHollowRoutes,
     gridWidth: GRID_WIDTH, // tiles in one row of the map: a tile's place in tileBlocksHollow is z * gridWidth + x

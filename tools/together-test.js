@@ -843,6 +843,36 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await fine(0.6);
   for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, can = d.looseObjects.filter((object) => object.id === id)[0]; if (can) d.removeLooseObject(can); d.getFuelTanks().splice(d.getFuelTanks().indexOf(window.testTank), 1); }, fuelCanIds[0]);
 
+  // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
+  // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.
+  // For this check the host's game is given its say back, with half a minute of its wait left.)
+  const readRadio = (page) => page.evaluate(() => Array.from(document.querySelectorAll('#hud-messages .hud-message')).map((element) => element.textContent).join(' | '));
+  const arrivalIn = (page) => page.evaluate(() => { const d = window.lastReturnDebug, wait = d.arrivals.waits.hollow; return { here: d.hollow.isActive, hasArrived: wait.hasArrived, cause: wait.cause, takenByNoise: Math.round(wait.takenByNoise * 10) / 10 }; });
+  await a.evaluate(() => {
+    const d = window.lastReturnDebug, wait = d.arrivals.waits.hollow;
+    d.hollow.isActive = false;
+    d.debugState.areArrivalsHeld = false;
+    wait.hasArrived = false; wait.isDue = ''; wait.cause = ''; wait.takenByNoise = 0;
+    wait.quietSeconds = wait.goneBy + 30;
+  });
+  // It is not the other's to say that it has come.
+  await b.evaluate(() => window.lastReturnDebug.askToAct({ what: 'arrive', key: 'hollow', cause: 'time' }));
+  await fine(1);
+  const arrivalAsked = { host: await arrivalIn(a), other: await arrivalIn(b) };
+  // The other is loud: seven full sweeps' worth of noise, where they stand. That is the host's wait run out.
+  await b.evaluate(() => { const d = window.lastReturnDebug; for (let count = 0; count < 7; count++) d.emitNoise(d.player.x, d.player.z, d.tuning.noiseRadiusSweep); });
+  for (let turn = 0; turn < 20 && !(await arrivalIn(b)).hasArrived; turn++) await fine(0.3);
+  const arrivalHeard = { host: await arrivalIn(a), other: await arrivalIn(b) };
+  let radioA = '', radioB = '';
+  for (let turn = 0; turn < 30 && !(/Keep the noise down/.test(radioA) && /Keep the noise down/.test(radioB)); turn++) { await fine(0.3); radioA += await readRadio(a); radioB += await readRadio(b); }
+  const arrivalShown = await b.evaluate(() => window.lastReturnDebug.hollow.isActive);
+  check('the Hollow arriving is not the other\'s to say; noise the other makes runs the host\'s wait down, and when it is over it arrives in both games, woken by noise',
+    !arrivalAsked.host.here && !arrivalAsked.host.hasArrived && !arrivalAsked.other.hasArrived && arrivalHeard.host.here && arrivalHeard.host.hasArrived && arrivalHeard.host.cause === 'noise' &&
+    arrivalHeard.host.takenByNoise >= 30 && arrivalHeard.other.hasArrived && arrivalHeard.other.cause === 'noise' && arrivalShown, [arrivalAsked, arrivalHeard, arrivalShown]);
+  check('and Dispatch tells both of you that the shaft sensor has tripped', /Keep the noise down/.test(radioA) && /Keep the noise down/.test(radioB), [radioA.slice(0, 160), radioB.slice(0, 160)]);
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.hollow.isActive = false; d.debugState.areArrivalsHeld = true; });
+  await fine(0.5);
+
   // Something breaks: it is gone from both games.
   const brokenId = await a.evaluate(() => {
     const d = window.lastReturnDebug, thing = d.looseObjects.filter((object) => object.kind.shattersAt)[0] || d.looseObjects[d.looseObjects.length - 1];

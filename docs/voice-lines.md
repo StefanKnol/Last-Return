@@ -24,6 +24,7 @@ A night-shift controller at the surface, talking to you over a poor radio link. 
 | `firstSpoolOfMany.mp3` | That is one. Crew 2 logged more of them. One is in the calibration store, one is at the shaft, and the rest are wherever they left them. | The same, a little wearier: the list is longer than he would like. Only on a Survey order with more than three spools. |
 | `generatorStarted.mp3` | We see the load up here. Powered doors should answer now. | Matter-of-fact, eyes on a gauge. |
 | `generatorFollowUp.mp3` | Odd. The motion sensor in the shaft chamber just tripped. Probably the mains coming back. | Mild curiosity on "Odd." Then talks himself out of it. Not worried. |
+| `shaftSensorTripped.mp3` | Odd. The motion sensor in the shaft chamber just tripped, and you are nowhere near it. Keep the noise down. | The same "Odd." as the line above, but this time he has nothing to blame it on, and it shows. The last sentence is an order, quietly given. |
 | `keycardTaken.mp3` | That card opens the keycard doors. Shaft 9 is behind one of them. | Helpful, brief. |
 | `lowerKeycardTaken.mp3` | That card opens some of the doors. Not the way to Shaft 9. There is another card further in. | Helpful, brief, a little apologetic. Only heard in large stations, which have more than one card. |
 | `secondSpool.mp3` | That is two. Do not stay in that room. | First sentence normal. Second sentence a little too quick. Said when the Stills of the calibration store wake, in stations with exactly three spools. |

@@ -86,6 +86,11 @@ function explainCustomDifficultyValue(key, value) {
       return 'About ' + Math.round(1 / (TUNING.heatPerSecondWhilePainting * value)) + ' s of painting before the scanner overheats.';
     case 'staminaFactor':
       return 'A full bar is ' + (TUNING.staminaSeconds * value).toFixed(1) + ' s of sprinting.';
+    case 'arrivalFactor': {
+      if (value <= 0) return 'Only once Generator 2 is running, wherever you are.';
+      const range = TUNING.hollowArrivalQuietSeconds, minutes = function (seconds) { return (Math.round(seconds / value / 30) / 2).toString().replace('.5', '½'); };
+      return 'In an uncharted annex: ' + minutes(range[0]) + ' to ' + minutes(range[1]) + ' quiet minutes after you leave the lift, sooner for every noise, and at once if you start Generator 2. In Kessel-9: with the power.';
+    }
     case 'phantomFactor':
       if (value <= 0) return 'None, not even the ones that stand at fixed places.';
       return 'About ' + getPhantomBudgetForRooms(19, value) + ' in a descent of Kessel-9, more in a bigger station.';

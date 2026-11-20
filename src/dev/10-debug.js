@@ -21,6 +21,7 @@ const DEBUG_OPTION_DEFINITIONS = [
   { key: 'invulnerable', group: 'Cheat', label: 'Cannot be caught', hint: 'Creatures still chase you, but touching you does nothing.' },
   { key: 'creaturesIgnorePlayer', group: 'Cheat', label: 'Creatures ignore me', hint: 'The Hollow senses nothing and the Stills never advance.' },
   { key: 'freezeCreatures', group: 'Cheat', label: 'Freeze creatures', hint: 'Everything that walks stops where it is.' },
+  { key: 'holdArrivals', group: 'Cheat', label: 'Nothing arrives by itself', hint: 'The Hollow only comes when Generator 2 is started, as in Kessel-9, however long you take and however loud you are.' },
   { key: 'unlimitedScanner', group: 'Cheat', label: 'Scanner never heats', hint: 'Paint and sweep without limit.' },
   { key: 'unlimitedStamina', group: 'Cheat', label: 'Unlimited sprint', hint: 'The stamina bar stays full.' },
   { key: 'flyMode', group: 'Cheat', label: 'Fly through walls', hint: 'W and S move where you look, walls do not stop you, Shift goes faster. Nothing can catch you while flying.' }
@@ -586,7 +587,10 @@ function buildDebugReadout() {
     lines.push('  steering  to rooms ' + director.ringMinimumSteps + ' to ' + (director.ringMaximumSteps > 9000 ? 'any' : director.ringMaximumSteps) + ' steps from you; it is ' +
       (director.stepsToPlayer >= NAVIGATION_UNREACHABLE ? 'unreachable' : director.stepsToPlayer + ' steps') + ' away');
   } else {
-    lines.push('HOLLOW      not in the station');
+    const secondsLeft = getSecondsUntilArrival('hollow'), wait = arrivals.waits.hollow;
+    lines.push('HOLLOW      not in the station' + (secondsLeft < 0
+      ? (game.difficulty.hollowEnabled && !(wait && wait.hasArrived) ? ': it comes with the mains' : '')
+      : ': it comes by itself in ' + Math.ceil(secondsLeft) + ' s if nothing makes a sound (' + (game.flags.hasLeftLift ? 'noise has taken ' + Math.round(wait.takenByNoise) + ' s off so far' : 'counted from when you leave the lift') + ')'));
   }
   lines.push('station     ' + level.description);
   lines.push('crawlspace  ' + hollowHatches.length + ' hatches in ' + hollowPartCount + ' locked-off part' + (hollowPartCount === 1 ? '' : 's') + '; you are in part ' +

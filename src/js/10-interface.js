@@ -111,7 +111,7 @@ function initializeInterface() {
   const difficultyDescriptions = {
     survey: 'Nothing hunts you. Walk the station, map it, read what the last crew left.',
     standard: 'It is blind. It hears running, sweeps and doors. The beam slows it, and angers it.',
-    nightmare: 'It is faster and hears further. The emitter overheats sooner.'
+    nightmare: 'It is faster, hears further, and comes sooner. The emitter overheats sooner.'
   };
   const difficultyInputs = document.querySelectorAll('input[name="difficulty"]');
   const refreshDifficulty = function () {

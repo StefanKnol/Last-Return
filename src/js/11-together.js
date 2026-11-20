@@ -921,6 +921,8 @@ function readAction(data) {
   if (data.what === 'restart' && Number.isInteger(data.id)) return { what: 'restart', id: data.id };
   // Things that lie loose (see further down).
   if ((data.what === 'take' || data.what === 'release' || data.what === 'carry' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
+  // What lives down there arrives (the host's to decide, likewise: 08-arrivals.js).
+  if (data.what === 'arrive' && findCreatureArrival(data.key) && (data.cause === 'time' || data.cause === 'noise' || data.cause === 'mains')) return { what: 'arrive', key: data.key, cause: data.cause };
   // A splash from a fuel can into a tank (the host's to decide: see hearOfTheStation, which lets nobody else ask).
   if (data.what === 'pour' && Number.isInteger(data.id) && Number.isInteger(data.tank)) return { what: 'pour', id: data.id, tank: data.tank };
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
@@ -937,7 +939,7 @@ function readAction(data) {
 // stand, and what is only for the one who did it (see wrapForTogether) is left out.
 function performActionFor(actorId, action) {
   // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
-  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour';
+  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour' || action.what === 'arrive';
   const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z }); // (gone since: it is still done)
   game.actor = other;
   together.isCarryingOut = true;
@@ -954,6 +956,7 @@ function performAction(action) {
   else if (action.what === 'ascend') beginAscent();
   else if (action.what === 'fall') dropFallenScanner(action);
   else if (action.what === 'restart') restartFallenScanner(action.id);
+  else if (action.what === 'arrive') performArrival(action);
   else if (action.what === 'allDown') {
     game.isDescentLost = true;
     if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // it says so
@@ -1262,7 +1265,7 @@ function hearOfTheStation(id, data) {
       const action = readAction(data.a);
       // When the car goes up, when a scanner is restarted, when everyone is down, what a salvage bay does and
       // takes, and a fuel can pouring are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
-      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour'].indexOf(action.what) >= 0;
+      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive'].indexOf(action.what) >= 0;
       if (action && !isTheHostsToSay) decideAction(id, action);
     }
     return;
