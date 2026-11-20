@@ -1022,7 +1022,12 @@ function addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, rad
   }
 }
 
-// What a ball touches of one thing that stands in the station (a box, a cylinder or a ball: see 02-world.js).
+// What a ball touches of one thing that stands in the station (a box, a cylinder or a ball: see 02-world.js),
+// and, below, of one other loose object. These two are for asking about a place where no ball is yet
+// (measureRoomForLooseObject). collectLooseContacts does the same for a ball that is really there, and has it
+// written out in its own loops on purpose: it runs for every ball of everything that moves, 120 times a
+// second, and calling these from there made twelve tumbling things cost about 7% more (measured).
+// Whoever changes how a ball touches a prop or another object changes it in both places.
 function addLooseContactsWithProp(prop, positionX, positionY, positionZ, radius) {
   if (prop.kind === PROP_KIND_BOX) addLooseContactsWithBoxProp(prop, positionX, positionY, positionZ, radius);
   else if (prop.kind === PROP_KIND_CYLINDER) addLooseContactsWithCylinderProp(prop, positionX, positionY, positionZ, radius);
@@ -1130,7 +1135,13 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius, i
         prop.collisionStamp = stamp;
         if (prop.isRemoved) continue;
         if (positionY - radius > prop.maximumY || positionY + radius < prop.minimumY) continue;
-        addLooseContactsWithProp(prop, positionX, positionY, positionZ, radius);
+        if (prop.kind === PROP_KIND_BOX) addLooseContactsWithBoxProp(prop, positionX, positionY, positionZ, radius);
+        else if (prop.kind === PROP_KIND_CYLINDER) addLooseContactsWithCylinderProp(prop, positionX, positionY, positionZ, radius);
+        else {
+          const offsetX = positionX - prop.centerX, offsetY = positionY - prop.centerY, offsetZ = positionZ - prop.centerZ;
+          const distance = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
+          if (distance < radius + prop.radius && distance > 1e-6) addLooseContact(offsetX / distance, offsetY / distance, offsetZ / distance, radius + prop.radius - distance);
+        }
       }
     }
   }
@@ -1140,7 +1151,30 @@ function collectLooseContacts(object, positionX, positionY, positionZ, radius, i
   const neighbours = ballTileX >= 0 && ballTileZ >= 0 && ballTileX < GRID_WIDTH && ballTileZ < GRID_DEPTH ? tileLooseLists[ballTileZ * GRID_WIDTH + ballTileX] : null;
   for (let objectIndex = 0; neighbours !== null && objectIndex < neighbours.length; objectIndex++) {
     const other = neighbours[objectIndex];
-    if (other !== object) addLooseContactsWithLooseObject(other, positionX, positionY, positionZ, radius, isOfBox);
+    if (other === object) continue;
+    const offsetX = positionX - other.x, offsetY = positionY - other.y, offsetZ = positionZ - other.z;
+    const reach = radius + other.prepared.boundsRadius;
+    if (offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ >= reach * reach) continue;
+    // Its boxes as they are, and of whatever else it is made of the balls that stand in for it. (A ball that
+    // stands in for a box of this object is not held against those: the other's balls are held against the box
+    // itself, in gatherLooseTouchesOnOwnBoxes, and the two answers would not agree.)
+    if (other.prepared.boxes.length > 0) addLooseContactsWithBoxesOf(other, positionX, positionY, positionZ, radius);
+    if (isOfBox) continue;
+    const shell = other.prepared.shell, shellIsOfBox = other.prepared.shellIsOfBox, matrix = other.matrix;
+    for (let ballIndex = 0; ballIndex < other.prepared.shellCount; ballIndex++) {
+      if (shellIsOfBox[ballIndex] === 1) continue;
+      const localX = shell[ballIndex * 4], localY = shell[ballIndex * 4 + 1], localZ = shell[ballIndex * 4 + 2], otherRadius = shell[ballIndex * 4 + 3];
+      const otherX = other.x + matrix[0] * localX + matrix[1] * localY + matrix[2] * localZ;
+      const otherY = other.y + matrix[3] * localX + matrix[4] * localY + matrix[5] * localZ;
+      const otherZ = other.z + matrix[6] * localX + matrix[7] * localY + matrix[8] * localZ;
+      const deltaX = positionX - otherX, deltaY = positionY - otherY, deltaZ = positionZ - otherZ;
+      const distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ, both = radius + otherRadius;
+      if (distanceSquared >= both * both || distanceSquared < 1e-10) continue;
+      const distance = Math.sqrt(distanceSquared);
+      const contact = addLooseContact(deltaX / distance, deltaY / distance, deltaZ / distance, both - distance);
+      if (!contact) break;
+      contact.other = other;
+    }
   }
 
   // You and the Hollow. What you are carrying passes through you: the beam has it. A kind with a step-over
