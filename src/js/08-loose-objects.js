@@ -466,6 +466,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     scanHits: 0, isAppraised: false,    // how many pulses have landed on it, and whether that was enough for the scanner to read what it is worth
     wasHandled: false,                  // you have had it in the beam (and the Hollow has not flung it back since): only such things interest it
     isIgnoredByHollow: false,           // the Hollow flung it: it knows that noise, and pays it no heed until you handle the thing again
+    timesThrownBack: 0,                 // how many times the Hollow has thrown it back at you: each time is drawn by itself (flingLooseObjectFromHollow)
     // Down there with others (11-together.js): whose browser moves it (0: the host's), who has it in their beam (0: nobody),
     // and whether it was moving when its mover last said where it is.
     ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
@@ -2962,8 +2963,13 @@ function updateHollowAfterKickedObjects() {
 
 // The Hollow picks a small thing up and throws it at you, or near enough. It lands with all the noise such a
 // thing makes, and the Hollow does not come to that noise: it knows what it was.
+// Where beside you it comes down, and how it turns on the way, is not left to chance: the draw belongs to this
+// thing in this station, and to how many times it has been thrown back before (createNamedRandomGenerator in
+// 01-math.js). So the same thing, thrown back for the same time, is aimed at the same spot beside you; the next
+// time, at another.
 function flingLooseObjectFromHollow(object) {
-  const scatter = TUNING.hollowFlingsScatterMetres, angle = Math.random() * TWO_PI, reach = Math.sqrt(Math.random()) * scatter;
+  const random = createNamedRandomGenerator(level.seed, 'thrown back ' + object.id + ' time ' + object.timesThrownBack);
+  const scatter = TUNING.hollowFlingsScatterMetres, angle = random() * TWO_PI, reach = Math.sqrt(random()) * scatter;
   const targetX = player.x + Math.cos(angle) * reach, targetZ = player.z + Math.sin(angle) * reach, targetY = player.floorY + 0.6;
   // From where its arm would let go: over its own feet, clear of the floor.
   const fromY = getFloorHeightAt(hollow.figure.x, hollow.figure.z) + 1.3;
@@ -2982,7 +2988,8 @@ function flingLooseObjectFromHollow(object) {
   const seconds = clampNumber(across / TUNING.hollowFlingsSpeed, 0.25, 1.1);
   object.velocityX = deltaX / seconds; object.velocityZ = deltaZ / seconds;
   object.velocityY = (targetY - object.y) / seconds + 0.5 * TUNING.looseGravity * seconds;
-  object.spinX = (Math.random() - 0.5) * 14; object.spinY = (Math.random() - 0.5) * 14; object.spinZ = (Math.random() - 0.5) * 14;
+  object.spinX = (random() - 0.5) * 14; object.spinY = (random() - 0.5) * 14; object.spinZ = (random() - 0.5) * 14;
+  object.timesThrownBack++;
   object.lastGoodX = object.x; object.lastGoodY = object.y; object.lastGoodZ = object.z;
   object.kickedByHollowTime = game.time;
   object.wasHandled = false; object.isIgnoredByHollow = true;

@@ -1712,7 +1712,8 @@ function installLab() {
   // --- thrown back ---
   const thrownBack = await inGame((spot) => {
     const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
-    for (const which of ['testTin', 'testCapsule']) {
+    // (The tin twice, from the same beginning: for "what it throws back is not left to chance".)
+    for (const [which, name] of [['testTin', 'testTin'], ['testCapsule', 'testCapsule'], ['testTin', 'testTinAgain']]) {
       lab.reset(); // creatures held still: the test walks the Hollow by hand
       lab.stand(spot.x - 2.9, spot.z - 2, Math.PI / 2);
       const object = d.createLooseObject(which, spot.x + 2, 0.3, spot.z + 1, 0);
@@ -1738,9 +1739,12 @@ function installLab() {
       // Where it aimed. (Where the thing ends up is another matter: a can bounces and rolls.)
       entry.aimedMetresFromYou = flungAt >= 0 ? lab.round(Math.hypot(d.looseState.lastFling.targetX - p.x, d.looseState.lastFling.targetZ - p.z)) : -1;
       entry.scatter = d.tuning.hollowFlingsScatterMetres;
+      // Where it aimed, measured from you, and (further down) where the thing came to rest: to the last digit.
+      entry.aimedExactly = flungAt >= 0 ? [d.looseState.lastFling.targetX - p.x, d.looseState.lastFling.targetZ - p.z] : null;
       const hollowAt = { x: d.hollow.figure.x, z: d.hollow.figure.z };
       for (let step = 0; step < 240 && !object.isAsleep; step++) d.simulate(1 / 30);
       entry.landedMetresFromYou = lab.round(Math.hypot(object.x - p.x, object.z - p.z));
+      entry.landedExactly = [object.x, object.y, object.z];
       entry.wasMetresFromYou = lab.round(Math.hypot(hollowAt.x - p.x, hollowAt.z - p.z));
       entry.knocksOnLanding = lab.since(before);
       entry.noisesTheHollowHeard = lab.noises.length;
@@ -1751,7 +1755,7 @@ function installLab() {
       entry.afterPickingItUp = { ignored: object.isIgnoredByHollow, ofInterest: object.wasHandled };
       d.releaseHeldLooseObject(0);
       d.hollow.isActive = false;
-      result[which] = entry;
+      result[name] = entry;
     }
     result.throwsUpTo = d.tuning.hollowFlingsMass; result.goesAfterUpTo = d.tuning.hollowChasesKickedMass;
     return result;
@@ -1766,6 +1770,8 @@ function installLab() {
   check('what it threw makes its own noise where it lands, and the Hollow does not come to that; picked up again, the thing is yours again',
     tin.knocksOnLanding.heard + tin.knocksOnLanding.quiet >= 1 && tin.noisesTheHollowHeard === 0 && tin.ignored && !tin.stillOfInterest &&
     !tin.afterPickingItUp.ignored && tin.afterPickingItUp.ofInterest, tin);
+  check('what it throws back is not left to chance: from the same beginning the tin is aimed at exactly the same spot beside you, and comes to rest in exactly the same place',
+    tin.aimedExactly !== null && JSON.stringify(thrownBack.testTinAgain) === JSON.stringify(tin), [tin.aimedExactly, thrownBack.testTinAgain.aimedExactly, tin.landedExactly, thrownBack.testTinAgain.landedExactly]);
   check('a capsule of three kilograms is too heavy for that: it goes after it and does not throw it',
     TEST_OBJECT_KINDS.testCapsule.mass > thrownBack.throwsUpTo && TEST_OBJECT_KINDS.testCapsule.mass <= thrownBack.goesAfterUpTo && capsule.kicked && capsule.flungAfterSeconds < 0 && !capsule.ignored, [capsule, thrownBack.throwsUpTo]);
 
