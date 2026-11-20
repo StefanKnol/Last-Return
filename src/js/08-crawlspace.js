@@ -368,13 +368,16 @@ function findHollowParts() {
   return parts;
 }
 
-// Cuts the floor the Hollow may stand on into the pieces that are left when every door `isShut` picks is shut.
+// Cuts the floor the Hollow may stand on into the pieces that are left when every door `isShut` picks is shut
+// (and, with `cutsAtVents`, every vent taken away).
 // Writes each tile's piece number into `numbers` (0: none), and returns the pieces: for each (index 0 unused),
 // the list of its tile indexes.
-function floodHollowFloor(isShut, numbers) {
+function floodHollowFloor(isShut, numbers, cutsAtVents) {
   numbers.fill(0);
   const isShutDoorTile = new Uint8Array(TILE_COUNT);
   for (const door of doors) if (isShut(door)) isShutDoorTile[tileIndexAt(door.tileX, door.tileZ)] = 1;
+  // (`cutsAtVents`: a vent is no floor at all, so that what lies at either end of it is two pieces.)
+  if (cutsAtVents) for (let index = 0; index < TILE_COUNT; index++) if (tileFlags[index] & TILE_FLAG_VENT) isShutDoorTile[index] = 1;
   const pieces = [null];
   for (let startIndex = 0; startIndex < TILE_COUNT; startIndex++) {
     if (numbers[startIndex] !== 0 || isShutDoorTile[startIndex] === 1 || !isHollowGroundTile(startIndex)) continue;
@@ -507,7 +510,10 @@ function refreshHollowParts() {
 function placeHollowHatches() {
   clearHollowHatches();
   const parts = findHollowParts();
-  const pieces = floodHollowFloor(function (door) { return isLockingDoorKind(door.kind) || door.kind === DOOR_KIND_BAY || door.kind === DOOR_KIND_POWERED; }, new Int16Array(TILE_COUNT));
+  // (And by every vent: two rooms with a vent between them are two rooms, each to have its hatch. The Hollow
+  // goes through vents, so they do not cut the station into parts; but how many hatches there are is not to
+  // depend on how many vents the station happens to have.)
+  const pieces = floodHollowFloor(function (door) { return isLockingDoorKind(door.kind) || door.kind === DOOR_KIND_BAY || door.kind === DOOR_KIND_POWERED; }, new Int16Array(TILE_COUNT), true);
   // The doors that can be shut to it, to find the spot in each piece that is deepest inside it.
   const shutDoors = doors.filter(function (door) { return isLockingDoorKind(door.kind) || door.kind === DOOR_KIND_POWERED; });
   const hatchesInPart = new Array(parts.length).fill(0);

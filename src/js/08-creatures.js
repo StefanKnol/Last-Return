@@ -306,6 +306,15 @@ function moveCreatureToward(creature, targetX, targetZ, speed, dt) {
 //   hear       (optional) function (x, z, radius): a noise was made there, and carries that far
 //   walkers    (optional) function (into): adds to the list `into` each of this kind that is on its feet in the
 //              station now, as something with a `figure` and a `way`: a door opens for it as its way says
+// Down there with others (11-together.js), for a kind that is to be seen by the others:
+//   describe   (optional) function (): how every one of this kind stands now, as a list of numbers. The host's
+//              game says it WORLD_SENDS_PER_SECOND times a second.
+//   followHost (optional) function (numbers, blend, dt): one frame in a game that only shows what the host says.
+//              `numbers` is what `describe` gave there (or null), `blend` runs from 0 to 1 between two tellings.
+// For debug mode (10-debug.js), so that a new kind shows up there by itself:
+//   debugFigures (optional) function (into): adds { figure, red, green, blue } for each body to draw
+//   debugMarks   (optional) function (into): adds { x, z, color } for each to mark on the map
+//   debugLines   (optional) function (lines): adds its lines to the readout
 const CREATURE_KINDS = [];
 
 function addCreatureKind(kind) {

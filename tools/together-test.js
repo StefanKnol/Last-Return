@@ -843,6 +843,59 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await fine(0.6);
   for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, can = d.looseObjects.filter((object) => object.id === id)[0]; if (can) d.removeLooseObject(can); d.getFuelTanks().splice(d.getFuelTanks().indexOf(window.testTank), 1); }, fuelCanIds[0]);
 
+  // ---- The looters are the host's too: where one stands, and what it has in its arms, is the same in every game ----
+  // (This suite's pages have no looters: see browser-harness.js. For this check the host's game is given them
+  // back, in whatever nests this station has, or in one made up where the host stands if it has none. They are
+  // kept at home, but for the first, which is put beside a thing of this check's own: a test weight, put down
+  // in both games in the same place, so that it has the same number in both.)
+  const looterSpot = await a.evaluate(() => {
+    const d = window.lastReturnDebug, p = d.player;
+    for (const step of [[1.6, 0], [-1.6, 0], [0, 1.6], [0, -1.6]]) {
+      const spot = d.findWalkableSpotNear(p.x + step[0], p.z + step[1]);
+      if (spot && Math.hypot(spot.x - p.x, spot.z - p.z) > 1 && Math.abs(d.getFloorHeightAt(spot.x, spot.z) - p.floorY) < 0.01) return { x: spot.x, y: p.floorY + 0.15, z: spot.z };
+    }
+    return null;
+  });
+  const lootIds = [];
+  for (const page of [a, b]) await installTogetherTestObjectKinds(page); // (a descent begun since the last time has the game's own kinds only)
+  if (looterSpot) for (const page of [a, b]) lootIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('testWeight', spot.x, spot.y, spot.z, 0).id, looterSpot));
+  await fine(1);
+  const lootId = lootIds[0];
+  await a.evaluate(([spot, id]) => {
+    const d = window.lastReturnDebug;
+    if (d.level.ventNests.length === 0) d.level.ventNests.push({ x: d.player.x, z: d.player.z, floorY: d.player.floorY, isPocket: false });
+    d.setLootersWanted(true); d.createLooters(); d.setLootersWanted(false);
+    for (const looter of d.looters) looter.timer = 9999;
+    const looter = d.looters[0], thing = d.looseObjects.filter((object) => object.id === id)[0];
+    looter.figure.x = spot.x + 0.5; looter.figure.z = spot.z;
+    looter.wanted = thing; looter.state = 1; // after a thing
+  }, [looterSpot, lootId]);
+  await fine(1.5);
+  const looterIn = (page, id) => page.evaluate((id) => {
+    const d = window.lastReturnDebug, looter = d.looters[0], thing = d.looseObjects.filter((object) => object.id === id)[0];
+    if (!looter || !thing) return { looters: d.looters.length, hasThing: Boolean(thing) };
+    return { looters: d.looters.length, x: Math.round(looter.figure.x * 10) / 10, z: Math.round(looter.figure.z * 10) / 10, state: d.looterStates[looter.state],
+      hasIt: looter.carried === thing, inItsArms: thing.looterIndex, thingMetresFromIt: Math.round(Math.hypot(thing.x - looter.figure.x, thing.z - looter.figure.z) * 10) / 10,
+      thingAt: [Math.round(thing.x * 10) / 10, Math.round(thing.z * 10) / 10], thingLiesStill: thing.isAsleep };
+  }, id);
+  const looterTook = [await looterIn(a, lootId), await looterIn(b, lootId)];
+  check('the host\'s looters are shown in the other game where the host has them; one that takes a thing has it in its arms in both games, and there it is where the looter is',
+    Boolean(looterSpot) && lootIds.length === 2 && lootIds[0] === lootIds[1] && looterTook[0].looters >= 1 && looterTook[1].looters === looterTook[0].looters &&
+    Math.hypot(looterTook[0].x - looterTook[1].x, looterTook[0].z - looterTook[1].z) < 1 && looterTook[0].state === 'carrying a thing home' && looterTook[1].state === looterTook[0].state &&
+    looterTook[0].hasIt && looterTook[1].hasIt && looterTook[0].inItsArms === 0 && looterTook[1].inItsArms === 0 && looterTook[0].thingMetresFromIt < 0.7 && looterTook[1].thingMetresFromIt < 0.7, looterTook);
+  // Frightened, it lets the thing fall: in both games it lies where it fell, nobody's.
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.frightenLooter(d.looters[0]); });
+  await fine(1.5);
+  const looterDropped = [await looterIn(a, lootId), await looterIn(b, lootId)];
+  check('frightened, it lets the thing fall and runs: in both games the thing is out of its arms and lies in the same place',
+    looterDropped[0].state === 'frightened' && looterDropped[1].state === 'frightened' && !looterDropped[0].hasIt && !looterDropped[1].hasIt && looterDropped[0].inItsArms === -1 && looterDropped[1].inItsArms === -1 &&
+    Math.hypot(looterDropped[0].thingAt[0] - looterDropped[1].thingAt[0], looterDropped[0].thingAt[1] - looterDropped[1].thingAt[1]) < 0.3, looterDropped);
+  // (And away with them again: the checks that follow are about other things.)
+  await a.evaluate(() => { const d = window.lastReturnDebug; for (const looter of d.looters) d.setFigureRaycastable(looter.figure, false); d.looters.length = 0; });
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, thing = d.looseObjects.filter((object) => object.id === id)[0]; if (thing) d.removeLooseObject(thing); }, lootId);
+  await fine(0.6);
+  check('with the host\'s looters gone they are gone from the other game', (await b.evaluate(() => window.lastReturnDebug.looters.length)) === 0);
+
   // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
   // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.
   // For this check the host's game is given its say back, with half a minute of its wait left.)

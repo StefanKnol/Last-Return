@@ -49,14 +49,22 @@
   - lidar monster produces dots around it on everything, but can see the player
     - nearly 2 m: no vents, but the ceiling hatches. A cone of pulses from its face, more of them while it hunts
     - hits once and runs off (wants the health system)
-  - small monster (the looter)
+  - ~~small monster (the looter)~~ (in: 08-looter.js. Still open below: summoning others, throwing things, being thrown)
     - under a metre: walks through vents, cannot reach a hatch. Its nest is in a vent
     - moves objects (including what you need, chaseable and interruptable to get item back): from an open bay, the fuel can
     - out of your hands only if it can reach: held up high it tries and cannot
     - scared off by sound
+    - ~~likes what you have handled or carry best, so it goes for the salvage bays~~ (in)
+    - ~~a thing taken back from it, it wants back: waits a moment, then comes for it again~~ (in)
+    - ~~mad, not scared, at whoever is in its vents~~ (in: it scolds). Wants the health system: after scolding for a while it bites (the place is marked in updateLooter)
     - makes noise to summon other monsters (hits objects, walks in vents, etc.)
     - throws things at the player when angered (throwing the small monster or hitting it with stuff)
-  - more vents for it: more of them, T-junctions and crossings, one way down from an upper level. (A vent the player fits may not join two lock tiers; one too small for the player may)
+    - fetches a bigger monster if the player pisses it off enough?
+  - ~~more vents for it: more of them, T-junctions and crossings, dead ends~~ (done; a vent may lead round a lock now: slow, loud, and not everything fits)
+  - ~~one way down from the upper level to the lower~~ (done: a vent with a drop in it)
+    - temporary: a keycard door opens from its inner side without the card (`keycardDoorsOpenFromInside`), or the drop is a trap. To be replaced by a proper way back out
+    - the Hollow and the other creatures do not use the drop yet
+  - the scanner tripod: an item to find (or buy in the shop later), set down and switched on, that scans what is in front of it in pulses. The same system the scanning monster will see by, and a way to try it first
   - other types of blind monsters with different systems for it
   - kidnapping monster that moves a player somewhere else
 

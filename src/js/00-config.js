@@ -33,6 +33,8 @@ const DIFFICULTY_PRESETS = {
     arrivalFactor: 1.0,         // how soon the Hollow comes by itself in a generated station (08-arrivals.js): it divides
                                 // the wait in TUNING.hollowArrivalQuietSeconds. 2 is in half the time. 0: it only comes when
                                 // Generator 2 is started, as it always does in Kessel-9.
+    looterCount: 2,             // how many looters live in the vents of a generated station (08-looter.js), if it has
+                                // vents for that many. They are there from the start. 0: none.
     checkpointsEnabled: true    // false: one life. Being caught ends the descent; there is no resuming from a checkpoint.
   },
   standard: {
@@ -48,6 +50,7 @@ const DIFFICULTY_PRESETS = {
     staminaFactor: 1.0,
     phantomFactor: 1.0,
     arrivalFactor: 1.0,         // it wakes four to seven quiet minutes after you leave the lift, sooner for every noise
+    looterCount: 3,
     checkpointsEnabled: true
   },
   nightmare: {
@@ -63,6 +66,7 @@ const DIFFICULTY_PRESETS = {
     staminaFactor: 1.0,
     phantomFactor: 1.4,
     arrivalFactor: 1.5,         // two minutes forty to four minutes forty
+    looterCount: 5,
     checkpointsEnabled: true
   }
 };
@@ -86,6 +90,7 @@ const CUSTOM_DIFFICULTY_OPTIONS = [
   { key: 'heatFactor', kind: 'percent', label: 'Scanner heat', minimum: 0.5, maximum: 2, step: 0.1 },
   { key: 'staminaFactor', kind: 'percent', label: 'Your stamina', minimum: 0.5, maximum: 2, step: 0.1 },
   { key: 'phantomFactor', kind: 'choice', label: 'Apparitions', choices: [[0, 'None'], [0.5, 'Few'], [1, 'Normal'], [2, 'Many']] },
+  { key: 'looterCount', kind: 'choice', label: 'Looters in the vents', choices: [[0, 'None'], [1, 'One'], [2, 'Two'], [3, 'Three'], [5, 'Five']] },
   { key: 'checkpointsEnabled', kind: 'switch', label: 'Checkpoints', onText: 'Caught: you resume from the last checkpoint.', offText: 'One life. Caught means starting over.' }
 ];
 
@@ -157,6 +162,38 @@ const TUNING = {
   noiseRadiusSweep: 22,
   noiseRadiusDoor: 8,           // a door you open (doors the Hollow opens do not count)
   noiseRadiusPickup: 4,
+  // ---- The looters (08-looter.js): small things that live in the vents and carry off what lies loose ----
+  looterWalkSpeed: 1.6,             // on its way to a thing, or wandering (you walk at 2.2)
+  looterCarrySpeed: 1.25,           // with a thing in its arms: slower than you creep along crouched (1.3)
+  looterFleeSpeed: 3.6,             // frightened, on its way home
+  looterCarriesKilograms: 10,       // the heaviest thing it carries off (a fuel can weighs 9, and it is to be able to take that)
+  looterCarriesReach: 0.5,          // ... and the biggest, by how far the thing reaches from its own middle, in metres
+  looterReachHeight: 1.15,          // how high above the floor it can take hold of a thing. Carried level in front of you a
+                                    // thing hangs lower than that; look up and it hangs out of its reach
+  looterTakeMetres: 0.8,            // how near it has to be to a thing to take it
+  looterRangeSteps: 100,             // how far from its nest it goes for a thing, in steps on foot
+  looterRestSeconds: [2, 45],      // how long it sits in its nest between two outings: [shortest, longest]
+  looterHearingFactor: 1.2,         // it hears a noise this many times as far as the noise carries. Then it drops what it has and runs home
+  looterDeafMetres: 4.5,            // ... unless the noise carries less far than this: a walking step and the hum of the scanner
+                                    // carry 4, and those it is used to. A door (8), a running step (14), a knock, a sweep (22) it is not
+  looterFearSeconds: [8, 14],       // and how long it stays there before it dares come out again
+  looterTriesSeconds: 4,            // how long it reaches up for a thing that is held too high for it, before it gives up
+  looterLikesHandled: 3,            // what one of you has had in the beam is worth this many times as much to it as what nobody has touched
+  looterLikesCarried: 4,            // ... what is in somebody's beam now, this many times
+  looterLikesBay: 2,                // and what lies in a salvage bay that stands open, this many times again
+  looterWantsBackSeconds: [2.5, 4.5], // a thing taken out of its arms: how long it stands there cross before it comes after it
+  looterChaseSpeed: 2.6,            // ... and how fast it comes: quicker than you walk (2.2), slower than you run
+  looterTerritoryMetres: 9,         // one of you in a vent this near to it, or to its nest, is in its vents: it does not run, it goes for them
+  looterMadSpeed: 2.6,              // on its way to them: twice as fast as you crawl
+  looterMadMetres: 1.1,             // how near it comes to them
+  looterScoldSeconds: [1.4, 2.6],   // how often it scolds them
+  looterCalmSeconds: 3,             // how long it is still mad once nobody is in its vents
+  noiseRadiusDropLanding: 11,   // landing at the foot of a drop in a vent (per metre fallen it is no louder: it is the sheet metal that rings)
+  playerFallAcceleration: 14,   // how fast you gather speed going down a drop, in metres per second every second
+  // TEMPORARY. A keycard door opens from its inner side without the card, and without the mains: there is a
+  // release on that side. It is here because a vent with a drop in it lets you down into what is behind the
+  // last keycard, and without this there would be no way back out. To go when there is another way out of there.
+  keycardDoorsOpenFromInside: true,
   noiseRadiusValve: 18,          // shutting an isolation valve: its actuator squeals. On Standard that is heard from 14 m.
   noiseRadiusGeneratorStart: 30, // starting one of the small generators (1, 3, 4). On Standard that is heard from 24 m, and within 7 m of it the Hollow knows where you are.
   // ---- Captions (the lines themselves are in CAPTIONS, further down) ----
@@ -619,6 +656,14 @@ const CAPTIONS = {
   hollowSnarl: { text: '[it snarls]', level: 'sound', withinMetres: 60, seconds: 1.8, slot: 'hollowVoice', rank: 2 },
   hollowSniff: { text: '[it sniffs the air]', level: 'sound', withinMetres: 50, seconds: 2, slot: 'hollowVoice', rank: 2 },
   hollowTrill: { text: '[a short, rising trill]', level: 'sound', withinMetres: 23, seconds: 2.5, slot: 'hollowVoice', rank: 2 },
+
+  // ---- the looters ----
+  looterSteps: { text: '[small quick steps]', level: 'sound', withinMetres: 8, seconds: 1.4, slot: 'looterFeet', rank: 0 },
+  looterTakes: { text: '[a chitter: something small has got hold of something]', level: 'sound', withinMetres: 14, seconds: 2.4, slot: 'looterVoice', rank: 1 },
+  looterTries: { text: '[a chitter, cross: it cannot reach]', level: 'sound', withinMetres: 10, seconds: 2, slot: 'looterVoice', rank: 1 },
+  looterRobbed: { text: '[a chitter, cross: it wants that back]', level: 'sound', withinMetres: 12, seconds: 2.2, slot: 'looterVoice', rank: 1 },
+  looterMad: { text: '[a furious chitter: it wants you out of its vent]', level: 'sound', withinMetres: 12, seconds: 2, slot: 'looterVoice', rank: 1 },
+  looterScared: { text: '[a squeal, and small feet running]', level: 'sound', withinMetres: 18, seconds: 2.2, slot: 'looterVoice', rank: 2 },
 
   // ---- where it puts its feet ----
   hollowSteps: { text: '[heavy footsteps]', level: 'sound', withinMetres: 10, seconds: 1.6, slot: 'hollowFeet', rank: 0 },

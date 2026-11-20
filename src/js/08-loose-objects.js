@@ -491,6 +491,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // Down there with others (11-together.js): whose browser moves it (0: the host's), who has it in their beam (0: nobody),
     // and whether it was moving when its mover last said where it is.
     ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
+    looterIndex: -1,                    // which looter has it in its arms (08-looter.js), or -1: then it goes where that looter goes
     fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
@@ -1935,6 +1936,7 @@ function pickUpLooseObject(object, isByButton) {
 
 function pickUpLooseObjectNow(object, isByButton) {
   if (looseState.held || !object || object.isRemoved) return false;
+  object.looterIndex = -1; // (out of a looter's arms, if it was in them: the looter finds out for itself)
   wakeLooseObject(object);
   wakeLooseObjectsTouching(object);
   object.isHeld = true;
@@ -2523,7 +2525,7 @@ function returnLooseObjectToWhereItStood(object) {
   changePointsOnLooseObject(object, 0); // the points on it stay where it was no longer
   wakeLooseObjectsTouching(object);
   if (looseState.held === object) { looseState.held = null; looseState.isLettingGo = false; looseState.lettingGoSeconds = 0; }
-  object.isHeld = false; object.heldById = 0; object.ownerId = 0; object.isLost = false; object.rideCrateId = 0;
+  object.isHeld = false; object.heldById = 0; object.ownerId = 0; object.isLost = false; object.rideCrateId = 0; object.looterIndex = -1;
   object.x = entry.x; object.y = entry.y; object.z = entry.z;
   setLooseObjectOrientation(object, entry.orientation[0], entry.orientation[1], entry.orientation[2], entry.orientation[3]);
   object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0;
@@ -2704,7 +2706,7 @@ function isPointInHaulBay(bay, x, z, margin) {
 }
 
 function isLooseObjectInHaulBay(object, bay) {
-  return !object.isHeld && !object.heldById && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
+  return !object.isHeld && !object.heldById && object.looterIndex < 0 && isPointInHaulBay(bay, object.x, object.z, 0) && object.y > bay.floorY - 0.2 && object.y < bay.floorY + 2.4;
 }
 
 // What lies in a bay is worth this much.

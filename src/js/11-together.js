@@ -698,6 +698,10 @@ function wrapForTogether() {
   playDoorBang = shareWorldSound('playDoorBang', playDoorBang);
   playDoorBreak = shareWorldSound('playDoorBreak', playDoorBreak);
   playStinger = shareWorldSound('playStinger', playStinger);
+  // The looters (08-looter.js): their feet and their voices.
+  playLooterStep = shareWorldSound('playLooterStep', playLooterStep);
+  playLooterChitter = shareWorldSound('playLooterChitter', playLooterChitter);
+  playLooterSqueal = shareWorldSound('playLooterSqueal', playLooterSqueal);
   // The Hollow treading on glass, cans or a loose plate, and flinging a thing: your warning, and so the others' too.
   // (Shared only while the host's creatures are being run, like the rest: your own step on glass is your own.)
   playNoisyFloorSound = shareWorldSound('playNoisyFloorSound', playNoisyFloorSound);
@@ -786,6 +790,9 @@ function describeWorld() {
   }
   for (const door of doors) world.d += door.isBroken ? 'b' : (door.isWantedOpen ? '1' : '0');
   for (const hatch of hollowHatches) world.c += hatch.isOpen ? '1' : '0';
+  // Every other kind of creature says for itself how it stands, in numbers (`describe`, 08-creatures.js): `x`, by kind.
+  world.x = {};
+  for (const kind of CREATURE_KINDS) if (kind.describe) world.x[kind.key] = kind.describe();
   return world;
 }
 
@@ -796,6 +803,12 @@ function hearWorld(data) {
   if (!isNumbers(data.s, 1 + stills.length * WORLD_STILL_NUMBERS)) return;
   if (typeof data.d !== 'string' || data.d.length !== doors.length || typeof data.c !== 'string' || data.c.length !== hollowHatches.length) return;
   if (data.h !== null && (!Number.isInteger(data.h[0]) || data.h[0] < HOLLOW_STATE_ROAM || data.h[0] > HOLLOW_STATE_LISTEN)) return;
+  // What the other kinds of creature say of themselves: numbers and nothing else, for a kind this game knows.
+  if (!data.x || typeof data.x !== 'object' || Array.isArray(data.x)) return;
+  for (const key in data.x) {
+    const kind = findCreatureKind(key);
+    if (!kind || !kind.followHost || !Array.isArray(data.x[key]) || data.x[key].length > 400 || !data.x[key].every(Number.isFinite)) return;
+  }
   // The Hollow is shown on its way from where it is shown now to where the host says it is.
   together.hollowFrom = describeFigure(hollow.figure, []);
   together.world = data;
@@ -857,6 +870,9 @@ function followHostStation(dt) {
       updateFigureCapsules(body);
     }
   }
+
+  // The other kinds of creature are shown as they say they stand (`followHost`, 08-creatures.js).
+  for (const kind of CREATURE_KINDS) if (kind.followHost) kind.followHost(world.x[kind.key] || null, together.worldBlend, dt);
 
   // The apparitions are your own, and ask how far things are from you on foot. Alone the Hollow's director keeps that up.
   playerDistanceFieldAge += dt;
@@ -928,6 +944,11 @@ function readAction(data) {
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
     return { what: 'shatter', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
   }
+  // A looter takes hold of a thing, and lets go of it (the host's to decide: 08-looter.js).
+  if (data.what === 'looterTake' && Number.isInteger(data.id) && Number.isInteger(data.looter)) return { what: 'looterTake', id: data.id, looter: data.looter };
+  if (data.what === 'looterDrop' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
+    return { what: 'looterDrop', id: data.id, x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH), isSetDown: data.isSetDown === true };
+  }
   if (data.what === 'bayState' && Number.isInteger(data.index) && (data.state === 'open' || data.state === 'sealing')) return { what: 'bayState', index: data.index, state: data.state };
   if (data.what === 'sealBay' && Number.isInteger(data.index) && Array.isArray(data.ids) && data.ids.length <= 400 && data.ids.every(Number.isInteger) && Number.isFinite(data.value)) {
     return { what: 'sealBay', index: data.index, ids: data.ids, value: data.value };
@@ -939,7 +960,8 @@ function readAction(data) {
 // stand, and what is only for the one who did it (see wrapForTogether) is left out.
 function performActionFor(actorId, action) {
   // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
-  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour' || action.what === 'arrive';
+  const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour' || action.what === 'arrive' ||
+    action.what === 'looterTake' || action.what === 'looterDrop';
   const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z }); // (gone since: it is still done)
   game.actor = other;
   together.isCarryingOut = true;
@@ -1049,8 +1071,11 @@ function performLooseAction(action) {
   }
   const object = findLooseObjectById(action.id);
   if (!object) return; // gone already
+  if (action.what === 'looterTake') { takeLooseObjectAsLooter(object, action.looter); return; }
+  if (action.what === 'looterDrop') { dropLooseObjectFromLooter(object, action); return; }
   if (action.what === 'take') {
     if (object.heldById && isWorldShared()) return; // somebody was quicker
+    object.looterIndex = -1; // (out of a looter's arms, if it was in them)
     object.heldById = actingId; object.ownerId = actingId;
     object.wasHandled = true; object.isIgnoredByHollow = false; object.lastHandledTime = game.time;
     object.hasBeenTaken = true; // (a fuel can pours from now on: updateFuelCan, 08-loose-objects.js)
@@ -1265,7 +1290,7 @@ function hearOfTheStation(id, data) {
       const action = readAction(data.a);
       // When the car goes up, when a scanner is restarted, when everyone is down, what a salvage bay does and
       // takes, and a fuel can pouring are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
-      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive'].indexOf(action.what) >= 0;
+      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive', 'looterTake', 'looterDrop'].indexOf(action.what) >= 0;
       if (action && !isTheHostsToSay) decideAction(id, action);
     }
     return;

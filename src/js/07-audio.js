@@ -71,6 +71,9 @@ const SOUND_LEVELS = {
   hollowEnraged: 1,       // the beam stops slowing it
   hollowFootstep: 1,
   hollowVentStep: 1,      // crawling in a vent
+  looterStep: 1,          // a looter's small feet
+  looterChitter: 1,       // it has got hold of something, or cannot reach it
+  looterSqueal: 1,        // it is frightened
   hollowCeilingStep: 1,   // crawling above the ceiling, on its way round a locked door
   hatchRattle: 1,         // a ceiling hatch that is already open: it has gone in, or it is about to come out
   hatchBurst: 1,          // a ceiling hatch forced open for the first time
@@ -1485,6 +1488,36 @@ function playHollowVentStep(x, z, weight) {
   }
   playResonantNoise({ frequency: 150 + Math.random() * 50, resonance: 18, duration: 0.7, gain: 1.5 * weight * SOUND_LEVELS.hollowVentStep, attack: 0.004, destination: panner });
   playNoiseBurst({ duration: 0.07, filterType: 'bandpass', frequency: 2200, gain: 1.25 * weight * SOUND_LEVELS.hollowVentStep, delay: 0.04, destination: panner });
+}
+
+// ---- The looters (08-looter.js) ----
+
+// One of a looter's small feet coming down: a tick, and on the sheet metal of a vent a little ring with it.
+function playLooterStep(x, z, isInVent) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.1, z);
+  if (!panner) return;
+  playNoiseBurst({ duration: 0.035, filterType: 'bandpass', frequency: 1700 + Math.random() * 500, resonance: 2, gain: 0.5 * SOUND_LEVELS.looterStep, destination: panner });
+  if (isInVent) playResonantNoise({ frequency: 620 + Math.random() * 160, resonance: 22, duration: 0.16, gain: 0.5 * SOUND_LEVELS.looterStep, attack: 0.002, destination: panner });
+}
+
+// Its voice: a run of short high notes. `isCross`: falling, when it cannot have what it wants; otherwise rising.
+function playLooterChitter(x, z, isCross) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.6, z);
+  if (!panner) return;
+  const notes = isCross ? 4 : 6;
+  for (let note = 0; note < notes; note++) {
+    const pitch = (isCross ? 2300 - note * 260 : 1500 + note * 190) * (0.94 + Math.random() * 0.12);
+    playTone({ waveform: 'triangle', frequency: pitch, frequencyEnd: pitch * (isCross ? 0.8 : 1.25), duration: 0.055, gain: 0.5 * SOUND_LEVELS.looterChitter,
+      attack: 0.004, delay: note * (isCross ? 0.095 : 0.07), destination: panner });
+  }
+}
+
+// Frightened: one long note going up and breaking off.
+function playLooterSqueal(x, z) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.6, z);
+  if (!panner) return;
+  playTone({ waveform: 'sawtooth', frequency: 1300, frequencyEnd: 3400, duration: 0.42, gain: 0.34 * SOUND_LEVELS.looterSqueal, attack: 0.01, destination: panner });
+  playTone({ waveform: 'triangle', frequency: 2600, frequencyEnd: 5200, duration: 0.3, gain: 0.2 * SOUND_LEVELS.looterSqueal, attack: 0.02, delay: 0.05, destination: panner });
 }
 
 function playHollowFootstep(x, z, weight) {

@@ -18,6 +18,11 @@ const ZONE_GENERATED_ROOM = 250; // stand-in zone for rooms that only exist in g
 // TWEAK: how big each size of station is. "fillers" are the extra rooms per tier (no power, power, keycard).
 const GENERATED_SIZE_PRESETS = {
   // vents: crawl-height tunnels between rooms. loops: full-height service ducts. Both join places far apart on foot.
+  // ventBranches: vents that run from a room to another vent and join it there, so that one becomes a junction.
+  // ventPockets: dead ends, a few tiles off the side of a vent. (All three are the most a station gets: fewer if
+  //           the rock has no room for them.)
+  // ventDrops: vents from the upper level to the lower, with a drop in them: a way down and no way back. Only in
+  //           a station with two levels.
   // complications: the fewest and the most things a station of this size has on top of its work order, that
   //           hold up the mains or the lift itself (QUEST_COMPLICATIONS in 09-quests.js: no fuel in
   //           Generator 2's tank, the winch breaker tripped, the wait for the car to come down). Each of the
@@ -27,10 +32,10 @@ const GENERATED_SIZE_PRESETS = {
   // keycards: 1 to 3. Each card opens one more ring of doors, and the next card is somewhere inside that ring;
   //           Shaft 9 is behind the last. The third number of "fillers" is shared out between the rings.
   // salvageBays: the fewest and the most bays it has on a Salvage order.
-  small: { label: 'Small', fillers: [2, 1, 0], loops: 2, vents: 1, keycards: 1, complications: [0, 1], extraGenerators: [0, 1], extraSpools: [0, 0], salvageBays: [1, 2], spineLength: [10, 14] },
-  medium: { label: 'Medium', fillers: [4, 2, 1], loops: 3, vents: 2, keycards: 1, complications: [0, 2], extraGenerators: [0, 2], extraSpools: [0, 0], salvageBays: [2, 2], spineLength: [13, 18] },
-  large: { label: 'Large', fillers: [7, 4, 2], loops: 5, vents: 3, keycards: 2, complications: [1, 2], extraGenerators: [1, 2], extraSpools: [0, 1], salvageBays: [2, 3], spineLength: [16, 22] },
-  massive: { label: 'Massive', fillers: [15, 8, 6], loops: 8, vents: 14, keycards: 3, complications: [1, 3], extraGenerators: [1, 3], extraSpools: [0, 2], salvageBays: [3, 4], spineLength: [15, 28] },
+  small: { label: 'Small', fillers: [2, 1, 0], loops: 2, vents: 2, ventBranches: 1, ventPockets: 1, ventDrops: 1, keycards: 1, complications: [0, 1], extraGenerators: [0, 1], extraSpools: [0, 0], salvageBays: [1, 2], spineLength: [10, 14] },
+  medium: { label: 'Medium', fillers: [4, 2, 1], loops: 3, vents: 4, ventBranches: 2, ventPockets: 1, ventDrops: 1, keycards: 1, complications: [0, 2], extraGenerators: [0, 2], extraSpools: [0, 0], salvageBays: [2, 2], spineLength: [13, 18] },
+  large: { label: 'Large', fillers: [7, 4, 2], loops: 5, vents: 6, ventBranches: 3, ventPockets: 2, ventDrops: 1, keycards: 2, complications: [1, 2], extraGenerators: [1, 2], extraSpools: [0, 1], salvageBays: [2, 3], spineLength: [16, 22] },
+  massive: { label: 'Massive', fillers: [15, 8, 6], loops: 8, vents: 18, ventBranches: 8, ventPockets: 4, ventDrops: 2, keycards: 3, complications: [1, 3], extraGenerators: [1, 3], extraSpools: [0, 2], salvageBays: [3, 4], spineLength: [15, 28] },
 };
 
 // TWEAK: how spread out a station is.
@@ -583,8 +588,11 @@ let ductRouteScratch = null;
 function releaseDuctRouteScratch() { ductRouteScratch = null; }
 
 // Finds a way for a one-tile-wide service duct through solid rock, from one tile to another.
-// `blocked` marks tiles the duct may not use. Bends cost extra, so ducts come out mostly straight.
+// `blocked` marks tiles the duct may not use (1). Bends cost extra, so ducts come out mostly straight.
+// A tile may also be marked as one that can only be crossed, straight on, along x or along z
+// (DUCT_CROSS_ALONG_X, DUCT_CROSS_ALONG_Z): that is how a vent goes across another vent, or ends on one.
 // Returns the tiles of the route in order, or null when there is none short enough.
+const DUCT_CROSS_ALONG_X = 2, DUCT_CROSS_ALONG_Z = 3;
 function routeDuctThroughRock(blocked, startX, startZ, startDirection, goalX, goalZ, maximumCost) {
   if (ductRouteScratch === null) {
     ductRouteScratch = { bestCost: new Int16Array(TILE_COUNT * 4).fill(32000), cameFrom: new Int32Array(TILE_COUNT * 4).fill(-1), written: [] };
@@ -594,13 +602,27 @@ function routeDuctThroughRock(blocked, startX, startZ, startDirection, goalX, go
   // Leave it as it was found: untouched everywhere.
   for (let entry = 0; entry < scratch.written.length; entry++) { scratch.bestCost[scratch.written[entry]] = 32000; scratch.cameFrom[scratch.written[entry]] = -1; }
   scratch.written.length = 0;
-  return route;
+  return route !== null && doesDuctRouteTouchItself(route) ? null : route;
+}
+
+// A route that doubles back hard has two of its tiles side by side that are not one after the other: dug, they
+// would be one space two tiles wide, with no rock between. (The cheapest way to turn round is exactly that.)
+function doesDuctRouteTouchItself(route) {
+  const stepOf = new Map();
+  for (let step = 0; step < route.length; step++) stepOf.set(route[step], step);
+  for (let step = 0; step < route.length; step++) {
+    for (const beside of [route[step] + 1, route[step] - 1, route[step] + GRID_WIDTH, route[step] - GRID_WIDTH]) {
+      const other = stepOf.get(beside);
+      if (other !== undefined && Math.abs(other - step) > 1) return true;
+    }
+  }
+  return false;
 }
 
 function routeDuctWithScratch(bestCost, cameFrom, written, blocked, startX, startZ, startDirection, goalX, goalZ, maximumCost) {
   const BEND_COST = 3; // TWEAK: higher = straighter ducts, but fewer places a duct can be fitted
   const startIndex = tileIndexAt(startX, startZ), goalIndex = tileIndexAt(goalX, goalZ);
-  if (blocked[startIndex] || blocked[goalIndex]) return null;
+  if (blocked[startIndex] || blocked[goalIndex] === 1) return null;
   const buckets = [];
   for (let cost = 0; cost <= maximumCost; cost++) buckets.push([]);
   const startState = startIndex * 4 + startDirection;
@@ -619,12 +641,17 @@ function routeDuctWithScratch(bestCost, cameFrom, written, blocked, startX, star
         return route.reverse();
       }
       const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
+      const isCrossingHere = blocked[index] > 1;
       for (let nextDirection = 0; nextDirection < 4; nextDirection++) {
         if (nextDirection === (direction + 2) % 4) continue; // never straight back
         const nextX = tileX + WALL_DIRECTIONS[nextDirection][0], nextZ = tileZ + WALL_DIRECTIONS[nextDirection][1];
         if (nextX < 3 || nextZ < 3 || nextX >= GRID_WIDTH - 3 || nextZ >= GRID_DEPTH - 3) continue;
         const nextIndex = tileIndexAt(nextX, nextZ);
-        if (blocked[nextIndex]) continue;
+        const nextBlock = blocked[nextIndex];
+        if (nextBlock === 1) continue;
+        // A tile that can only be crossed: entered the right way, and left straight on.
+        if (isCrossingHere && nextDirection !== direction) continue;
+        if (nextBlock > 1 && (nextDirection & 1) !== (nextBlock === DUCT_CROSS_ALONG_X ? 1 : 0)) continue;
         const nextCost = cost + 1 + (nextDirection === direction ? 0 : BEND_COST);
         const nextState = nextIndex * 4 + nextDirection;
         if (nextCost > maximumCost || nextCost >= bestCost[nextState]) continue;
@@ -667,23 +694,283 @@ function blockDuctRectangle(blocked, startX, startZ, endX, endZ) {
   }
 }
 
+// (A duct or a vent takes up its own tiles, and not the whole of the box they lie in: the rock inside a bend is free.)
 function createDuctBlockGrid(plan) {
   const blocked = new Uint8Array(TILE_COUNT);
-  for (const room of plan.rooms) blockDuctRectangle(blocked, room.startX, room.startZ, room.endX, room.endZ);
+  for (const room of plan.rooms) {
+    if (!room.route) { blockDuctRectangle(blocked, room.startX, room.startZ, room.endX, room.endZ); continue; }
+    for (const index of room.route) blockDuctRectangle(blocked, index % GRID_WIDTH, Math.floor(index / GRID_WIDTH), index % GRID_WIDTH + 1, Math.floor(index / GRID_WIDTH) + 1);
+  }
   return blocked;
+}
+
+// ---------------------------------------------------------------------------
+// Vents: where one may go, and where it may meet another
+//
+// A vent is dug like a service duct, a tile wide through the rock, and like a duct it keeps a tile of rock
+// between itself and everything else: two open tiles side by side are one space, with no wall between them.
+// But vents may meet. A later vent can go straight across an earlier one, or end on it, at a tile where the
+// earlier one runs straight with nothing else near. So the rock is kept count of for vents (`count`: how many
+// things each tile is too near to), and beside it the grid the router goes by (`blocked`), in which the tiles
+// of such a place are marked as ones that can be crossed and in no other way used.
+// ---------------------------------------------------------------------------
+
+function createVentGrid(plan) {
+  // (`isVent`: the tiles that are already a vent's. One that crosses another, or ends on it, does not dig those again.
+  // `crossFloor`: how high the floor is of the vent that can be crossed at a tile. The levels of a station lie
+  // side by side in the rock at different heights, and a vent can only meet a vent on its own floor.)
+  const grid = { blocked: new Uint8Array(TILE_COUNT), count: new Uint8Array(TILE_COUNT), isVent: new Uint8Array(TILE_COUNT),
+    crossFloor: new Float32Array(TILE_COUNT), forFloor: new Uint8Array(TILE_COUNT) };
+  for (const room of plan.rooms) {
+    if (room.route) continue;
+    for (let tileZ = Math.max(0, room.startZ - 1); tileZ < Math.min(GRID_DEPTH, room.endZ + 1); tileZ++) {
+      for (let tileX = Math.max(0, room.startX - 1); tileX < Math.min(GRID_WIDTH, room.endX + 1); tileX++) {
+        const index = tileIndexAt(tileX, tileZ);
+        grid.count[index]++; grid.blocked[index] = 1;
+      }
+    }
+  }
+  // What is already dug through the rock, in the order it was dug: the service ducts, and (for a grid that is
+  // made when some vents are there) the vents, with the places where they can still be crossed.
+  for (const room of plan.rooms) {
+    if (room.isVent) addVentToGrid(grid, room);
+    else if (room.route) for (const index of room.route) blockVentGridTile(grid, index);
+  }
+  return grid;
+}
+
+// One more open tile: it and the eight round it are too near it for anything else. (Whatever could be crossed
+// there cannot be any more: another crossing so close would lie against this one.)
+function blockVentGridTile(grid, index) {
+  const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
+  for (let nearZ = Math.max(0, tileZ - 1); nearZ <= Math.min(GRID_DEPTH - 1, tileZ + 1); nearZ++) {
+    for (let nearX = Math.max(0, tileX - 1); nearX <= Math.min(GRID_WIDTH - 1, tileX + 1); nearX++) {
+      const nearIndex = tileIndexAt(nearX, nearZ);
+      if (grid.count[nearIndex] < 255) grid.count[nearIndex]++;
+      grid.blocked[nearIndex] = 1;
+    }
+  }
+}
+
+// The places where a vent can be joined or crossed: [{ index, sides }], a tile of the vent and the steps from
+// it to the tiles beside it that are free for that (one of them, or both: then it can be crossed as well).
+// Each is in the middle of a straight run of the vent, and nothing but the three tiles of that run is near it,
+// or near the tile beside it: so each is too near exactly three things. (A bend one tile further on comes too
+// near the tile on its inner side, and the count says so.)
+function findVentCrossings(grid, route) {
+  const crossings = [];
+  for (let step = 2; step < route.length - 2; step++) {
+    const along = route[step] - route[step - 1];
+    if (route[step + 1] - route[step] !== along || grid.count[route[step]] !== 3) continue;
+    const sideways = Math.abs(along) === 1 ? GRID_WIDTH : 1;
+    const sides = [sideways, -sideways].filter(function (side) { return grid.count[route[step] + side] === 3; });
+    if (sides.length > 0) crossings.push({ index: route[step], sides: sides });
+  }
+  return crossings;
+}
+
+// A vent has been dug: its tiles are taken, and where it can be joined or crossed is marked for the vents that
+// come after. (The tiles it shares with a vent that was there before it are that one's, and are not counted again.)
+function addVentToGrid(grid, vent) {
+  for (const index of vent.route) {
+    if (grid.isVent[index] === 1) continue;
+    grid.isVent[index] = 1;
+    blockVentGridTile(grid, index);
+  }
+  if (vent.isDrop) return; // (one that changes floor on its way is met by nothing)
+  for (const crossing of findVentCrossings(grid, vent.route)) {
+    // Crossed at right angles to the way the vent runs there.
+    const code = Math.abs(crossing.sides[0]) === 1 ? DUCT_CROSS_ALONG_X : DUCT_CROSS_ALONG_Z;
+    grid.blocked[crossing.index] = code; grid.crossFloor[crossing.index] = vent.floorY;
+    for (const side of crossing.sides) { grid.blocked[crossing.index + side] = code; grid.crossFloor[crossing.index + side] = vent.floorY; }
+  }
+}
+
+// The grid as the router is to see it for a vent on one floor: the places where a vent on another floor could be
+// crossed are plain rock that is taken. (`floorY` null: for a vent that may meet no other at all.) The same
+// array every time: it is only good until the next call.
+function getVentGridForFloor(grid, floorY) {
+  const blocked = grid.forFloor;
+  for (let index = 0; index < TILE_COUNT; index++) {
+    blocked[index] = grid.blocked[index] > 1 && (floorY === null || grid.crossFloor[index] !== floorY) ? 1 : grid.blocked[index];
+  }
+  return blocked;
+}
+
+// The vent as the plan keeps it: a kind of corridor, like a service duct, with the tiles of its route.
+// `mouths` are the doorways it opens into: [{ tileX, tileZ, wall }]. `ends` are the rooms it leads to.
+function createPlannedVent(plan, route, mouths, ends, floorY) {
+  let startX = GRID_WIDTH, startZ = GRID_DEPTH, endX = 0, endZ = 0, tier = Infinity;
+  for (const index of route) {
+    const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
+    startX = Math.min(startX, tileX); endX = Math.max(endX, tileX + 1);
+    startZ = Math.min(startZ, tileZ); endZ = Math.max(endZ, tileZ + 1);
+  }
+  for (const room of ends) tier = Math.min(tier, room.tier);
+  const vent = {
+    key: 'vent', name: 'VENT', tier: tier, isCorridor: true, isDuct: true, isVent: true, route: route, mouths: mouths, ends: ends,
+    startX: startX, startZ: startZ, endX: endX, endZ: endZ, floorY: floorY, ceiling: VENT_HEIGHT, zone: 0
+  };
+  plan.rooms.push(vent);
+  return vent;
+}
+
+// A vent from a free doorway to a vent that is already there, ending on it: where the two meet there are now
+// three ways to go. Tried for the doorways that are furthest on foot from where that vent already leads.
+// Returns how many were made.
+function planVentBranches(plan, grid, wantedCount) {
+  let made = 0;
+  for (let round = 0; round < wantedCount * 3 && made < wantedCount; round++) {
+    const candidates = [];
+    const doorsAwayCache = new Map();
+    for (const socket of plan.sockets) {
+      if (socket.isUsed || socket.owner.key === 'calibrationStore') continue;
+      if (!doorsAwayCache.has(socket.owner)) doorsAwayCache.set(socket.owner, countDoorsBetweenRooms(plan, socket.owner));
+      const doorsAway = doorsAwayCache.get(socket.owner);
+      for (const vent of plan.rooms) {
+        if (!vent.isVent || vent.isDrop || vent.floorY !== socket.floorY || vent.ends.indexOf(socket.owner) >= 0) continue;
+        // (Further on foot from where the vent already leads is better: see the score.)
+        let onFoot = Infinity;
+        for (const room of vent.ends) onFoot = Math.min(onFoot, doorsAway.has(room) ? doorsAway.get(room) : Infinity);
+        if (onFoot < 1 || onFoot === Infinity) continue;
+        // The place on that vent that is nearest to the doorway.
+        let nearest = null, nearestTiles = Infinity;
+        for (const crossing of findVentCrossings(grid, vent.route)) {
+          if (grid.blocked[crossing.index] <= 1) continue; // (it was one, until something else came too near)
+          const tiles = Math.abs(crossing.index % GRID_WIDTH - socket.tileX) + Math.abs(Math.floor(crossing.index / GRID_WIDTH) - socket.tileZ);
+          if (tiles < nearestTiles) { nearestTiles = tiles; nearest = crossing; }
+        }
+        if (!nearest || nearestTiles > 20 || nearestTiles < 3) continue;
+        candidates.push({ socket: socket, vent: vent, crossing: nearest, score: onFoot * 5 - nearestTiles + plan.random() * 6 });
+      }
+    }
+    candidates.sort(function (a, b) { return b.score - a.score; });
+    let madeThisRound = false;
+    for (let attempt = 0; attempt < Math.min(candidates.length, 25) && !madeThisRound; attempt++) {
+      const socket = candidates[attempt].socket, vent = candidates[attempt].vent, crossing = candidates[attempt].crossing;
+      const step = WALL_DIRECTIONS[socket.wall];
+      const route = routeDuctThroughRock(getVentGridForFloor(grid, socket.floorY), socket.tileX + step[0], socket.tileZ + step[1], socket.wall,
+        crossing.index % GRID_WIDTH, Math.floor(crossing.index / GRID_WIDTH), MAXIMUM_DUCT_COST);
+      if (!route) continue;
+      const branch = createPlannedVent(plan, [tileIndexAt(socket.tileX, socket.tileZ)].concat(route),
+        [{ tileX: socket.tileX, tileZ: socket.tileZ, wall: socket.wall }], [socket.owner].concat(vent.ends), socket.floorY);
+      branch.joins = vent;
+      vent.ends.push(socket.owner);
+      socket.isUsed = true;
+      addVentToGrid(grid, branch);
+      madeThisRound = true;
+    }
+    if (!madeThisRound) break;
+    made++;
+  }
+  return made;
+}
+
+// A dead end: a few tiles off the side of a vent, leading nowhere. Somewhere to be out of the way, for whatever
+// is small enough to want that. The longest vents get them first. Returns how many were made.
+const VENT_POCKET_TILES = 3; // TWEAK: how deep a pocket is
+function planVentPockets(plan, grid, wantedCount) {
+  let made = 0;
+  const vents = plan.rooms.filter(function (room) { return room.isVent && !room.joins && !room.isDrop; }).sort(function (a, b) { return b.route.length - a.route.length; });
+  for (let round = 0; round < 3 && made < wantedCount; round++) { // (a second one for a vent only once every vent has had its chance)
+    for (const vent of vents) {
+      if (made >= wantedCount) break;
+      const places = [];
+      for (const crossing of findVentCrossings(grid, vent.route)) {
+        if (grid.blocked[crossing.index] <= 1) continue;
+        for (const side of crossing.sides) {
+          let isFree = grid.blocked[crossing.index + side] > 1;
+          for (let depth = 2; depth <= VENT_POCKET_TILES && isFree; depth++) isFree = grid.blocked[crossing.index + side * depth] === 0;
+          if (isFree) places.push({ crossing: crossing, side: side, draw: plan.random() });
+        }
+      }
+      if (places.length === 0) continue;
+      places.sort(function (a, b) { return a.draw - b.draw; });
+      const place = places[0], route = [place.crossing.index];
+      for (let depth = 1; depth <= VENT_POCKET_TILES; depth++) route.push(place.crossing.index + place.side * depth);
+      const pocket = createPlannedVent(plan, route, [], vent.ends.slice(), vent.floorY);
+      pocket.joins = vent;
+      pocket.pocketIndex = route[route.length - 1]; // the tile at its far end
+      addVentToGrid(grid, pocket);
+      made++;
+    }
+  }
+  return made;
+}
+
+// A vent from the upper level to the lower, with a drop in it: you crawl in upstairs, come to the edge, and go
+// down. There is no way back up it. It lets you into what is behind the last keycard without one, which is a
+// trap unless there is another way out: see TUNING.keycardDoorsOpenFromInside (08-entities.js).
+// It runs from a free doorway of the upper level to one of the lower, as far apart on foot as can be had, and
+// meets no other vent. The drop is as near the middle of it as there is a straight stretch for it: the tile
+// before it is the edge, the tile itself the foot (as high as both floors together), and from there on the vent
+// is on the lower floor. Returns how many were made.
+function planVentDrops(plan, grid, wantedCount) {
+  let made = 0;
+  for (let round = 0; round < wantedCount * 2 && made < wantedCount; round++) {
+    const candidates = [], doorsAwayCache = new Map();
+    for (const upper of plan.sockets) {
+      if (upper.isUsed || upper.floorY !== 0 || upper.owner.key === 'calibrationStore' || upper.owner.tier >= plan.finalTier) continue;
+      if (!doorsAwayCache.has(upper.owner)) doorsAwayCache.set(upper.owner, countDoorsBetweenRooms(plan, upper.owner));
+      for (const lower of plan.sockets) {
+        if (lower.isUsed || lower.floorY !== plan.deepFloorY || lower.owner.key === 'stairwell') continue;
+        const onFoot = doorsAwayCache.get(upper.owner).get(lower.owner);
+        if (onFoot === undefined || onFoot < 3) continue;
+        const throughRock = Math.abs(upper.tileX - lower.tileX) + Math.abs(upper.tileZ - lower.tileZ);
+        if (throughRock > 26 || throughRock < 5) continue;
+        candidates.push({ upper: upper, lower: lower, score: onFoot * 5 - throughRock + plan.random() * 6 });
+      }
+    }
+    candidates.sort(function (a, b) { return b.score - a.score; });
+    let madeThisRound = false;
+    for (let attempt = 0; attempt < Math.min(candidates.length, 25) && !madeThisRound; attempt++) {
+      const upper = candidates[attempt].upper, lower = candidates[attempt].lower;
+      const upperStep = WALL_DIRECTIONS[upper.wall], lowerStep = WALL_DIRECTIONS[lower.wall];
+      const through = routeDuctThroughRock(getVentGridForFloor(grid, null), upper.tileX + upperStep[0], upper.tileZ + upperStep[1], upper.wall,
+        lower.tileX + lowerStep[0], lower.tileZ + lowerStep[1], MAXIMUM_DUCT_COST);
+      if (!through) continue;
+      const route = [tileIndexAt(upper.tileX, upper.tileZ)].concat(through, [tileIndexAt(lower.tileX, lower.tileZ)]);
+      // Where it goes down: on a straight stretch, with three tiles of vent before it and after it.
+      let dropStep = -1;
+      for (let step = 3; step < route.length - 3; step++) {
+        if (route[step] - route[step - 1] !== route[step + 1] - route[step]) continue;
+        if (dropStep < 0 || Math.abs(step - route.length / 2) < Math.abs(dropStep - route.length / 2)) dropStep = step;
+      }
+      if (dropStep < 0) continue;
+      const vent = createPlannedVent(plan, route,
+        [{ tileX: upper.tileX, tileZ: upper.tileZ, wall: upper.wall, floorY: upper.floorY }, { tileX: lower.tileX, tileZ: lower.tileZ, wall: lower.wall, floorY: lower.floorY }],
+        [upper.owner, lower.owner], upper.floorY);
+      vent.isDrop = true; vent.dropStep = dropStep; vent.lowerFloorY = lower.floorY;
+      addVentToGrid(grid, vent);
+      upper.isUsed = true; lower.isUsed = true;
+      madeThisRound = true;
+    }
+    if (!madeThisRound) break;
+    made++;
+  }
+  return made;
 }
 
 // Digs a service duct between two free doorways on the same level, if a way through the rock exists.
 // The door at the end that needs more (power, or the keycard) gets the lock. Returns true if the duct was made.
-// With `isVent` it is a vent instead: crawl height, and open at both ends. A vent has nowhere to put a lock,
-// so it is only ever dug between two places behind the same locks.
-function tryPlanDuct(plan, blocked, first, second, isVent) {
+// With `ventGrid` it is a vent instead: crawl height, and open at both ends. A vent has nowhere to put a lock,
+// so one that joins two places behind different locks is a way round the lock between them: a slow and a loud
+// one, for whoever will go on knees and hands, and for nothing that is too big to go into it. (The station can
+// always be finished without one: auditLevelProgression checks that with every vent shut.)
+function tryPlanDuct(plan, blocked, first, second, ventGrid) {
   if (first.floorY !== second.floorY) return false;
-  if (isVent && first.owner.tier !== second.owner.tier) return false;
   const firstStep = WALL_DIRECTIONS[first.wall], secondStep = WALL_DIRECTIONS[second.wall];
-  const route = routeDuctThroughRock(blocked, first.tileX + firstStep[0], first.tileZ + firstStep[1], first.wall,
+  const route = routeDuctThroughRock(ventGrid ? getVentGridForFloor(ventGrid, first.floorY) : blocked, first.tileX + firstStep[0], first.tileZ + firstStep[1], first.wall,
     second.tileX + secondStep[0], second.tileZ + secondStep[1], MAXIMUM_DUCT_COST);
   if (!route) return false;
+  if (ventGrid) {
+    // The two doorway tiles become the vent's mouths: part of the tunnel, with no door in them.
+    const vent = createPlannedVent(plan, [tileIndexAt(first.tileX, first.tileZ)].concat(route, [tileIndexAt(second.tileX, second.tileZ)]),
+      [{ tileX: first.tileX, tileZ: first.tileZ, wall: first.wall }, { tileX: second.tileX, tileZ: second.tileZ, wall: second.wall }], [first.owner, second.owner], first.floorY);
+    addVentToGrid(ventGrid, vent);
+    first.isUsed = true; second.isUsed = true;
+    return true;
+  }
   const lowerTier = Math.min(first.owner.tier, second.owner.tier), higherTier = Math.max(first.owner.tier, second.owner.tier);
   let startX = GRID_WIDTH, startZ = GRID_DEPTH, endX = 0, endZ = 0;
   for (const index of route) {
@@ -697,14 +984,6 @@ function tryPlanDuct(plan, blocked, first, second, isVent) {
     startX: startX, startZ: startZ, endX: endX, endZ: endZ, floorY: first.floorY, ceiling: 2.4, zone: 0
   };
   plan.rooms.push(duct);
-  if (isVent) {
-    // The two doorway tiles become the vent's mouths: part of the tunnel, with no door in them.
-    duct.key = 'vent'; duct.name = 'VENT'; duct.isVent = true; duct.ceiling = VENT_HEIGHT;
-    duct.route = [tileIndexAt(first.tileX, first.tileZ)].concat(route, [tileIndexAt(second.tileX, second.tileZ)]);
-    duct.mouths = [{ tileX: first.tileX, tileZ: first.tileZ, wall: first.wall }, { tileX: second.tileX, tileZ: second.tileZ, wall: second.wall }];
-    first.isUsed = true; second.isUsed = true;
-    return true;
-  }
   const lockedKind = doorKindForTier(higherTier), lockedCardLevel = cardLevelForTier(higherTier);
   plan.doors.push({ tileX: first.tileX, tileZ: first.tileZ, kind: first.owner.tier > lowerTier ? lockedKind : DOOR_KIND_AUTOMATIC,
     cardLevel: first.owner.tier > lowerTier ? lockedCardLevel : 0, roomA: first.owner, roomB: duct });
@@ -812,10 +1091,12 @@ function digHaulBay(bay, number) {
   placement.isGenerating = false;
 }
 
-// `isVent` plans vents instead of service ducts (see tryPlanDuct). `isLessPicky` accepts pairs that are only two
-// doors apart on foot, and vents that run from corridor to corridor: used when the picky pass came up short.
-function planLoops(plan, wantedCount, isVent, isLessPicky) {
-  const blocked = createDuctBlockGrid(plan);
+// With `ventGrid` it plans vents instead of service ducts (see tryPlanDuct). `isLessPicky` accepts pairs that
+// are only two doors apart on foot, and vents that run from corridor to corridor: used when the picky pass came
+// up short.
+function planLoops(plan, wantedCount, ventGrid, isLessPicky) {
+  const isVent = Boolean(ventGrid);
+  const blocked = isVent ? ventGrid.blocked : createDuctBlockGrid(plan);
   const isUsable = function (socket) { return !socket.isUsed && socket.owner.key !== 'calibrationStore'; };
   let made = 0;
   for (let round = 0; round < wantedCount * 3 && made < wantedCount; round++) {
@@ -828,20 +1109,21 @@ function planLoops(plan, wantedCount, isVent, isLessPicky) {
       const doorsAway = doorsAwayCache.get(first.owner);
       for (const second of plan.sockets) {
         if (!isUsable(second) || second.owner === first.owner || second.floorY !== first.floorY) continue;
-        if (isVent && second.owner.tier !== first.owner.tier) continue;
         if (isVent && !isLessPicky && first.owner.isCorridor && second.owner.isCorridor) continue;
         if (second.tileZ * GRID_WIDTH + second.tileX <= first.tileZ * GRID_WIDTH + first.tileX) continue; // each pair once
         const onFoot = doorsAway.get(second.owner);
         if (onFoot === undefined || onFoot < (isLessPicky ? 2 : 3)) continue;
         const throughRock = Math.abs(first.tileX - second.tileX) + Math.abs(first.tileZ - second.tileZ);
         if (throughRock > 26 || throughRock < 3) continue;
-        candidates.push({ first: first, second: second, score: onFoot * 5 - throughRock + plan.random() * 6 });
+        // (A vent round a lock is the rarer kind: most of them join places you could walk between.)
+        const locksBetween = isVent ? Math.abs(first.owner.tier - second.owner.tier) : 0;
+        candidates.push({ first: first, second: second, score: onFoot * 5 - throughRock - locksBetween * 6 + plan.random() * 6 });
       }
     }
     candidates.sort(function (a, b) { return b.score - a.score; });
     let madeThisRound = false;
     for (let attempt = 0; attempt < Math.min(candidates.length, 25) && !madeThisRound; attempt++) {
-      madeThisRound = tryPlanDuct(plan, blocked, candidates[attempt].first, candidates[attempt].second, isVent);
+      madeThisRound = tryPlanDuct(plan, blocked, candidates[attempt].first, candidates[attempt].second, ventGrid);
     }
     if (!madeThisRound) break;
     made++;
@@ -980,10 +1262,28 @@ function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
   for (let stairAttempt = 0; stairAttempt < 8 && hasLowerLevel && sizeKey !== 'small' && plan.stairCount < 2; stairAttempt++) {
     if (planSecondStair(plan)) plan.stairCount = 2;
   }
-  // Vents first: they are pickier about where they can go (both ends behind the same locks).
-  plan.ventCount = planLoops(plan, size.vents || 0, true, false);
-  if (plan.ventCount < (size.vents || 0)) plan.ventCount += planLoops(plan, size.vents - plan.ventCount, true, true);
-  plan.loopCount = planLoops(plan, size.loops, false);
+  // Vents and service ducts want the same thing: two free doorways that are far apart on foot and near each
+  // other through the rock. So they take turns. One vent first, so that a station has one if it can have any,
+  // and the one that goes down to the lower level; then half of the ducts (two at least), which are the other ways round on foot and are not to get fewer
+  // because there are more vents; then the rest of the vents; then the rest of the ducts, from whatever pairs
+  // are left. Among the vents, last the ones that need less: those that branch off another vent (one doorway
+  // each), and the dead ends (none).
+  const wantedVents = size.vents || 0;
+  let ventGrid = createVentGrid(plan);
+  plan.ventCount = planLoops(plan, Math.min(1, wantedVents), ventGrid, false);
+  if (plan.ventCount < Math.min(1, wantedVents)) plan.ventCount += planLoops(plan, 1, ventGrid, true);
+  // And, where there is a lower level to go down to, the way down that is no way back: early, because the
+  // lower level has few doorways to spare.
+  plan.ventDropCount = hasLowerLevel ? planVentDrops(plan, ventGrid, size.ventDrops || 0) : 0;
+  plan.ventCount += plan.ventDropCount;
+  plan.loopCount = planLoops(plan, Math.max(Math.ceil(size.loops / 2), Math.min(size.loops, 2)), null, false);
+  ventGrid = createVentGrid(plan); // (afresh: those ducts are in the rock now)
+  plan.ventCount += planLoops(plan, wantedVents - plan.ventCount, ventGrid, false);
+  if (plan.ventCount < wantedVents) plan.ventCount += planLoops(plan, wantedVents - plan.ventCount, ventGrid, true);
+  plan.ventBranchCount = planVentBranches(plan, ventGrid, size.ventBranches || 0);
+  plan.ventCount += plan.ventBranchCount;
+  plan.ventPocketCount = planVentPockets(plan, ventGrid, size.ventPockets || 0);
+  plan.loopCount += planLoops(plan, size.loops - plan.loopCount, null, false);
   // (No quests here. They are put into the finished station afterwards: see buildStation, and 09-quests.js.)
   plan.seed = seed;
   return plan;
@@ -1148,13 +1448,32 @@ function furnishGeneratedCorridor(corridor, random) {
   if (corridor.isVent) {
     // A vent: nothing in it but the seams of the sheet metal, one every other tile, so a scan has something to
     // catch on. At each mouth, a frame round the opening and the grille that used to cover it, lying where it fell.
+    // (A vent that branches off another, or is a dead end off its side, starts or ends on a tile of that one:
+    // `joins`. Its seams are its own tiles'; a dead end has no mouth, and its far end is kept for whatever
+    // will want to live in one: level.ventPockets.)
+    // (One with a drop in it is on the upper floor as far as the drop and on the lower from there: its seams
+    // and its mouths are each on the floor of their own tile.)
     for (let step = 1; step < corridor.route.length - 1; step += 2) {
       const index = corridor.route[step];
       const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
+      placement.offsetY = tileFloorHeight[index];
       addBoxBetween(tileX, 0, tileZ + 0.47, tileX + 1, 0.015, tileZ + 0.53, { surfaceClass: SURFACE_METAL, blocksMovement: false });
       addBoxBetween(tileX + 0.47, 0, tileZ, tileX + 0.53, 0.015, tileZ + 1, { surfaceClass: SURFACE_METAL, blocksMovement: false });
     }
-    for (const mouth of corridor.mouths) addVentMouth(mouth, random);
+    for (const mouth of corridor.mouths) {
+      placement.offsetY = mouth.floorY === undefined ? corridor.floorY : mouth.floorY;
+      addVentMouth(mouth, random);
+    }
+    placement.offsetY = corridor.floorY;
+    if (corridor.isDrop) {
+      const footIndex = corridor.route[corridor.dropStep];
+      level.ventDrops.push({ x: footIndex % GRID_WIDTH + 0.5, z: Math.floor(footIndex / GRID_WIDTH) + 0.5, topY: corridor.floorY, bottomY: corridor.lowerFloorY });
+    }
+    if (corridor.pocketIndex !== undefined) {
+      const pocketX = corridor.pocketIndex % GRID_WIDTH, pocketZ = Math.floor(corridor.pocketIndex / GRID_WIDTH);
+      const entryIndex = corridor.route[0];
+      level.ventPockets.push({ x: pocketX + 0.5, z: pocketZ + 0.5, floorY: placement.offsetY, entryX: entryIndex % GRID_WIDTH + 0.5, entryZ: Math.floor(entryIndex / GRID_WIDTH) + 0.5 });
+    }
     return;
   }
   if (corridor.isDuct) {
@@ -1296,17 +1615,38 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
     placement.zone = room.zone;
     placement.offsetY = room.floorY;
     if (room.route) {
-      for (const index of room.route) {
+      for (let step = 0; step < room.route.length; step++) {
+        const index = room.route[step];
         const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
-        carveRoom(tileX, tileZ, tileX + 1, tileZ + 1, room.ceiling, ZONE_GENERATED_ROOM);
+        if (room.isVent && (tileFlags[index] & TILE_FLAG_VENT)) continue; // where it meets another vent: that tile is the other one's
+        // A vent with a drop in it: on the upper floor up to the drop, on the lower floor from it on, and the
+        // foot of the drop is open from the lower floor to the vent's ceiling above.
+        const isFoot = room.isDrop && step === room.dropStep;
+        placement.offsetY = room.isDrop && step >= room.dropStep ? room.lowerFloorY : room.floorY;
+        carveRoom(tileX, tileZ, tileX + 1, tileZ + 1, isFoot ? room.floorY - room.lowerFloorY + room.ceiling : room.ceiling, ZONE_GENERATED_ROOM);
         if (room.isVent) tileFlags[index] |= TILE_FLAG_VENT | TILE_FLAG_GRATE; // sheet metal: it rings underfoot
+        if (isFoot) tileFlags[index] |= TILE_FLAG_DROP;
       }
+      placement.offsetY = room.floorY;
     } else carveRoom(room.startX, room.startZ, room.endX, room.endZ, room.ceiling, ZONE_GENERATED_ROOM);
   }
 
   // Hang the doors.
   clearPlacement();
-  for (const door of plan.doors) addDoor(door.tileX, door.tileZ, door.kind, door.cardLevel);
+  for (const planned of plan.doors) {
+    addDoor(planned.tileX, planned.tileZ, planned.kind, planned.cardLevel);
+    // Which side of it is the inside: the side of the room that is behind more locks. (A door between two
+    // rooms behind the same locks has none.) A keycard door can be opened from there without the card:
+    // TUNING.keycardDoorsOpenFromInside, 08-entities.js.
+    const inner = planned.roomA.tier === planned.roomB.tier ? null : (planned.roomA.tier > planned.roomB.tier ? planned.roomA : planned.roomB);
+    const built = doors[doors.length - 1];
+    for (const step of WALL_DIRECTIONS) {
+      const besideX = planned.tileX + step[0], besideZ = planned.tileZ + step[1];
+      const isInInner = inner !== null && (inner.route ? inner.route.indexOf(tileIndexAt(besideX, besideZ)) >= 0
+        : (besideX >= inner.startX && besideX < inner.endX && besideZ >= inner.startZ && besideZ < inner.endZ));
+      if (isInInner) { built.insideStepX = step[0]; built.insideStepZ = step[1]; }
+    }
+  }
 
   // Furnish.
   for (const room of plan.rooms) {
@@ -1364,6 +1704,15 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   computeLevelBounds();
   addCorridorDirectionSigns(plan);
 
+  // Places where something small could make its home (08-looter.js): the far end of every dead end off a vent,
+  // and after those the middle of every vent that is on one floor and leads from one room to another.
+  for (const pocket of level.ventPockets) level.ventNests.push({ x: pocket.x, z: pocket.z, floorY: pocket.floorY, isPocket: true });
+  for (const room of plan.rooms) {
+    if (!room.isVent || room.isDrop || room.joins) continue;
+    const middle = room.route[Math.floor(room.route.length / 2)];
+    if (tileIsWalkable[middle]) level.ventNests.push({ x: middle % GRID_WIDTH + 0.5, z: Math.floor(middle / GRID_WIDTH) + 0.5, floorY: room.floorY, isPocket: false });
+  }
+
   // Places for the Hollow to wander between: the middle of every room and corridor.
   for (const room of plan.rooms) {
     if (room.key === 'calibrationStore' || room.isVent) continue; // a vent is a way through, not somewhere to wander to
@@ -1378,6 +1727,9 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   level.roomCount = plan.rooms.length; // (how much lies about a station goes by this)
   level.loopCount = plan.loopCount;
   level.ventCount = plan.ventCount;
+  level.ventBranchCount = plan.ventBranchCount;
+  level.ventPocketCount = plan.ventPocketCount;
+  level.ventDropCount = plan.ventDropCount;
   generatedStationPlan = plan; // the quests are put into it afterwards (buildStation)
   return true;
 }
@@ -1544,16 +1896,109 @@ function buildStationRooms(kind, seed, sizeKey, layoutKey, levelsKey) {
 //   with no power:    the generator and the first spool must be reachable
 //   with power:       the keycard and the second spool
 //   with the keycard: everything
+// Checks the vents of the station that is built: that each is a tile wide and crawl height, that it has the
+// mouths it should, that every dead end is one, and that all of it can be got to. Returns a list of problems
+// (empty when fine).
+function auditVents() {
+  const problems = [];
+  const isVentTile = function (index) { return index >= 0 && index < TILE_COUNT && (tileFlags[index] & TILE_FLAG_VENT) !== 0; };
+  const field = borrowTileField('auditVents');
+  computeDistanceField(field, findNearestWalkableTileIndex(PLAYER_START.x, PLAYER_START.z), 0, null);
+  for (let index = 0; index < TILE_COUNT; index++) {
+    if (!isVentTile(index)) continue;
+    const where = (index % GRID_WIDTH) + ',' + Math.floor(index / GRID_WIDTH);
+    // Two vents side by side would be one space two tiles wide: there has to be rock between them.
+    if (isVentTile(index + 1) && isVentTile(index + GRID_WIDTH) && isVentTile(index + GRID_WIDTH + 1)) problems.push('vent tiles lie side by side at ' + where);
+    const isFoot = (tileFlags[index] & TILE_FLAG_DROP) !== 0;
+    if (!isFoot && Math.abs(tileCeilingHeight[index] - tileFloorHeight[index] - VENT_HEIGHT) > 0.001) problems.push('the vent at ' + where + ' is not crawl height');
+    if (field[index] >= NAVIGATION_UNREACHABLE) problems.push('the vent tile at ' + where + ' cannot be got to');
+    // A vent leads somewhere: every tile of it opens onto two tiles at least, by an opening a body can go
+    // through (a metre of it, floor to ceiling), unless it is the far end of a dead end. (Two vents on
+    // different floors that were dug across each other would each end blind in the rock here.)
+    let ways = 0;
+    for (const beside of [index + 1, index - 1, index + GRID_WIDTH, index - GRID_WIDTH]) {
+      if (tileIsOpen[beside] === 1 && Math.min(tileCeilingHeight[index], tileCeilingHeight[beside]) - Math.max(tileFloorHeight[index], tileFloorHeight[beside]) >= 1) ways++;
+    }
+    const isPocketEnd = level.ventPockets.some(function (pocket) { return tileIndexAt(Math.floor(pocket.x), Math.floor(pocket.z)) === index; });
+    if (ways < 2 && !isPocketEnd) problems.push('the vent tile at ' + where + ' is a blind end');
+  }
+  if (level.ventDrops.length !== level.ventDropCount) problems.push('the station knows of ' + level.ventDrops.length + ' drops where ' + level.ventDropCount + ' were dug');
+  for (const drop of level.ventDrops) {
+    // The foot of a drop: on the lower floor, with the edge above it on one side and the vent going on, on
+    // the lower floor, on another.
+    const index = tileIndexAt(Math.floor(drop.x), Math.floor(drop.z));
+    let edges = 0, waysOn = 0;
+    for (const beside of [index + 1, index - 1, index + GRID_WIDTH, index - GRID_WIDTH]) {
+      if (!isVentTile(beside)) continue;
+      if (Math.abs(tileFloorHeight[beside] - drop.topY) < 0.001) edges++;
+      else if (Math.abs(tileFloorHeight[beside] - drop.bottomY) < 0.001) waysOn++;
+    }
+    if (!(tileFlags[index] & TILE_FLAG_DROP) || Math.abs(tileFloorHeight[index] - drop.bottomY) > 0.001 || !(drop.topY - drop.bottomY > MAXIMUM_STEP_HEIGHT) || edges !== 1 || waysOn !== 1) {
+      problems.push('the drop at ' + drop.x + ', ' + drop.z + ' is not one: ' + edges + ' edge(s) above it, ' + waysOn + ' way(s) on from its foot');
+    }
+  }
+  if (level.ventMouths.length !== level.ventCount * 2 - level.ventBranchCount) {
+    problems.push(level.ventMouths.length + ' vent mouths, where ' + level.ventCount + ' vents of which ' + level.ventBranchCount + ' end on another should have ' + (level.ventCount * 2 - level.ventBranchCount));
+  }
+  if (level.ventPockets.length !== level.ventPocketCount) problems.push('the station knows of ' + level.ventPockets.length + ' dead ends where ' + level.ventPocketCount + ' were dug');
+  for (const pocket of level.ventPockets) {
+    const index = tileIndexAt(Math.floor(pocket.x), Math.floor(pocket.z));
+    let waysOut = 0;
+    for (const beside of [index + 1, index - 1, index + GRID_WIDTH, index - GRID_WIDTH]) if (tileIsOpen[beside] === 1) waysOut++;
+    if (!isVentTile(index) || waysOut !== 1) problems.push('the dead end at ' + pocket.x + ', ' + pocket.z + ' is not one: ' + waysOut + ' ways out of it');
+    if (!isVentTile(tileIndexAt(Math.floor(pocket.entryX), Math.floor(pocket.entryZ)))) problems.push('the dead end at ' + pocket.x + ', ' + pocket.z + ' does not leave from a vent');
+  }
+  return problems;
+}
+
+// What the vents of the station that is built come to: how many places there are where three or four ways
+// meet in one, and how much more floor they open to somebody who has not got through a single lock (every
+// powered and keycard door shut): `floorOnFoot` tiles through the doors alone, `floorThroughVents` with the vents.
+function measureVents() {
+  const measured = { junctions: 0, crossings: 0, floorOnFoot: 0, floorThroughVents: 0 };
+  const isVentTile = function (index) { return (tileFlags[index] & TILE_FLAG_VENT) !== 0; };
+  for (let index = GRID_WIDTH; index < TILE_COUNT - GRID_WIDTH; index++) {
+    if (!isVentTile(index)) continue;
+    let ways = 0;
+    for (const beside of [index + 1, index - 1, index + GRID_WIDTH, index - GRID_WIDTH]) if (tileIsOpen[beside] === 1) ways++;
+    if (ways === 3) measured.junctions++;
+    if (ways === 4) measured.crossings++;
+  }
+  const field = borrowTileField('measureVents'), closed = [];
+  const startIndex = findNearestWalkableTileIndex(PLAYER_START.x, PLAYER_START.z);
+  const countFloor = function () {
+    computeDistanceField(field, startIndex, 0, null);
+    let tiles = 0;
+    for (let index = 0; index < TILE_COUNT; index++) if (field[index] < NAVIGATION_UNREACHABLE && !isVentTile(index)) tiles++;
+    return tiles;
+  };
+  for (const door of doors) {
+    const index = tileIndexAt(door.tileX, door.tileZ);
+    if ((door.kind === DOOR_KIND_POWERED || door.kind === DOOR_KIND_KEYCARD) && tileIsWalkable[index]) { tileIsWalkable[index] = 0; closed.push(index); }
+  }
+  measured.floorThroughVents = countFloor();
+  for (let index = 0; index < TILE_COUNT; index++) if (isVentTile(index) && tileIsWalkable[index]) { tileIsWalkable[index] = 0; closed.push(index); }
+  measured.floorOnFoot = countFloor();
+  for (const index of closed) tileIsWalkable[index] = 1;
+  return measured;
+}
+
 function auditLevelProgression() {
   const problems = [];
   const field = borrowTileField('auditProgression');
   // `isShut` says which doors are locked in the situation being checked.
+  // All of it is checked on foot, with every vent shut. A vent may lead round a lock, and that is allowed: but
+  // nothing may hang on one. What has to be reached has to be reached through the doors, where anything that is
+  // carried can go too; and what a lock keeps for later, it keeps from everybody who stays on their feet.
   const reach = function (isShut) {
     const closed = [];
     for (const door of doors) {
       if (!isShut(door)) continue;
       const index = tileIndexAt(door.tileX, door.tileZ);
       if (tileIsWalkable[index]) { tileIsWalkable[index] = 0; closed.push(index); }
+    }
+    for (let index = 0; index < TILE_COUNT; index++) {
+      if ((tileFlags[index] & TILE_FLAG_VENT) && tileIsWalkable[index]) { tileIsWalkable[index] = 0; closed.push(index); }
     }
     computeDistanceField(field, findNearestWalkableTileIndex(PLAYER_START.x, PLAYER_START.z), 0, null);
     for (const index of closed) tileIsWalkable[index] = 1;

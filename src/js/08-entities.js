@@ -158,9 +158,18 @@ function captionDoorSound(door, isOpening) {
 }
 
 // You are standing at a door that will not open for you: it says so, and why, every few seconds.
+// Is somebody standing at this door on its inner side, where a keycard door has a release that needs no card
+// and no mains (TUNING.keycardDoorsOpenFromInside: a temporary rule, see 00-config.js)? `one` is whoever is asked about.
+// Only the doors of a generated station know which side is their inside (buildGeneratedStation, 03-levelgen.js).
+function isAtInsideOfKeycardDoor(door, one) {
+  if (!TUNING.keycardDoorsOpenFromInside || door.kind !== DOOR_KIND_KEYCARD || door.insideStepX === undefined) return false;
+  if (distanceBetweenPoints(one.x, one.z, door.centerX, door.centerZ) >= 1.9) return false;
+  return (one.x - door.centerX) * door.insideStepX + (one.z - door.centerZ) * door.insideStepZ > 0.3;
+}
+
 function tellPlayerOfShutDoor(door, dt) {
   door.deniedMessageCooldown -= dt;
-  if (door.deniedMessageCooldown > 0 || canPlayerOpenDoor(door)) return;
+  if (door.deniedMessageCooldown > 0 || canPlayerOpenDoor(door) || isAtInsideOfKeycardDoor(door, player)) return;
   if (distanceBetweenPoints(player.x, player.z, door.centerX, door.centerZ) >= 1.9) return;
   door.deniedMessageCooldown = 5;
   playDeniedSound();
@@ -187,6 +196,8 @@ function updateDoors(dt) {
       const nearestPlayer = findNearestPlayer(door.centerX, door.centerZ);
       const isSomeoneNear = distanceBetweenPoints(nearestPlayer.x, nearestPlayer.z, door.centerX, door.centerZ) < 1.9;
       if (isSomeoneNear && canPlayerOpenDoor(door)) { wantsOpen = true; openedByPlayer = true; }
+      // (Or one of them stands at its inner side, where a keycard door needs no card.)
+      else if (door.kind === DOOR_KIND_KEYCARD && players.some(function (one) { return isAtInsideOfKeycardDoor(door, one); })) { wantsOpen = true; openedByPlayer = true; }
       tellPlayerOfShutDoor(door, dt);
       // What walks down there: a door opens for one of them only if its way of getting around says so (for the
       // Hollow, not a keycard door: see 08-crawlspace.js). A door that is already open for someone else never

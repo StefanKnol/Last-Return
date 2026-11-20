@@ -25,6 +25,7 @@ const TILE_FLAG_HAZARD = 8;
 const TILE_FLAG_DOOR = 16;
 const TILE_FLAG_VENT = 32; // a crawl-height tunnel: sheet metal underfoot, and no room to stand
 const TILE_FLAG_DEBRIS = 64; // something loose lies here that is loud to walk on (see 03-noisy-floor.js)
+const TILE_FLAG_DROP = 128;  // the foot of a drop: a body may step off into it from however high, and never gets back up that way
 
 // TWEAK: how high a vent is inside, in metres. You crouch at 1.0 m and the Hollow crawls at about the same,
 // so much lower than 1.1 and neither of you fits.
@@ -158,6 +159,12 @@ const level = {
   levelsKey: 'two',
   stairCount: 0,          // flights of stairs between the levels (0 in a one-level station)
   ventCount: 0,           // crawl-height vents (generated stations only)
+  ventBranchCount: 0,     // ... how many of those end on another vent (so have one mouth, not two)
+  ventPocketCount: 0,     // ... and the dead ends off the side of vents, which are not counted as vents
+  ventDropCount: 0,       // ... how many of the vents go down to the lower level, one way (two mouths each, on different floors)
+  ventPockets: [],        // where those end: { x, z, floorY, entryX, entryZ } (the far end, and the tile of the vent it leaves from)
+  ventDrops: [],          // where a vent goes down to the lower level, one way: { x, z, topY, bottomY } (the foot of the drop)
+  ventNests: [],          // where something small could make its home: { x, z, floorY, isPocket }. The dead ends first, then the middle of each other vent
   keycardRoomText: 'the laboratory', // filled into the security office note
   // Extra jobs on top of "power, three spools, lift". Kessel-9 has none; a generated station may have some.
   // The quests of this station: the spools, and whatever else it asks of you before the lift. See 09-quests.js.
@@ -282,7 +289,7 @@ function resetWorldForNewLevel() {
   tileIsOpen.fill(0); tileFloorHeight.fill(0); tileCeilingHeight.fill(0); tileFlags.fill(0); tileZone.fill(0);
   tileIsWalkable.fill(0);
   tilePropLists.fill(null); tileSignLists.fill(null);
-  level.ventMouths.length = 0;
+  level.ventMouths.length = 0; level.ventPockets.length = 0; level.ventDrops.length = 0; level.ventNests.length = 0;
   level.questTiles.length = 0;
   worldProps.length = 0; dynamicBoxProps.length = 0; doors.length = 0; interactables.length = 0;
   clearLooseObjects();
@@ -1053,10 +1060,12 @@ function resolveBodyCollision(x, z, radius, bodyTopHeight, floorHeight) {
     const stamp = ++collisionStampCounter;
     for (let tileZ = centerTileZ - 1; tileZ <= centerTileZ + 1; tileZ++) {
       for (let tileX = centerTileX - 1; tileX <= centerTileX + 1; tileX++) {
-        // Rock, the pit, and any floor too far above or below to step onto all stop a body.
+        // Rock, the pit, and any floor too far above or below to step onto all stop a body. (But for the foot
+        // of a drop, which is there to be stepped off into: that stops nobody who comes to it from above.)
+        const floorDifference = isInsideGrid(tileX, tileZ) ? tileFloorHeight[tileZ * GRID_WIDTH + tileX] - floorHeight : 0;
         const isSolid = !isInsideGrid(tileX, tileZ) || tileIsOpen[tileZ * GRID_WIDTH + tileX] === 0 ||
           (tileFlags[tileZ * GRID_WIDTH + tileX] & TILE_FLAG_PIT) !== 0 ||
-          Math.abs(tileFloorHeight[tileZ * GRID_WIDTH + tileX] - floorHeight) > MAXIMUM_STEP_HEIGHT ||
+          floorDifference > MAXIMUM_STEP_HEIGHT || (floorDifference < -MAXIMUM_STEP_HEIGHT && (tileFlags[tileZ * GRID_WIDTH + tileX] & TILE_FLAG_DROP) === 0) ||
           // too low to get under at this height: a vent, to someone standing up
           tileCeilingHeight[tileZ * GRID_WIDTH + tileX] - tileFloorHeight[tileZ * GRID_WIDTH + tileX] < bodyTopHeight + 0.02;
         if (isSolid) {

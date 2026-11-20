@@ -200,8 +200,8 @@ const labSource = String(function () {
     d.setDebugOption('freezeCreatures', false);
     return seen;
   });
-  check('a creature added to the list of kinds is one of them, after the two the game has',
-    lifecycle.kinds.join() === 'hollow,stills,testWalker', lifecycle.kinds);
+  check('a creature added to the list of kinds is one of them, after the ones the game has',
+    lifecycle.kinds.indexOf('hollow') === 0 && lifecycle.kinds.indexOf('stills') === 1 && lifecycle.kinds.indexOf('testWalker') === lifecycle.kinds.length - 1, lifecycle.kinds);
   check('the game runs it without knowing it: reset once for a new descent, updated every frame with the time that has passed, told of a noise with where it was and how far it carries',
     lifecycle.resetsOnANewDescent === 1 && lifecycle.updatesInASecond >= 29 && lifecycle.updatesInASecond <= 31 && Math.abs(lifecycle.secondsGiven - 1) < 0.05 &&
     JSON.stringify(lifecycle.heard) === '[[41.5,47.25,9]]', lifecycle);

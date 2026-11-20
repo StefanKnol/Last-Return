@@ -33,6 +33,8 @@ const game = {
   deathSequence: null,
   ascentTimer: 0,
   hasShownHollowHint: false,
+  hasShownLooterHint: false,
+  hasShownLooterMadHint: false,
   hasShownVentHint: false,
   isDescentLost: false,          // down there with others: every one of you is down, and nobody is left to carry anybody back
   isLeftBehind: false,           // down there with others: the car has gone up with those on their feet, and you were not one of them
@@ -157,6 +159,8 @@ function resetWorldState() {
   game.statistics.elapsed = 0; game.statistics.distanceWalked = 0; game.statistics.deaths = 0;
   game.interference = 0; game.danger = 0;
   game.hasShownHollowHint = false;
+  game.hasShownLooterHint = false;
+  game.hasShownLooterMadHint = false;
   game.isDescentLost = false;
   game.isLeftBehind = false;
   game.isCarStaying = isWorldShared(); // decided as the descent begins, and kept if you end up down there alone
@@ -829,6 +833,16 @@ function updateGameProgress(dt) {
     if (isEveryoneAboard) askToAct({ what: 'ascend' });
   }
 
+  // The first looter your scanner finds: what it is, said once.
+  if (!game.hasShownLooterHint && looters.some(function (looter) { return looter.figure.totalHits > 25; })) {
+    game.hasShownLooterHint = true;
+    showMessage('Something small. It is after what lies loose, not after you. Noise frightens it.', 7, 'info');
+  }
+  // The first time one is mad at you, in a vent: why, said once.
+  if (!game.hasShownLooterMadHint && player.isInVent && looters.some(function (looter) { return looter.state === LOOTER_STATE_MAD && distanceBetweenPoints(looter.figure.x, looter.figure.z, player.x, player.z) < 3; })) {
+    game.hasShownLooterMadHint = true;
+    showMessage('The vents are theirs. In here it is not afraid of you, or of any noise you make.', 7, 'warning');
+  }
   if (hollow.isActive && !game.hasShownHollowHint && hollow.figure.totalHits > 30) {
     game.hasShownHollowHint = true;
     showMessage('The beam slows it and angers it. Hold it too long and it knows exactly where you are.', 7, 'warning');
@@ -1099,7 +1113,7 @@ function startApplication() {
     beamLines: beamLines,
     viewmodelLensCenter: [VIEWMODEL_LENS_CENTER_X * VIEWMODEL_MODEL_SCALE, VIEWMODEL_LENS_CENTER_Y * VIEWMODEL_MODEL_SCALE, VIEWMODEL_LENS_CENTER_Z * VIEWMODEL_MODEL_SCALE],
     auditLayout: auditFacilityLayout,
-    auditProgression: auditLevelProgression,
+    auditProgression: auditLevelProgression, auditVents: auditVents, measureVents: measureVents,
     level: level, interactables: interactables, zoneNames: ZONE_NAMES,
     loadStation: function (kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders) { const result = loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders); resetWorldState(); return result; },
     workOrders: WORK_ORDERS, questComplications: QUEST_COMPLICATIONS, rankWorkOrders: rankWorkOrders, getWorkOrderProgressShare: getWorkOrderProgressShare, getDirectorPaceFactor: getDirectorPaceFactor, areSpoolsOnTheOrder: areSpoolsOnTheOrder, describeUploadManifest: describeUploadManifest, getIntroLines: getIntroLines, areStillsHunting: function () { return stillsAreHunting; }, getAllowedWorkOrders: getAllowedWorkOrders,
@@ -1226,6 +1240,9 @@ function startApplication() {
     // The Hollow and locked doors: its ceiling hatches, what is shut to it right now, and its way round.
     hollowHatches: hollowHatches, tileBlocksHollow: HOLLOW_WAY.tileBlocks, auditHollowRoutes: auditHollowRoutes,
     // What the creatures have in common (08-creatures.js): the kinds, their ways of getting around, and the path finding of a way.
+    roamingWaypoints: roamingWaypoints,
+    setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
+    looters: looters, looterStates: LOOTER_STATE_NAMES, frightenLooter: frightenLooter, chooseLooterOuting: chooseLooterOuting, isLootable: isLootable,
     creatureKinds: CREATURE_KINDS, creatureWays: CREATURE_WAYS, createCreatureWay: createCreatureWay, createCreatureLegs: createCreatureLegs,
     computeWayDistanceField: computeWayDistanceField, refreshCreatureDoorBlocks: refreshCreatureDoorBlocks, moveCreatureToward: moveCreatureToward,
     findNearestWalkableTileIndex: findNearestWalkableTileIndex,

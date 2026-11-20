@@ -32,6 +32,7 @@ const player = {
   scannerDriftRight: 0, scannerDriftBack: 0,     // how far it has been left behind by your steps, in metres: to your right, and toward you
   eyeHeight: (TUNING.playerHeight * TUNING.playerEyeHeightToBody), // eyes above the floor you stand on
   floorY: 0,                           // height of that floor: 0 on the lift's level, negative further down
+  fallSpeed: 0,                        // how fast you are going down a drop, in metres per second (0: you are not)
   velocityX: 0, velocityZ: 0,
   stamina: 1,
   isStaminaLocked: false,
@@ -473,8 +474,19 @@ function updatePlayerMovement(dt) {
   // Follow the floor. Stairs are taken smoothly; anything bigger (a teleport, a checkpoint) lands at once.
   // TWEAK: 2.5 = how fast the view rises and falls on stairs, in metres per second. Lower feels floatier.
   const floorHere = getFloorHeightAt(player.x, player.z);
-  if (Math.abs(floorHere - player.floorY) > 1) player.floorY = floorHere;
-  else player.floorY = approachValue(player.floorY, floorHere, dt * 2.5);
+  const isOverADrop = floorHere < player.floorY - MAXIMUM_STEP_HEIGHT && (getTileFlagsAtPosition(player.x, player.z) & TILE_FLAG_DROP) !== 0;
+  if (isOverADrop || (player.fallSpeed > 0 && floorHere < player.floorY)) {
+    // Over the edge of a drop (a vent that goes down to the lower level): you fall, and it is heard when you land.
+    // (Once falling you fall to the floor that is under you, wherever your crawling on has taken you meanwhile.)
+    player.fallSpeed += TUNING.playerFallAcceleration * dt;
+    player.floorY = Math.max(floorHere, player.floorY - player.fallSpeed * dt);
+    if (player.floorY === floorHere) {
+      player.fallSpeed = 0;
+      playFootstepSound(false, true, 1.6);
+      emitNoise(player.x, player.z, TUNING.noiseRadiusDropLanding);
+    }
+  } else if (Math.abs(floorHere - player.floorY) > 1) { player.floorY = floorHere; player.fallSpeed = 0; }
+  else { player.floorY = approachValue(player.floorY, floorHere, dt * 2.5); player.fallSpeed = 0; }
   const movedDistance = distanceBetweenPoints(previousX, previousZ, player.x, player.z);
   player.isMoving = movedDistance > dt * 0.3;
   game.statistics.distanceWalked += movedDistance;
