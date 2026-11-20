@@ -626,15 +626,22 @@ function markInteractableDiscovered(objectId) {
 
 // Where the light that is being fired comes from, on the plan. A creature that is lit takes note of it: that
 // is the place it comes to, which is you when it is your scanner and somewhere else when it is not.
-const scanSource = { x: 0, z: 0 };
+// `object` is the loose thing the light comes out of when it is one that scans by itself (a scanner tripod, a
+// fallen scanner: fireScanCone, 09-scan-cone.js), and null for everybody's own scanner and everything else.
+const scanSource = { x: 0, z: 0, object: null };
 
 // Notes what a pulse has just landed on (it is in `rayHit`): the scan point, and what the game makes of it.
 function recordScanHit(drawBeam) {
   let lifeCode = 0;
   const figure = rayHit.figure;
   if (figure !== null) {
-    figure.beamSourceX = scanSource.x; figure.beamSourceZ = scanSource.z;
-    figure.hitsThisFrame++;
+    // The light of a scanner that the Hollow has been up to, and knows for a thing, is nothing to it any more
+    // (letHollowKnowScanner, 08-entities.js). It still leaves its points.
+    if (!(figure === hollow.figure && scanSource.object !== null && scanSource.object.isIgnoredByHollow)) {
+      figure.beamSourceX = scanSource.x; figure.beamSourceZ = scanSource.z;
+      figure.beamSourceObject = scanSource.object;
+      figure.hitsThisFrame++;
+    }
     figure.totalHits++;
     figure.lastScannedTime = game.time;
     lifeCode = convertSecondsToPointLifeCode(TUNING[figure.imprintTuningKey]);

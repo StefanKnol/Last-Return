@@ -11,6 +11,7 @@
   - still open: hurt by a fall (the drop in a vent costs nothing but noise), hurt by what the Hollow throws back, a first aid kit to buy in the shop, the others seeing how hurt you are
 
 - shop in item collection mode (repo mode)
+  - what the tools sell for is set already and is meant to be far below what they cost: a scan grenade 15, a scanner tripod 60, a first aid kit 20
 
 - Even better models
   - player models (overdone and funny, only visible when scanning)
@@ -66,7 +67,7 @@
     - temporary: a keycard door opens from its inner side without the card (`keycardDoorsOpenFromInside`), or the drop is a trap. To be replaced by a proper way back out
     - the Hollow and the other creatures do not use the drop yet
   - ~~the scanner tripod: an item to find (or buy in the shop later), set down and switched on, that scans what is in front of it in pulses. The same system the scanning monster will see by, and a way to try it first~~ (in: 08-loose-objects.js, and fireScanCone in 09-scan-cone.js)
-    - still open: to buy in the shop; a tripod that warns you when something walks into its light; the Hollow going for a tripod that keeps lighting it
+    - still open: to buy in the shop; a tripod that warns you when something walks into its light; the Hollow knocking over or breaking a tripod it has found out about (for now it only loses interest)
   - other types of blind monsters with different systems for it
   - kidnapping monster that moves a player somewhere else
 

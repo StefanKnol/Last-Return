@@ -1320,7 +1320,7 @@ function startApplication() {
 
     pickUpLooseObject: pickUpLooseObject, releaseHeldLooseObject: releaseHeldLooseObject, getHeldLooseObject: getHeldLooseObject,
     wakeLooseObject: wakeLooseObject, setLooseObjectYaw: setLooseObjectYaw, getCarrySpeedFactor: getCarrySpeedFactor,
-    fireScanCone: fireScanCone, scanConeResult: scanConeResult, isBodyInScanPulse: isBodyInScanPulse, getScannerTripodLens: getScannerTripodLens,
+    fireScanCone: fireScanCone, scanConeResult: scanConeResult, isBodyInScanPulse: isBodyInScanPulse, getLooseScannerLens: getLooseScannerLens, showLooseScannerLights: showLooseScannerLights, getLooseObjectPoint: getLooseObjectPoint, surfaceScannerLight: SURFACE_SCANNER_LIGHT,
     fireScanPulse: fireScanPulse, fireScanPulseBeyond: fireScanPulseBeyond, scanEmitter: scanEmitter, updateScanEmitterAtLens: updateScanEmitterAtLens, updateHeldScannerLag: updateHeldScannerLag, steadyHeldScanner: steadyHeldScanner, computeHeldScannerBasis: computeHeldScannerBasis, computeHeldScannerInView: computeHeldScannerInView, updateScanEmitterAtEye: updateScanEmitterAtEye, castScannerPulse: castScannerPulse, castRayAgainstThings: castRayAgainstThings,
     getPlayFieldOfViewDegrees: getPlayFieldOfViewDegrees, beginLettingGo: beginLettingGo,
     castScannerRay: castScannerRay, rayHit: rayHit, scannerBasis: scannerBasis, computeScannerBasis: computeScannerBasis,

@@ -50,6 +50,7 @@ function fireScanCone(originX, originY, originZ, directionX, directionY, directi
   const before = looseRaySkipped;
   looseRaySkipped = skippedObject || null;
   scanSource.x = originX; scanSource.z = originZ;
+  scanSource.object = skippedObject || null; // (whose light this is: a creature may come to know the thing)
   for (let pulse = 0; pulse < pulses; pulse++) {
     // Evenly over the cap of the sphere that the cone cuts out: as much light at its edge as in its middle.
     const cosine = 1 - Math.random() * (1 - cosineOfEdge), sine = Math.sqrt(Math.max(0, 1 - cosine * cosine)), turn = Math.random() * TWO_PI;
@@ -70,5 +71,6 @@ function fireScanCone(originX, originY, originZ, directionX, directionY, directi
     }
   }
   looseRaySkipped = before;
+  scanSource.object = null;
   return result;
 }

@@ -547,7 +547,7 @@ function advanceOtherPlayer(other, dt) {
 const scannerLight = { x: 0, y: 0, z: 0 };
 function showScannerLight(other) {
   if (!other.hasBeenHeardFrom) return;
-  if (other.isFallen) return; // their scanner is a thing that lies somewhere now, and is lit there (showFallenScannerLights)
+  if (other.isFallen) return; // their scanner is a thing that lies somewhere now, and is lit there (showLooseScannerLights, 08-loose-objects.js)
   getFigureScannerLight(other.figure, scannerLight);
   // A few points that last a quarter of a second, put down again every frame. They are not returns of anything.
   for (let count = 0; count < 3; count++) {
@@ -555,17 +555,6 @@ function showScannerLight(other) {
       1, SURFACE_SCANNER_LIGHT, 1, true);
   }
   pointCloud.totalReturns -= 3;
-}
-
-// The scanners of the fallen, wherever they lie or are being carried: lit.
-function showFallenScannerLights() {
-  for (const object of looseObjects) {
-    if (!object.fallenPlayerId) continue;
-    for (let count = 0; count < 3; count++) {
-      addScanPoint(object.x + (Math.random() - 0.5) * 0.03, object.y + 0.07 + (Math.random() - 0.5) * 0.02, object.z + (Math.random() - 0.5) * 0.03, 1, SURFACE_SCANNER_LIGHT, 1, true);
-    }
-    pointCloud.totalReturns -= 3;
-  }
 }
 
 // One of the others, for one frame: where they are now, their light, and what their scanner shows.
@@ -632,7 +621,7 @@ function updateTogether(dt) {
     sayWhereLooseThingsAre();
   }
   placeOwnBody();
-  if (game.mode !== 'intro') showFallenScannerLights();
+  if (game.mode !== 'intro') showLooseScannerLights(); // every scanner that lies or stands about: a fallen one, a tripod
   for (const other of together.others) {
     // What their scanners light up is lit here whatever you are doing yourself: with the menu open, reading a
     // page, or dead. It goes onto your map, and the host's creatures feel their light. (It used to stop for

@@ -30,6 +30,7 @@ const hollow = Object.assign(createCreatureLegs(HOLLOW_WAY), {
   // Below TUNING.hollowAngerNoticeLevel the beam only makes it stop and turn; above, it knows where you are.
   anger: 0,
   wasInBeam: false,
+  isAfterAThing: false, // hunting, and what it is following is the light of a scanner that scans by itself, not one of you
   stunSeconds: 0,       // it stands stunned for this much longer (see stunHollow)
   recoverSeconds: 0,    // it has just struck somebody who is still on their feet: it stands there for this much longer, and strikes nobody
   turnCaptionCooldown: 0,
@@ -101,6 +102,12 @@ function hearNoiseAsHollow(x, z, radius) {
   const effectiveRadius = radius * game.difficulty.hearingFactor * getHollowHearingBoost();
   if (debugHooks.recordNoise) debugHooks.recordNoise(x, z, effectiveRadius);
   if (!hollow.isActive || hollow.graceTimer > 0 || debugState.options.creaturesIgnorePlayer) return;
+  // The tick of a scanner it has been up to and knows for a thing: it pays that no heed (letHollowKnowScanner).
+  if (Math.abs(radius - TUNING.noiseRadiusTripodPulse) < 0.001) {
+    for (const object of looseObjects) {
+      if (object.kind.scans && object.isOn && object.isIgnoredByHollow && distanceBetweenPoints(x, z, object.x, object.z) < 0.5) return;
+    }
+  }
   const distance = distanceBetweenPoints(x, z, hollow.figure.x, hollow.figure.z);
   // Too faint to act on, but close enough to make it turn its head that way.
   if (distance < effectiveRadius * 1.8) { hollow.lastNoiseX = x; hollow.lastNoiseZ = z; hollow.hasHeardNoise = true; }
@@ -129,6 +136,31 @@ function stunHollow(seconds) {
   hollow.stunSeconds = Math.max(hollow.stunSeconds, seconds);
   shareWorldSoundsDuring(function () { showCaption('hollowStunned', hollow.figure); });
   return true;
+}
+
+// The Hollow has come right up to a scanner that scans by itself (a tripod, a fallen scanner: called from
+// updateLooseScanner, in the game that runs the Hollow). It came because the thing lit it, or ticked. Now it
+// knows what it is: not one of you. It stands over it for a moment, sniffs, and goes back to its rounds. From
+// now on that scanner's light is nothing to it (it does not anger it, hold it or draw it: recordScanHit,
+// 09-player.js) and neither is its ticking (hearNoiseAsHollow), until one of you takes the scanner into the
+// beam again: moved, it is a new thing to find out about.
+function letHollowKnowScanner(object) {
+  object.isIgnoredByHollow = true;
+  const figure = hollow.figure;
+  figure.hitsThisFrame = 0;
+  hollow.wasInBeam = false; hollow.heldAmount = 0;
+  // What that light made of its temper is gone with it, unless the light on it now is one of yours.
+  const wasItsLight = figure.beamSourceObject === object;
+  if (wasItsLight) { hollow.anger = Math.min(hollow.anger, TUNING.hollowAngerNoticeLevel * 0.4); hollow.enragedTimer = 0; figure.beamSourceObject = null; }
+  // And if the thing is what it was after, it is after nothing now. (After one of you, it goes on.)
+  const wasAfterIt = ((hollow.state === HOLLOW_STATE_HUNT || hollow.state === HOLLOW_STATE_SEARCH) && hollow.isAfterAThing) ||
+    (hollow.state === HOLLOW_STATE_INVESTIGATE && distanceBetweenPoints(hollow.targetX, hollow.targetZ, object.x, object.z) < 2.5);
+  if (wasAfterIt || hollow.state === HOLLOW_STATE_ROAM) {
+    hollow.state = HOLLOW_STATE_LISTEN;
+    hollow.listenTimer = TUNING.hollowAtScannerSeconds;
+    hollow.doorBang = null; hollow.isAfterAThing = false; hollow.timeSinceSensed = 99;
+  }
+  shareWorldSoundsDuring(function () { playHollowSniff(); showCaption('hollowKnowsScanner', figure); });
 }
 
 // Draws the Hollow towards a place, the way a noise does, unless it is hunting. Used for a thing it has kicked.
@@ -557,8 +589,8 @@ function updateHollow(dt) {
     }
     if (!heardPlayer && hollow.knowsPlayerPositionAlways) heardPlayer = nearestPlayer;
   }
-  if (heardPlayer) beginHollowHunt(heardPlayer.x, heardPlayer.z);
-  else if (isLightFollowed) beginHollowHunt(beamSourceX, beamSourceZ);
+  if (heardPlayer) { beginHollowHunt(heardPlayer.x, heardPlayer.z); hollow.isAfterAThing = false; }
+  else if (isLightFollowed) { beginHollowHunt(beamSourceX, beamSourceZ); hollow.isAfterAThing = Boolean(figure.beamSourceObject); } // (the light of a tripod: it is after a thing, and does not know it yet)
   else hollow.timeSinceSensed += dt;
 
   // The beam has just left it and it was not sure where the light came from: it comes over to look.

@@ -271,13 +271,16 @@ const TUNING = {
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
   // The scan grenade (a loose object that does something: see `use` in LOOSE_OBJECT_KINDS).
   // The scanner tripod (08-loose-objects.js): switched on with Q, it scans what is in front of it in pulses.
+  // (The scanner of somebody who fell does the same when it is switched on, by these same numbers, without the battery.)
   tripodPulseEverySeconds: 2,     // one pulse of light this often
   tripodFlashSeconds: 0.22,         // how long one pulse lasts
   tripodPulseRays: 1500,            // how many pulses of the scanner go into one of its own
   tripodConeDegrees: 74,            // how wide its light opens, edge to edge
   tripodBatterySeconds: 480,        // how long it scans in all, counted while it is on. Then it is spent
+  hollowKnowsScannerMetres: 1.6,    // the Hollow this near to one that is scanning finds out it is a thing: after that its light and its tick are nothing to it, until you handle it again
+  hollowAtScannerSeconds: 2.5,      // ... and stands over it for this long, sniffing, before it goes back to its rounds
   noiseRadiusTripodPulse: 5,        // each pulse ticks. The Hollow hears that from a little way off; a looter close by is startled by it
-  scannerTripodsPerRoom: 0.04,      // how many of them a station has, for each of its rooms (never fewer than one)
+  scannerTripodsPerRoom: 0.07,      // how many of them a station has, for each of its rooms (never fewer than one)
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
@@ -690,6 +693,7 @@ const CAPTIONS = {
   hollowShriek: { text: '[it shrieks in the beam]', level: 'sound', withinMetres: 50, seconds: 1.2, slot: 'hollowVoice', rank: 2 },
   hollowRoar: { text: '[it roars]', level: 'sound', withinMetres: 50, seconds: 2.5, slot: 'hollowVoice', rank: 3 },
   hollowSnarl: { text: '[it snarls]', level: 'sound', withinMetres: 60, seconds: 1.8, slot: 'hollowVoice', rank: 2 },
+  hollowKnowsScanner: { text: '[it sniffs at the scanner, and loses interest]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'hollowVoice', rank: 2 },
   hollowSniff: { text: '[it sniffs the air]', level: 'sound', withinMetres: 50, seconds: 2, slot: 'hollowVoice', rank: 2 },
   hollowTrill: { text: '[a short, rising trill]', level: 'sound', withinMetres: 23, seconds: 2.5, slot: 'hollowVoice', rank: 2 },
 
@@ -745,7 +749,7 @@ const CAPTIONS = {
   ownObjectBreak: { text: '[something breaks apart at your feet]', level: 'sound', withinMetres: 0, seconds: 3, slot: 'ownHands', rank: 2 },
   objectBreak: { text: '[something breaks apart]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   ownObjectKicked: { text: '[something skitters away from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
-  tripodPulse: { text: '[a tick, and a flash: a scanner tripod]', level: 'sound', withinMetres: 9, seconds: 1.7, slot: 'tripod', rank: 0 },
+  tripodPulse: { text: '[a tick, and a flash: a scanner left scanning]', level: 'sound', withinMetres: 9, seconds: 1.7, slot: 'tripod', rank: 0 },
   scanGrenade: { text: '[a rising whine, and a crack of light]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   hollowStunned: { text: '[it stands frozen in the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },
   ownObjectKnock: { text: '[it knocks against something]', level: 'sound', withinMetres: 0, seconds: 2, slot: 'ownHands', rank: 0 },

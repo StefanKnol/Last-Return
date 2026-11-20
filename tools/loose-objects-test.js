@@ -226,9 +226,9 @@ function installLab() {
       // within all that too, so nothing of it is further from that centre than that space is across.
       const limits = d.designedObjectLimits, furthestCorner = Math.sqrt(3) * (limits.reach + Math.max(limits.maximumHalf, limits.maximumRadius));
       if (!(prepared.boundsRadius >= prepared.smallestRadius && prepared.boundsRadius <= 2 * furthestCorner) || !(prepared.smallestRadius >= limits.minimumRadius)) wrong.push(kindKey + ': size');
-      // (A scan grenade is a tool, a scanner is what is left of a player, and a fuel can with fuel in it is for a
-      // generator: none of them is salvage.)
-      if (kindKey !== 'scanGrenade' && kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scanner is what is left of a player, and a fuel can with fuel in it is for a generator: neither is
+      // salvage. A tool is: a scan grenade and a scanner tripod are worth something unused.)
+      if (kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length, ofTheGame: Object.keys(d.looseObjectKinds).filter((kindKey) => testKinds.indexOf(kindKey) < 0).length };
