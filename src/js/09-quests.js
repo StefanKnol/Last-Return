@@ -56,6 +56,9 @@
 //   needsPower     for 'activate': true if it will not work until the mains is on
 //   requires       for 'activate': { item, chance } - with that chance a machine needs one of QUEST_ITEMS
 //                  brought to it first, and one is put near it. For 'supply': { item }.
+//   tankOf         for a machine that needs fuel: function (object) returning the floor its body stands on, as
+//                  { minimumX, maximumX, minimumZ, maximumZ }. A fuel can pours while it is at that (see "Fuel").
+//   tankName       ... and what the machine is called, where its things have no names of their own
 //   noise          for 'activate': how far switching one on carries, in metres (0 or left out: no further than a pickup)
 //   activated      for 'activate': function (instance, object) run as it switches on (its sound, say)
 //   countsWith     a number added to both sides of "{done} of {total}" (the generators count Generator 2 too)
@@ -78,16 +81,15 @@
 // except where they would have wanted the same place.
 // ---------------------------------------------------------------------------
 
-// Things you carry for a quest. Any one of a kind does for any machine that needs that kind.
-// TWEAK: `carryMost` is how many you can hold at once.
+// Things you bring to a machine for a quest. Any one of a kind does for any machine that needs that kind.
+// Each is a loose object (`looseKind`, in LOOSE_OBJECT_KINDS, 08-loose-objects.js): it is carried in the beam
+// like anything else that lies loose, it can be dropped, thrown and knocked about, and it is not in a pocket.
+// `build` puts one out (03-layout.js); `mapLabel` is what your map calls one you have scanned or carried.
 const QUEST_ITEMS = {
   fuel: {
-    carryMost: 1,
-    chip: 'FUEL CAN',
+    looseKind: 'fuelCan',
+    mapLabel: 'FUEL',
     build: function (objectId, x, z) { addFuelCan(x, z, objectId); },
-    taken: 'Fuel can taken.',
-    alreadyCarrying: 'You are already carrying a fuel can.',
-    used: 'Fuel can emptied into the day tank.',
     line: 'generatorNoFuel'   // Dispatch says this once a descent, the first time something will not run for want of one
   }
 };
@@ -180,10 +182,13 @@ const QUESTS = [
     key: 'fuel', kind: 'supply', blocks: 'mains',
     requires: { item: 'fuel', objectId: OBJECT_FUEL_CAN },
     target: function () { return GENERATOR_POSITION; },
+    tankOf: function () { return level.generatorBody; }, tankName: 'Generator 2',
     text: {
       refused: 'GENERATOR 2: day tank empty. It will not start without fuel.',
+      refusedPartly: 'GENERATOR 2: day tank {fuel} % full. It will not start on that.',
       objective: OBJECTIVE_TEXT.findFuel,        // once you know the tank is empty
-      carrying: OBJECTIVE_TEXT.bringFuel         // once you have a can
+      carrying: OBJECTIVE_TEXT.bringFuel,        // once you have a can in the beam
+      objectiveDone: OBJECTIVE_TEXT.startGeneratorFuelled // once the tank is full, until the mains is on
     }
   },
 
@@ -212,6 +217,7 @@ const QUESTS = [
     build: function (objectId, x, z, random, index) { addExtraGenerator(objectId, EXTRA_GENERATOR_NUMBERS[index], x, z); },
     needsPower: true,
     requires: { item: 'fuel', chance: 0.5, firstObjectId: OBJECT_EXTRA_FUEL_CAN_FIRST }, // TWEAK: 0.5 = half of them have an empty tank
+    tankOf: function (object) { return { minimumX: object.x - 0.46, maximumX: object.x + 0.46, minimumZ: object.z - 0.32, maximumZ: object.z + 0.32 }; }, // its skid (addExtraGenerator, 03-layout.js)
     noise: function () { return TUNING.noiseRadiusGeneratorStart; },
     activated: function (instance, object) { startExtraGeneratorSound(object.index, object.x, object.z); },
     reset: function () { stopExtraGeneratorSounds(); },
@@ -224,6 +230,7 @@ const QUESTS = [
       chip: 'GENERATORS {done}/{total}',
       noPower: '{NAME}: no control power. It needs the mains. Start Generator 2 first.',
       noItem: '{NAME}: day tank empty. There is a fuel can not far from it.',
+      noItemPartly: '{NAME}: day tank {fuel} % full. It will not start on that.',
       activated: '{name} running. Generators running: {done} of {total}.',
       activatedLast: '{name} running. That is all of them: the winch has its power.',
       refused: 'LIFT CONTROL: winch supply low. Generators running: {done} of {total}. All must run.'
@@ -409,6 +416,8 @@ const questLookup = {}; // by object number: { instance, object, isItem }
 function clearQuests() {
   clearHaulBays();
   level.quests.length = 0;
+  level.fuelTanks = [];
+  questLooseObjects.length = 0;
   for (const objectId in questLookup) delete questLookup[objectId];
 }
 
@@ -445,6 +454,20 @@ function registerQuests() {
   }
   const spools = findQuest('spools');
   level.spoolCount = spools ? spools.total : 0;
+  // The day tanks that are empty: every machine that needs fuel brought to it, in the order of the quests (the
+  // same in every browser that builds this station, which is how a tank is named between them).
+  level.fuelTanks = [];
+  for (const instance of level.quests) {
+    const definition = instance.definition;
+    for (const object of instance.objects) {
+      object.fuel = 0;
+      if (!object.needsItem || !definition.requires || definition.requires.item !== 'fuel' || !definition.tankOf) continue;
+      const body = definition.tankOf(object);
+      level.fuelTanks.push({ index: level.fuelTanks.length, instance: instance, object: object, name: object.name || definition.tankName || '',
+        minimumX: body.minimumX, maximumX: body.maximumX, minimumZ: body.minimumZ, maximumZ: body.maximumZ,
+        x: (body.minimumX + body.maximumX) / 2, z: (body.minimumZ + body.maximumZ) / 2, splashes: 0 });
+    }
+  }
 }
 
 // The quests every station has, with nothing but what its rooms put out. This is all of Kessel-9's quests,
@@ -575,6 +598,10 @@ function placeQuests(plan, seed, size, allowedOrders) {
             for (const prop of interactables[index].props) prop.isRemoved = true;
             interactables.splice(index, 1);
           }
+          // (What it needed is a loose thing, not something to press: that is taken back out of what the station puts out.)
+          for (let index = questLooseObjects.length - 1; index >= 0; index--) {
+            if (object.itemObjectId > 0 && questLooseObjects[index].questObjectId === object.itemObjectId) questLooseObjects.splice(index, 1);
+          }
         }
         return false;
       }
@@ -588,7 +615,7 @@ function placeQuests(plan, seed, size, allowedOrders) {
   // The work order: the first of those the seed ranks that this station has room for. A try that fails (no
   // doorway left for a salvage bay, too few free corners for the badges) is taken out again to the last prop,
   // and the next order is tried. Survey, which needs only what the rooms put out, never fails.
-  const firstInteractable = interactables.length, firstProp = worldProps.length;
+  const firstInteractable = interactables.length, firstProp = worldProps.length, firstLooseThing = questLooseObjects.length;
   for (const order of rankWorkOrders(seed, allowedOrders)) {
     workOrder = order;
     wantedQuests = planQuests(seed, size, order);
@@ -604,6 +631,7 @@ function placeQuests(plan, seed, size, allowedOrders) {
     if (hasRoom) break;
     for (let index = firstProp; index < worldProps.length; index++) worldProps[index].isRemoved = true;
     interactables.length = firstInteractable;
+    questLooseObjects.length = firstLooseThing;
     clearHaulBays();
   }
   level.workOrder = workOrder.key;
@@ -623,20 +651,38 @@ function placeQuests(plan, seed, size, allowedOrders) {
 
 // ---------------------------------------------------------------------------
 // Checking that a station's quests can be done. Called by auditLevelProgression (03-levelgen.js), which hands
-// over its two tools: reach(isShut) works out what can be walked to with the doors that isShut picks kept
-// shut, and canReach(objectId) asks about one thing after that. Every object number that must exist exactly
-// once is added to mustExistOnce.
+// over its tools: reach(isShut) works out what can be walked to with the doors that isShut picks kept
+// shut, and canReach(objectId) asks about one thing after that, canReachSpot(x, z) about one place. Every
+// object number that must exist exactly once is added to mustExistOnce.
+// What a machine needs brought to it is not a thing with an object number to press: it is a loose thing the
+// station puts out for its quests (questLooseObjects, 08-loose-objects.js), known by the number its quest gave it.
 // ---------------------------------------------------------------------------
-function auditQuests(problems, reach, canReach, mustExistOnce) {
+function auditQuests(problems, reach, canReach, mustExistOnce, canReachSpot) {
   const noPower = function (door) { return door.kind === DOOR_KIND_POWERED || door.kind === DOOR_KIND_KEYCARD; };
+  // Where the loose thing with this number was put out: null, with a problem noted, unless there is exactly one,
+  // of the kind its quest wants, within the beam's reach of somewhere to stand.
+  const findItem = function (instance, itemObjectId) {
+    const entries = questLooseObjects.filter(function (entry) { return entry.questObjectId === itemObjectId; });
+    const what = 'what the quest "' + instance.key + '" needs (' + itemObjectId + ')';
+    if (entries.length !== 1) { problems.push(what + ' is put out ' + entries.length + ' times, not once'); return null; }
+    const entry = entries[0];
+    if (entry.kindKey !== QUEST_ITEMS[instance.definition.requires.item].looseKind) problems.push(what + ' is a ' + entry.kindKey);
+    const index = findNearestWalkableTileIndex(entry.x, entry.z);
+    const distance = index < 0 ? Infinity : distanceBetweenPoints(entry.x, entry.z, index % GRID_WIDTH + 0.5, Math.floor(index / GRID_WIDTH) + 0.5);
+    if (distance > TUNING.looseBeamReach - 0.6) problems.push(what + ' is out of reach: ' + distance.toFixed(2) + ' m from the nearest standing spot');
+    return entry;
+  };
+  if (level.fuelTanks.length !== questLooseObjects.filter(function (entry) { return entry.kindKey === QUEST_ITEMS.fuel.looseKind; }).length) {
+    problems.push('the station has ' + level.fuelTanks.length + ' empty tanks and not as many fuel cans');
+  }
   for (const instance of level.quests) {
     const definition = instance.definition;
     if (instance.total < (definition.fewest || 1)) problems.push('the quest "' + instance.key + '" has only ' + instance.total + ' of its things');
     if (definition.kind === 'supply') {
       reach(noPower);
       for (const object of instance.objects) {
-        mustExistOnce.push(object.itemObjectId);
-        if (!canReach(object.itemObjectId)) problems.push('what the quest "' + instance.key + '" needs cannot be reached without power');
+        const item = findItem(instance, object.itemObjectId);
+        if (item && !canReachSpot(item.x, item.z)) problems.push('what the quest "' + instance.key + '" needs cannot be reached without power');
       }
       continue;
     }
@@ -647,13 +693,13 @@ function auditQuests(problems, reach, canReach, mustExistOnce) {
       if (object.isFixed) continue; // put out by its room, and checked with the rooms (auditLevelProgression)
       const what = (object.name || 'thing ' + (object.index + 1)) + ' of the quest "' + instance.key + '"';
       mustExistOnce.push(object.objectId);
-      if (object.needsItem) mustExistOnce.push(object.itemObjectId);
+      const item = object.needsItem ? findItem(instance, object.itemObjectId) : null;
       let cardsNeeded = -1;
       for (let held = 0; held <= level.keycardCount && cardsNeeded < 0; held++) {
         reach(function (door) { return door.kind === DOOR_KIND_KEYCARD && door.cardLevel > held; });
         if (!canReach(object.objectId)) continue;
         cardsNeeded = held;
-        if (object.needsItem && !canReach(object.itemObjectId)) problems.push('what ' + what + ' needs is behind a door it is not behind itself');
+        if (item && !canReachSpot(item.x, item.z)) problems.push('what ' + what + ' needs is behind a door it is not behind itself');
       }
       if (cardsNeeded < 0) problems.push(what + ' cannot be reached at all');
       else if (cardsNeeded > mostCards) problems.push(what + ' is behind a door of keycard ' + cardsNeeded + ', deeper than its quest allows');
@@ -706,8 +752,11 @@ function isQuestUnfinished(key) {
   return instance !== null && !isQuestDone(instance);
 }
 
+// How many of an item you have with you: one, if it is in your beam and still of use, and none otherwise.
+// (What the others carry, down there with others, is theirs.)
 function getCarriedCount(itemKey) {
-  return game.carried[itemKey] || 0;
+  const held = getHeldLooseObject();
+  return held && held.kindKey === QUEST_ITEMS[itemKey].looseKind && isLooseObjectStillNeeded(held) ? 1 : 0;
 }
 
 // A sentence of a quest with its numbers and names filled in. '' if the quest has no such sentence.
@@ -718,7 +767,71 @@ function fillQuestText(instance, textKey, object) {
   const progress = getQuestProgress(instance), extra = instance.definition.countsWith || 0;
   const name = object && object.name ? object.name : '';
   return text.replace('{done}', String(progress.done + extra)).replace('{total}', String(progress.total + extra))
-    .replace('{NAME}', name.toUpperCase()).replace('{name}', name);
+    .replace('{NAME}', name.toUpperCase()).replace('{name}', name).replace('{fuel}', String(getTankPercent(object || instance.objects[0])));
+}
+
+// ---------------------------------------------------------------------------
+// Fuel
+//
+// A generator with an empty day tank will not start. Somewhere not far from it the station has a fuel can for
+// it, standing on a low crate: a loose thing (08-loose-objects.js), carried in the beam. Any can does for any
+// tank. While a can with fuel in it is at a generator whose tank is not full (within fuelPourReachMetres of its
+// body: held against it, or set down beside it, which leaves your beam free), it runs out into the tank: a
+// full can in fuelPourSeconds, glugging, which is heard. (Only a can that somebody has had in the beam: one
+// still standing on its crate pours nowhere, however near a generator the crate is.) Take it away and it stops; what has gone in stays in,
+// and what is left in the can is still in the can. A tank is full after one can's worth. The generator is then
+// started at its panel, as ever: filling it starts nothing.
+// The empty can stays where it is left. It is an empty can from then on.
+// A station has exactly as many cans as it has empty tanks, so none may be lost: a can that goes down the shaft
+// or is sealed into a salvage bay with fuel still in it is back on its crate (08-loose-objects.js).
+// ---------------------------------------------------------------------------
+
+function getTankPercent(object) {
+  return object ? Math.round(clampNumber(object.fuel || 0, 0, 1) * 100) : 0;
+}
+
+// The tank a fuel can at this place would pour into: the nearest that is not full and has it within reach of
+// its body, or null.
+function findFuelTankAt(x, y, z) {
+  let best = null, bestDistance = TUNING.fuelPourReachMetres;
+  for (const tank of level.fuelTanks) {
+    if (tank.object.isSupplied) continue;
+    const outsideX = Math.max(tank.minimumX - x, 0, x - tank.maximumX), outsideZ = Math.max(tank.minimumZ - z, 0, z - tank.maximumZ);
+    const distance = Math.sqrt(outsideX * outsideX + outsideZ * outsideZ);
+    if (distance > bestDistance) continue;
+    const floorY = getFloorHeightAt(tank.x, tank.z);
+    if (y < floorY - 0.2 || y > floorY + TUNING.fuelPourTopMetres) continue;
+    best = tank; bestDistance = distance;
+  }
+  return best;
+}
+
+// One splash from a can into a tank ('pour': done in every browser down there, in the host's order).
+function pourFuelIntoTank(can, tankIndex) {
+  const tank = level.fuelTanks[tankIndex];
+  if (!tank || !isLooseObjectStillNeeded(can) || tank.object.isSupplied) return;
+  const instance = tank.instance, object = tank.object;
+  const amount = Math.min(TUNING.fuelPourStepSeconds / TUNING.fuelPourSeconds, can.fuel, 1 - object.fuel);
+  can.fuel -= amount; object.fuel += amount;
+  // It glugs, and that carries: the sound twice a second, the noise the Hollow hears once.
+  const splashesASecond = Math.max(1, Math.round(1 / TUNING.fuelPourStepSeconds));
+  if (tank.splashes % Math.max(1, Math.round(splashesASecond / 2)) === 0) { playFuelPourSound(tank.x, tank.z, object.fuel); showCaption('fuelPour', tank); }
+  if (tank.splashes % splashesASecond === 0) emitNoise(tank.x, tank.z, TUNING.noiseRadiusFuelPour);
+  tank.splashes++;
+  if (can.fuel < 0.0005) emptyFuelCan(can);
+  const isNear = distanceBetweenPoints(player.x, player.z, tank.x, tank.z) < 8; // (it is everybody's doing and nobody's: those who stand there are told)
+  if (object.fuel > 0.9995) {
+    object.fuel = 1;
+    object.isSupplied = true;
+    // Fuel was all that Generator 2 wanted of this quest: that is it done. A small generator still has to be started.
+    if (instance.definition.kind === 'supply') { object.isDone = true; instance.done = instance.total; }
+    if (isNear) showMessage(tank.name.toUpperCase() + ': day tank full.' + (can.fuel <= 0 ? ' The can is empty.' : ''), 4, 'info', 'fuel');
+    saveCheckpoint();
+  } else if (isNear) {
+    // (One line, with the number counting up in it: see `slot` in showMessage.)
+    showMessage(tank.name.toUpperCase() + ': filling the day tank. ' + getTankPercent(object) + ' %.' + (can.fuel <= 0 ? ' The can is empty.' : ''), can.fuel <= 0 ? 5 : 1.5, 'info', 'fuel');
+  }
+  refreshObjective();
 }
 
 // You come to know of a quest: its things go on the map if it says so, and the objective may speak of it.
@@ -775,26 +888,13 @@ function noteItemWanted(itemKey) {
 }
 
 function resetQuests() {
-  game.carried = {};
   game.itemLinesSaid = {};
   for (const instance of level.quests) {
     instance.done = 0; instance.isKnown = false; instance.wasSaid = false;
-    for (const object of instance.objects) { object.isDone = false; object.isSupplied = false; }
+    for (const object of instance.objects) { object.isDone = false; object.isSupplied = false; object.fuel = 0; }
   }
+  for (const tank of level.fuelTanks) tank.splashes = 0;
   for (const definition of QUESTS) if (definition.reset) definition.reset();
-}
-
-// Taking an item, or being told you have your hands full.
-function takeQuestItem(interactable, itemKey) {
-  const item = QUEST_ITEMS[itemKey];
-  if (getCarriedCount(itemKey) >= item.carryMost) { showMessage(item.alreadyCarrying, 3, 'info'); return; }
-  removeInteractableFromWorld(interactable);
-  game.carried[itemKey] = getCarriedCount(itemKey) + 1;
-  playPickupSound();
-  emitNoise(getActingPlayer().x, getActingPlayer().z, TUNING.noiseRadiusPickup);
-  saveCheckpoint();
-  showMessage(item.taken, 3, 'info');
-  refreshObjective();
 }
 
 // Uses a thing that belongs to a quest. Returns false if this object belongs to none.
@@ -802,7 +902,6 @@ function useQuestObject(interactable) {
   const entry = questLookup[interactable.objectId];
   if (!entry) return false;
   const instance = entry.instance, definition = instance.definition, object = entry.object, flags = game.flags;
-  if (entry.isItem) { takeQuestItem(interactable, definition.requires.item); return true; }
   if (definition.kind === 'haul') { makeQuestKnown(instance); useHaulBay(object.index); return true; }
 
   if (definition.kind === 'collect' && definition.taken) {
@@ -830,16 +929,11 @@ function useQuestObject(interactable) {
     return true;
   }
   if (object.needsItem && !object.isSupplied) {
-    const itemKey = definition.requires.item;
-    if (getCarriedCount(itemKey) < 1) {
-      playDeniedSound();
-      showMessage(fillQuestText(instance, 'noItem', object), 5, 'warning');
-      noteItemWanted(itemKey);
-      return true;
-    }
-    game.carried[itemKey]--;
-    object.isSupplied = true;
-    showMessage(QUEST_ITEMS[itemKey].used, 3, 'info');
+    // What it needs has not been brought to it, or not all of it (see "Fuel").
+    playDeniedSound();
+    showMessage(fillQuestText(instance, object.fuel > 0 ? 'noItemPartly' : 'noItem', object), 5, 'warning');
+    noteItemWanted(definition.requires.item);
+    return true;
   }
   object.isDone = true;
   interactable.isAvailable = false;
@@ -861,22 +955,15 @@ function useQuestObject(interactable) {
 }
 
 // Generator 2 is about to be started. Returns whether every quest that holds up the mains lets it: one that
-// wants something brought takes it from you if you carry it, and says so if you do not.
+// wants something brought (fuel, in its tank) says so until it has been.
 function doQuestsAllowTheMains() {
   for (const instance of getUnfinishedQuests('mains')) {
-    const itemKey = instance.definition.requires.item;
-    if (getCarriedCount(itemKey) < 1) {
-      playDeniedSound();
-      showMessage(fillQuestText(instance, 'refused'), 5, 'warning');
-      if (!instance.isKnown) noteItemWanted(itemKey);
-      makeQuestKnown(instance);
-      refreshObjective();
-      return false;
-    }
-    game.carried[itemKey]--;
-    for (const object of instance.objects) { object.isSupplied = true; object.isDone = true; }
-    instance.done = instance.total;
-    showMessage(QUEST_ITEMS[itemKey].used, 3, 'info');
+    playDeniedSound();
+    showMessage(fillQuestText(instance, instance.objects[0].fuel > 0 ? 'refusedPartly' : 'refused'), 5, 'warning');
+    if (!instance.isKnown) noteItemWanted(instance.definition.requires.item);
+    makeQuestKnown(instance);
+    refreshObjective();
+    return false;
   }
   return true;
 }
@@ -914,6 +1001,10 @@ function getMainsQuestObjective() {
     if (getCarriedCount(instance.definition.requires.item) > 0) return fillQuestText(instance, 'carrying');
     if (instance.isKnown) return fillQuestText(instance, 'objective');
   }
+  // Nothing holds the mains up any more, and something did: that is worth saying.
+  for (const instance of level.quests) {
+    if (instance.definition.blocks === 'mains' && !instance.isOptional && isQuestDone(instance) && instance.definition.text.objectiveDone) return fillQuestText(instance, 'objectiveDone');
+  }
   return '';
 }
 
@@ -936,16 +1027,24 @@ function getUploadQuestObjectives() {
   return parts;
 }
 
-// What the status line on screen lists for the quests: what you carry, then each quest's count.
+// What the status line on screen lists for the quests: each quest's count. (What is in your beam has a line
+// of its own on screen, "CARRYING: FUEL CAN", like anything else you carry.)
 function getQuestChips() {
   const parts = [];
-  for (const itemKey in QUEST_ITEMS) if (getCarriedCount(itemKey) > 0) parts.push(QUEST_ITEMS[itemKey].chip);
   for (const instance of level.quests) {
     const definition = instance.definition;
     if (definition.text.chip && !(definition.hideUntilTold && !instance.isKnown)) parts.push(fillQuestText(instance, 'chip'));
     if (definition.text.chipWhileHolding && game.flags.spoolsUploaded && !isQuestDone(instance)) parts.push(definition.text.chipWhileHolding);
   }
   return parts;
+}
+
+// For the map: the item of QUEST_ITEMS this loose thing is, if it is one, is still of use, and you know where
+// it is (your scanner has been on it, or you have had it in the beam). '' otherwise.
+function getQuestItemKeyOfLooseObject(object) {
+  if (!object.isKnownOnMap || object.isRemoved || !isLooseObjectStillNeeded(object)) return '';
+  for (const itemKey in QUEST_ITEMS) if (QUEST_ITEMS[itemKey].looseKind === object.kindKey) return itemKey;
+  return '';
 }
 
 // Whether a machine somewhere could take one of these items right now.
@@ -965,10 +1064,7 @@ function isQuestObjectWantedNow(objectId) {
   const entry = questLookup[objectId];
   if (!entry) return undefined;
   const definition = entry.instance.definition, object = entry.object;
-  if (entry.isItem) {
-    const itemKey = definition.requires.item;
-    return getCarriedCount(itemKey) < QUEST_ITEMS[itemKey].carryMost && isQuestItemWantedNow(itemKey);
-  }
+  if (entry.isItem) return isQuestItemWantedNow(definition.requires.item); // (a number no thing to press has any more: kept for the asking)
   if (definition.kind === 'collect') return !entry.instance.isOptional; // what nobody asks for is not marked as wanted
   if (definition.kind === 'haul') return haulState.bays[object.index] !== undefined && haulState.bays[object.index].state !== 'sealed' && !isQuestDone(entry.instance);
   if (definition.needsPower && !game.flags.powerOn) return false;
@@ -990,7 +1086,7 @@ Object.defineProperty(level, 'mission', {
       needsBreaker: findQuest('breaker') !== null,
       extraGenerators: generators ? generators.objects.map(function (object) {
         return { objectId: object.objectId, number: EXTRA_GENERATOR_NUMBERS[object.index], needsFuel: object.needsItem, fuelCanId: object.itemObjectId,
-          x: object.x, z: object.z, isRunning: object.isDone, isFilled: object.isSupplied };
+          x: object.x, z: object.z, isRunning: object.isDone, isFilled: object.isSupplied, fuel: object.fuel };
       }) : [],
       // Every quest of the station, in the same plain form: for whatever wants to list them.
       quests: level.quests.map(function (instance) { const progress = getQuestProgress(instance); return { key: instance.key, total: progress.total, done: progress.done }; })

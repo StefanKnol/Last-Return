@@ -17,10 +17,9 @@ const game = {
     uploadStarted: false,
     liftArrived: false,
     spoolsUploaded: false    // the upload is in, but the lift has not been called because a quest holds it (the winch breaker)
-    // (What the quests keep count of is with the quests: level.quests, and game.carried below. See 09-quests.js.)
+    // (What the quests keep count of is with the quests: level.quests. See 09-quests.js.)
   },
-  carried: {},          // what you carry for the quests, by the item's key in QUEST_ITEMS: { fuel: 1 }
-  itemLinesSaid: {},    // which of those items Dispatch has already spoken of in this descent
+  itemLinesSaid: {},    // which of the things a machine may need brought to it (QUEST_ITEMS, 09-quests.js) Dispatch has already spoken of in this descent
   placesEntered: {},    // the rooms you have been in during this descent, by name (for lines that go with a room)
   objectiveText: '',
   liftCountdown: -1,
@@ -1164,11 +1163,61 @@ function startApplication() {
       if (!instance) return false;
       if (instance.definition.kind === 'haul') fillHaulBays();
       for (const object of instance.objects) {
-        if (object.needsItem && !object.isSupplied && getCarriedCount(instance.definition.requires.item) < 1) useInteractable(findInteractableByObjectId(object.itemObjectId));
+        // What it needs is poured into it, from the can that was put out for it if that still has fuel, or else from any that has.
+        if (object.needsItem && !object.isSupplied) {
+          const tank = level.fuelTanks.filter(function (candidate) { return candidate.object === object; })[0];
+          for (let splash = 0; tank && splash < 1000 && !object.isSupplied; splash++) {
+            const cans = looseObjects.filter(isLooseObjectStillNeeded);
+            const can = cans.filter(function (candidate) { return candidate.questObjectId === object.itemObjectId; })[0] || cans[0];
+            if (!can) break;
+            pourFuelIntoTank(can, tank.index);
+          }
+        }
         if (object.objectId > 0 && !object.isDone) useInteractable(findInteractableByObjectId(object.objectId));
       }
       return isQuestDone(instance);
     },
+    // Does with a fuel can what a player does: stands by the can that a quest put out (by the number the quest
+    // gave it), takes it into the beam, goes and stands at the generator facing it (`machineObjectId` is the
+    // generator's own object number; 0 is Generator 2), and holds the can against it until the tank is full or
+    // `mostSeconds` have gone by. Walking from the one to the other is a jump; the can comes along in the beam.
+    carryFuelToTank: function (canQuestObjectId, machineObjectId, mostSeconds) {
+      const can = looseObjects.filter(function (object) { return object.questObjectId === canQuestObjectId; })[0];
+      const tank = level.fuelTanks.filter(function (candidate) { return candidate.object.objectId === (machineObjectId || 0); })[0];
+      if (!can || !tank) return { isFull: false, why: !can ? 'no can with the number ' + canQuestObjectId : 'no empty tank at the machine ' + machineObjectId };
+      const faceTowards = function (x, z) { player.yaw = Math.atan2(x - player.x, -(z - player.z)); };
+      const standNear = function (x, z) {
+        const index = findNearestWalkableTileIndex(x, z);
+        player.x = index % GRID_WIDTH + 0.5; player.z = Math.floor(index / GRID_WIDTH) + 0.5;
+        faceTowards(x, z);
+      };
+      const simulate = function (seconds) { for (let elapsed = 0; elapsed < seconds && game.mode === 'playing'; elapsed += 1 / 30) updatePlaying(1 / 30); };
+      const result = { fuelBefore: can.fuel, tankBefore: tank.object.fuel, tank: tank.name };
+      if (looseState.held !== can) {
+        if (looseState.held) releaseHeldLooseObject(0); // (the beam holds one thing)
+        standNear(can.x, can.z);
+        result.reachToCan = distanceBetweenPoints(player.x, player.z, can.x, can.z);
+        simulate(0.1);
+        pickUpLooseObject(can, false);
+      }
+      result.isInTheBeam = looseState.held === can;
+      result.objectiveWithCan = game.objectiveText;
+      result.carrySpeedFactor = getCarrySpeedFactor();
+      result.canSprint = canSprintWhileCarrying();
+      standNear(tank.x, tank.z); player.pitch = -0.25;
+      can.x = player.x; can.y = getPlayerEyeY() - 0.3; can.z = player.z; can.velocityX = 0; can.velocityY = 0; can.velocityZ = 0;
+      result.metresFromTheSet = Math.hypot(Math.max(tank.minimumX - player.x, 0, player.x - tank.maximumX), Math.max(tank.minimumZ - player.z, 0, player.z - tank.maximumZ));
+      let seconds = 0;
+      while (!tank.object.isSupplied && seconds < (mostSeconds || 12)) { simulate(0.25); seconds += 0.25; }
+      result.seconds = seconds; result.isFull = tank.object.isSupplied; result.tankAfter = tank.object.fuel; result.fuelAfter = can.fuel;
+      result.canIsNow = getLooseObjectLabel(can); result.isStillInTheBeam = looseState.held === can;
+      return result;
+    },
+    // Fuel (09-quests.js): the empty tanks, the can a quest put out (by the number the quest gave it), and the rules.
+    getFuelTanks: function () { return level.fuelTanks; }, findFuelTankAt: findFuelTankAt, pourFuelIntoTank: pourFuelIntoTank,
+    findQuestItem: function (questObjectId) { return looseObjects.filter(function (object) { return object.questObjectId === questObjectId; })[0] || null; },
+    isLooseObjectStillNeeded: isLooseObjectStillNeeded, returnLooseObjectToWhereItStood: returnLooseObjectToWhereItStood, emptyFuelCan: emptyFuelCan,
+    getQuestItemKeyOfLooseObject: getQuestItemKeyOfLooseObject, getCarriedCount: getCarriedCount, generatorBody: function () { return level.generatorBody; },
     areGeneratorsMissing: function () { return isQuestUnfinished('generators'); },
     isFuelWantedNow: function () { return isQuestItemWantedNow('fuel'); }, isInteractableWantedNow: isInteractableWantedNow,
     startExtraGeneratorSound: startExtraGeneratorSound, stopExtraGeneratorSounds: stopExtraGeneratorSounds,
@@ -1225,7 +1274,7 @@ function startApplication() {
     isSpaceOpenAt: function (x, y, z) { return isLooseSpaceOpenAt(Math.floor(x), Math.floor(z), y); },
     worldProps: worldProps, getTileFlagsAt: getTileFlagsAtPosition, tileFlagPit: TILE_FLAG_PIT, getPlayerEyeY: getPlayerEyeY,
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
-    stationLooseObjects: stationLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
+    stationLooseObjects: stationLooseObjects, questLooseObjects: questLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
     // The Hollow and a vent's cover: which way it would throw one (and how much room that way has), and the throw itself.
     chooseVentCoverThrow: chooseVentCoverThrow, throwVentCoverFromHollow: throwVentCoverFromHollow, measureRoomForLooseObject: measureRoomForLooseObject,
