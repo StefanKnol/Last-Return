@@ -74,6 +74,8 @@ const SOUND_LEVELS = {
   looterStep: 1,          // a looter's small feet
   looterChitter: 1,       // it has got hold of something, or cannot reach it
   looterSqueal: 1,        // it is frightened
+  hurt: 1,                // something has hit you
+  firstAid: 1,            // a first aid kit, used
   hollowCeilingStep: 1,   // crawling above the ceiling, on its way round a locked door
   hatchRattle: 1,         // a ceiling hatch that is already open: it has gone in, or it is about to come out
   hatchBurst: 1,          // a ceiling hatch forced open for the first time
@@ -1510,6 +1512,19 @@ function playLooterChitter(x, z, isCross) {
     playTone({ waveform: 'triangle', frequency: pitch, frequencyEnd: pitch * (isCross ? 0.8 : 1.25), duration: 0.055, gain: 0.5 * SOUND_LEVELS.looterChitter,
       attack: 0.004, delay: note * (isCross ? 0.095 : 0.07), destination: panner });
   }
+}
+
+// Something has hit you: a dull blow, and the breath knocked out of you. Yours alone: it is in your own head.
+function playHurt() {
+  playTone({ waveform: 'sine', frequency: 130, frequencyEnd: 42, duration: 0.24, gain: 0.9 * SOUND_LEVELS.hurt, attack: 0.003 });
+  playResonantNoise({ frequency: 700, resonance: 1.4, duration: 0.32, gain: 0.4 * SOUND_LEVELS.hurt, delay: 0.04 });
+}
+
+// A first aid kit, used: the seal torn, and a hiss.
+function playFirstAid() {
+  playResonantNoise({ frequency: 2600, resonance: 3, duration: 0.12, gain: 0.35 * SOUND_LEVELS.firstAid });
+  playResonantNoise({ frequency: 5200, resonance: 1.2, duration: 0.5, gain: 0.25 * SOUND_LEVELS.firstAid, delay: 0.16 });
+  playTone({ waveform: 'sine', frequency: 660, frequencyEnd: 880, duration: 0.18, gain: 0.25 * SOUND_LEVELS.firstAid, attack: 0.01, delay: 0.5 });
 }
 
 // Frightened: one long note going up and breaking off.

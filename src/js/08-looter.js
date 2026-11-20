@@ -19,8 +19,8 @@
 // then it comes after you for it, quicker than you walk, and takes it again if it can reach it.
 //
 // And the vents are its own. With one of you in a vent near it or near its nest it does not run from anything:
-// it goes for them, stands in front of them and scolds until they are out. (It does no more than that. When
-// there is such a thing as being hurt, this is where it bites: see the note in updateLooter.)
+// it goes for them, stands in front of them and scolds until they are out. And if they stay, it bites: not
+// much of a bite, and never the death of anybody (09-health.js), but it goes on biting for as long as they do.
 //
 // How it gets around (08-creatures.js): it walks through a vent upright, it cannot reach a ceiling hatch, and
 // the doors that open for anything open for it. So it has the run of whatever its vents join.
@@ -83,6 +83,7 @@ function createLooter(index, nest) {
     nestField: new Int16Array(TILE_COUNT), nestFieldVersion: -1, // how far it is on foot from its nest to everywhere, by its way
     isRobbed: false, madAt: null,
     scoldSeconds: 0,     // mad: until it scolds again
+    biteSeconds: 0,      // mad, and in front of them: until it bites
     calmSeconds: 0,      // mad: how long it stays so once nobody is in its vents
     outSeconds: 0,       // how long it has been on its way to where it is going
     deafSeconds: 0,      // it has just put a thing down: what that sounds like does not frighten it
@@ -343,6 +344,7 @@ function maddenLooter(looter, one) {
   looter.state = LOOTER_STATE_MAD;
   looter.outSeconds = 0;
   looter.scoldSeconds = 0.3;
+  looter.biteSeconds = TUNING.looterBiteAfterSeconds;
 }
 
 // ---------------------------------------------------------------------------
@@ -404,15 +406,24 @@ function updateLooter(looter, dt) {
       looter.calmSeconds = TUNING.looterCalmSeconds;
       looter.goalX = one.x; looter.goalZ = one.z;
       // Up to them, and no nearer than an arm's length: in front of them, in their way, turned to them.
-      if (distanceBetweenPoints(figure.x, figure.z, one.x, one.z) > TUNING.looterMadMetres) speed = TUNING.looterMadSpeed;
+      const isInFrontOfThem = distanceBetweenPoints(figure.x, figure.z, one.x, one.z) <= TUNING.looterMadMetres;
+      if (!isInFrontOfThem) speed = TUNING.looterMadSpeed;
       else figure.yaw += clampNumber(wrapAngleToPi(Math.atan2(one.x - figure.x, -(one.z - figure.z)) - figure.yaw), -dt * 8, dt * 8);
+      // In front of them, and they are still there: after a while it bites, and goes on biting.
+      if (isInFrontOfThem || distanceBetweenPoints(figure.x, figure.z, one.x, one.z) < TUNING.looterMadMetres + 0.5) {
+        looter.biteSeconds -= dt;
+        if (looter.biteSeconds <= 0) {
+          looter.biteSeconds = TUNING.looterBiteEverySeconds;
+          looter.scoldSeconds = Math.max(looter.scoldSeconds, 1);
+          playLooterChitter(figure.x, figure.z, true); showCaption('looterBites', figure);
+          catchPlayer(one, 'looter', figure);
+        }
+      }
       looter.scoldSeconds -= dt;
       if (looter.scoldSeconds <= 0) {
         looter.scoldSeconds = randomBetween(TUNING.looterScoldSeconds[0], TUNING.looterScoldSeconds[1]);
         playLooterChitter(figure.x, figure.z, true); showCaption('looterMad', figure);
       }
-      // (When there is such a thing as being hurt: this is where it bites, once it has stood here scolding for
-      // long enough and they are still in its vents. docs/ideas.md.)
     } else {
       // Nobody there any more: it stays where it is, bristling, and then goes back to what it was about.
       looter.calmSeconds -= dt;
@@ -488,13 +499,19 @@ function updateLooter(looter, dt) {
   const movedDistance = speed > 0 ? moveCreatureToward(looter, looter.goalX, looter.goalZ, speed, dt) : 0;
   looter.currentSpeed = movedDistance / Math.max(dt, 0.0001);
   poseLooter(looter, movedDistance, dt);
-  // Its steps: small and quick. In a vent they ring.
-  const stepSign = Math.sin(looter.walkPhase) >= 0 ? 1 : -1;
-  if (stepSign !== looter.lastStepSign) {
-    looter.lastStepSign = stepSign;
+  soundLooterSteps(looter);
+}
+
+// Its steps: small and quick. In a vent they ring. Every game makes these for itself, from how it shows the
+// looter walking: there are ten of them a second when it runs, far too many to tell the others one by one.
+function soundLooterSteps(looter) {
+  const figure = looter.figure, stepSign = Math.sin(looter.walkPhase) >= 0 ? 1 : -1;
+  if (stepSign === looter.lastStepSign) return;
+  looter.lastStepSign = stepSign;
+  asYoursAlone(function () {
     playLooterStep(figure.x, figure.z, (getTileFlagsAtPosition(figure.x, figure.z) & TILE_FLAG_VENT) !== 0);
     showCaption('looterSteps', figure);
-  }
+  });
 }
 
 function updateLooters(dt) {
@@ -539,6 +556,7 @@ function followHostLooters(numbers, blend, dt) {
     if (carried && carried.looterIndex === index) looter.carried = carried;
     else if (!carried || carried.looterIndex !== index) looter.carried = null;
     poseLooter(looter, distanceBetweenPoints(beforeX, beforeZ, figure.x, figure.z), dt);
+    soundLooterSteps(looter);
   }
 }
 

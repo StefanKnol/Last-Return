@@ -35,6 +35,8 @@ const DIFFICULTY_PRESETS = {
                                 // Generator 2 is started, as it always does in Kessel-9.
     looterCount: 2,             // how many looters live in the vents of a generated station (08-looter.js), if it has
                                 // vents for that many. They are there from the start. 0: none.
+    damageFactor: 0.75,         // multiplies what every hit takes off your health (09-health.js). At 1 the Hollow's
+                                // second hit kills; at 2 its first does, as it always did.
     checkpointsEnabled: true    // false: one life. Being caught ends the descent; there is no resuming from a checkpoint.
   },
   standard: {
@@ -51,6 +53,7 @@ const DIFFICULTY_PRESETS = {
     phantomFactor: 1.0,
     arrivalFactor: 1.0,         // it wakes four to seven quiet minutes after you leave the lift, sooner for every noise
     looterCount: 3,
+    damageFactor: 1.0,
     checkpointsEnabled: true
   },
   nightmare: {
@@ -67,6 +70,7 @@ const DIFFICULTY_PRESETS = {
     phantomFactor: 1.4,
     arrivalFactor: 1.5,         // two minutes forty to four minutes forty
     looterCount: 5,
+    damageFactor: 2.0,          // one hit from the Hollow, two from a Still
     checkpointsEnabled: true
   }
 };
@@ -91,6 +95,7 @@ const CUSTOM_DIFFICULTY_OPTIONS = [
   { key: 'staminaFactor', kind: 'percent', label: 'Your stamina', minimum: 0.5, maximum: 2, step: 0.1 },
   { key: 'phantomFactor', kind: 'choice', label: 'Apparitions', choices: [[0, 'None'], [0.5, 'Few'], [1, 'Normal'], [2, 'Many']] },
   { key: 'looterCount', kind: 'choice', label: 'Looters in the vents', choices: [[0, 'None'], [1, 'One'], [2, 'Two'], [3, 'Three'], [5, 'Five']] },
+  { key: 'damageFactor', kind: 'choice', label: 'What a hit does to you', choices: [[0.5, 'Half'], [0.75, 'Less'], [1, 'Normal'], [1.5, 'More'], [2, 'Double: the Hollow kills at once']] },
   { key: 'checkpointsEnabled', kind: 'switch', label: 'Checkpoints', onText: 'Caught: you resume from the last checkpoint.', offText: 'One life. Caught means starting over.' }
 ];
 
@@ -112,8 +117,6 @@ const TUNING = {
   playerRadius: 0.3,            // how wide you are for bumping into walls. Smaller squeezes through tighter gaps.
   playerHeight: 1.2,           // how tall you are, standing: where you bump your head. The body the others see is made to fit it (getFigureBody, 04-figures.js). Vents are 1.15 high: no taller than that and you walk into one upright.
   playerHeightCrouching: 0.85, // ... and crouched. That body goes down on its haunches as far as it takes (getPlayerCrouchPose). Under about 0.85 you tip a vent cover over by crawling at it.
-  // eyeHeightStanding: 1.16,      // camera height when standing
-  // eyeHeightCrouching: 0.7,     // camera height when crouched
   playerEyeHeightToBody: 0.94, // camera height when standing in percentage of player height
   playerEyeHeightToCrouchedBody: 0.94, // camera height when crouched in percentage of player height when crouching
   walkSpeed: 2.2,
@@ -157,10 +160,10 @@ const TUNING = {
   noiseRadiusWalkStep: 4,
   noiseRadiusSprintStep: 14,
   noiseRadiusVentStep: 5,       // one shuffle forward inside a vent. Sheet metal booms: this is the price of the shortcut.
-  noiseRadiusCrouchStep: 1.2,
+  noiseRadiusCrouchStep: 1.1,
   noiseRadiusScannerHum: 4,     // emitted twice a second while painting
   noiseRadiusSweep: 22,
-  noiseRadiusDoor: 8,           // a door you open (doors the Hollow opens do not count)
+  noiseRadiusDoor: 6,           // a door you open (doors the Hollow opens do not count)
   noiseRadiusPickup: 4,
   // ---- The looters (08-looter.js): small things that live in the vents and carry off what lies loose ----
   looterWalkSpeed: 1.6,             // on its way to a thing, or wandering (you walk at 2.2)
@@ -179,7 +182,7 @@ const TUNING = {
   looterFearSeconds: [8, 14],       // and how long it stays there before it dares come out again
   looterTriesSeconds: 4,            // how long it reaches up for a thing that is held too high for it, before it gives up
   looterLikesHandled: 3,            // what one of you has had in the beam is worth this many times as much to it as what nobody has touched
-  looterLikesCarried: 4,            // ... what is in somebody's beam now, this many times
+  looterLikesCarried: 5,            // ... what is in somebody's beam now, this many times
   looterLikesBay: 2,                // and what lies in a salvage bay that stands open, this many times again
   looterWantsBackSeconds: [2.5, 4.5], // a thing taken out of its arms: how long it stands there cross before it comes after it
   looterChaseSpeed: 2.6,            // ... and how fast it comes: quicker than you walk (2.2), slower than you run
@@ -187,7 +190,24 @@ const TUNING = {
   looterMadSpeed: 2.6,              // on its way to them: twice as fast as you crawl
   looterMadMetres: 1.1,             // how near it comes to them
   looterScoldSeconds: [1.4, 2.6],   // how often it scolds them
-  looterCalmSeconds: 3,             // how long it is still mad once nobody is in its vents
+  looterCalmSeconds: 2,             // how long it is still mad once nobody is in its vents
+  looterBiteAfterSeconds: 5,        // in front of whoever is in its vents for this long, it bites
+  looterBiteEverySeconds: 3.5,      // ... and again this often for as long as they stay
+  looterBiteDamage: 8,              // what a bite takes off (it never kills: the last of your health is not a looter's to take)
+
+  // ---- Your health (09-health.js) ----
+  // Being caught is being hit. What a hit takes off is one of these times the threat level's damageFactor, and
+  // you die of the hit that takes the last of it. Nothing gives it back but a first aid kit.
+  playerMaxHealth: 100,
+  hollowHitDamage: 55,              // two hits at damageFactor 1, three at 0.75, one at 2
+  stillHitDamage: 40,
+  playerHurtGraceSeconds: 2,        // after a hit nothing can hit you again for this long
+  hollowAfterHitSeconds: 3,         // the Hollow stands where it struck for this long before it comes on again: your chance to get away
+  stillAfterHitSeconds: 5,          // a Still that has struck does not move, or strike, again for this long
+  playerRetryHealth: 50,            // back from a checkpoint, or on your feet again where the others restarted your scanner: at least this much
+  firstAidHeals: 50,                // what a first aid kit gives back
+  firstAidKitsPerRoom: 0.12,        // how many of them a station has, for each of its rooms (never fewer than one)
+  healthCriticalShare: 0.3,         // at or below this share of your health the bar on the HUD goes red
   noiseRadiusDropLanding: 11,   // landing at the foot of a drop in a vent (per metre fallen it is no louder: it is the sheet metal that rings)
   playerFallAcceleration: 14,   // how fast you gather speed going down a drop, in metres per second every second
   // TEMPORARY. A keycard door opens from its inner side without the card, and without the mains: there is a
@@ -662,6 +682,7 @@ const CAPTIONS = {
   looterTakes: { text: '[a chitter: something small has got hold of something]', level: 'sound', withinMetres: 14, seconds: 2.4, slot: 'looterVoice', rank: 1 },
   looterTries: { text: '[a chitter, cross: it cannot reach]', level: 'sound', withinMetres: 10, seconds: 2, slot: 'looterVoice', rank: 1 },
   looterRobbed: { text: '[a chitter, cross: it wants that back]', level: 'sound', withinMetres: 12, seconds: 2.2, slot: 'looterVoice', rank: 1 },
+  looterBites: { text: '[a snap: it has bitten somebody]', level: 'sound', withinMetres: 12, seconds: 2, slot: 'looterVoice', rank: 2 },
   looterMad: { text: '[a furious chitter: it wants you out of its vent]', level: 'sound', withinMetres: 12, seconds: 2, slot: 'looterVoice', rank: 1 },
   looterScared: { text: '[a squeal, and small feet running]', level: 'sound', withinMetres: 18, seconds: 2.2, slot: 'looterVoice', rank: 2 },
 

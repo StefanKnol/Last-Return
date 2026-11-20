@@ -413,13 +413,27 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('noise the other makes is heard by the host\'s Hollow, which hunts them', heard.host.state === 2 && heard.host.at < 2.5, heard);
   check('and the other hears it roar', heard.roars >= 1, heard);
 
-  // It reaches them. That is their death, in their own game; the host plays on, and the Hollow is sent away.
-  await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.hollow.figure.x = other.x + 0.3; d.hollow.figure.z = other.z; d.hollow.graceTimer = 0; });
+  // It reaches them. That is a hit, in their own game: it takes some of their health, they are still on their
+  // feet, and the host's Hollow stands where it struck. (09-health.js)
+  const reach = () => a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.hollow.figure.x = other.x + 0.3; d.hollow.figure.z = other.z; d.hollow.graceTimer = 0; d.hollow.recoverSeconds = 0; });
+  const healthBefore = await b.evaluate(() => { const d = window.lastReturnDebug; d.player.hurtGraceSeconds = 0; return d.player.health; });
+  await reach();
+  await both(0.6);
+  const hit = { other: await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, health: d.player.health, of: d.tuning.playerMaxHealth, takes: d.getHitDamage('hollow') * d.game.difficulty.damageFactor }; }),
+    host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, health: d.player.health, isDown: other.isDown, standsFor: d.hollow.recoverSeconds, of: d.tuning.hollowAfterHitSeconds,
+      metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
+  check('the host\'s Hollow reaching the other is a hit, worked out in the other\'s own game: it takes what a hit takes off their health and nobody else\'s, they are still on their feet and still hunted, and the Hollow stands where it struck',
+    healthBefore === hit.other.of && hit.other.mode === 'playing' && Math.abs(hit.other.health - (healthBefore - hit.other.takes)) < 0.01 && hit.other.takes < hit.other.of &&
+    hit.host.mode === 'playing' && hit.host.health === hit.other.of && !hit.host.isDown && hit.host.standsFor > 0 && hit.host.standsFor <= hit.host.of && hit.host.metresAway < 1, hit);
+  // The hit that takes the last of it is their death, in their own game; the host plays on, and then the Hollow is sent away.
+  await b.evaluate(() => { window.lastReturnDebug.player.hurtGraceSeconds = 0; });
+  await reach();
   await play(a, 0.2);
   await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 5000 }).catch(() => {});
+  await both(0.6); // (their game says they are down, and the host's sends it off)
   const caught = { other: await b.evaluate(() => window.lastReturnDebug.game.mode),
     host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, isDown: other.isDown, players: d.players.length, metresAway: Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) }; }) };
-  check('the host\'s Hollow catching the other is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
+  check('the hit that takes the last of their health is the other\'s death and nobody else\'s', (caught.other === 'dying' || caught.other === 'dead') && caught.host.mode === 'playing', caught);
   check('and it does not stand over them: it is sent off, and they are not hunted while they are down', caught.host.isDown && caught.host.metresAway > 6, caught);
   await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
   // The station does not stop for the dead, and there is no checkpoint to come back from.

@@ -31,6 +31,7 @@ const hollow = Object.assign(createCreatureLegs(HOLLOW_WAY), {
   anger: 0,
   wasInBeam: false,
   stunSeconds: 0,       // it stands stunned for this much longer (see stunHollow)
+  recoverSeconds: 0,    // it has just struck somebody who is still on their feet: it stands there for this much longer, and strikes nobody
   turnCaptionCooldown: 0,
   enragedTimer: 0,
   listenTimer: 0,
@@ -265,7 +266,7 @@ function activateHollow(x, z, graceSeconds) {
   hollow.targetX = x; hollow.targetZ = z;
   hollow.timeSinceSensed = 99;
   hollow.timeSinceLastHunt = 0;
-  hollow.anger = 0; hollow.wasInBeam = false; hollow.enragedTimer = 0; hollow.heldAmount = 0; hollow.stunSeconds = 0;
+  hollow.anger = 0; hollow.wasInBeam = false; hollow.enragedTimer = 0; hollow.heldAmount = 0; hollow.stunSeconds = 0; hollow.recoverSeconds = 0;
   hollow.listenTimer = 0; hollow.nextListenIn = 12; hollow.doubleBackTimer = 0; hollow.hasHeardNoise = false;
   hollow.graceTimer = graceSeconds;
   hollow.fieldTargetIndex = -1;
@@ -454,7 +455,7 @@ function relocateHollowAwayFromPlayer(graceSeconds) {
   hollow.timeSinceSensed = 99;
   hollow.timeSinceLastHunt = 0;
   hollow.anger *= 0.5; hollow.wasInBeam = false; hollow.enragedTimer = 0; hollow.heldAmount = 0;
-  hollow.listenTimer = 0; hollow.doubleBackTimer = 0;
+  hollow.listenTimer = 0; hollow.doubleBackTimer = 0; hollow.recoverSeconds = 0;
   hollow.graceTimer = graceSeconds;
   resetDirector(true); // being sent away always comes with a breather
   chooseHollowRoamTarget();
@@ -668,6 +669,9 @@ function updateHollow(dt) {
     hollow.stunSeconds -= dt;
     if (hollow.enragedTimer > 0) hollow.stunSeconds = 0; else speed = 0;
   }
+  // It has just struck somebody and they are still on their feet: it stands where it struck, enraged or not.
+  // That is their chance to get away (09-health.js).
+  if (hollow.recoverSeconds > 0) { hollow.recoverSeconds -= dt; speed = 0; }
 
   const movedDistance = speed > 0 ? moveCreatureToward(hollow, hollow.targetX, hollow.targetZ, speed, dt) : 0;
   hollow.currentSpeed = movedDistance / Math.max(dt, 0.0001);
@@ -698,7 +702,7 @@ function updateHollow(dt) {
     stepHollowOnNoisyFloor(figure.x, figure.z, isHunting); // glass and loose plates give it away as they would you
   }
 
-  if (distanceToPlayer < TUNING.hollowKillDistance && hollow.graceTimer <= 0) {
+  if (distanceToPlayer < TUNING.hollowKillDistance && hollow.graceTimer <= 0 && hollow.recoverSeconds <= 0) {
     // Everyone within its reach, not only the nearest: two who stand together are caught together.
     for (const one of players.slice()) {
       if (distanceBetweenPoints(figure.x, figure.z, one.x, one.z) < TUNING.hollowKillDistance) catchPlayer(one, 'hollow', figure);
@@ -770,6 +774,7 @@ function createStills() {
       isPresent: !isLateArrival,
       isLateArrival: isLateArrival,
       wakeDelay: 0,
+      restSeconds: 0,      // it has just struck somebody: it does not move or strike again until this has run out
       restlessCooldown: 3 + poseRandom() * 6,
       distanceMovedSinceSound: 0
     };
@@ -863,10 +868,11 @@ function updateStills(dt) {
       continue;
     }
 
+    if (still.restSeconds > 0) { still.restSeconds -= dt; continue; } // it has just struck somebody
     if (distanceToPlayer < TUNING.stillKillDistance) {
       catchPlayer(quarry, 'still', figure);
-      if (quarry === player) return; // your death: nothing moves on
-      continue;                      // somebody else's: the others keep coming
+      if (quarry === player && game.mode !== 'playing') return; // your death: nothing moves on
+      continue;                      // a hit, or somebody else's: the others keep coming
     }
     if (still.wakeDelay > 0) { still.wakeDelay -= dt; continue; }
     if (isObserved) continue;

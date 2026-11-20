@@ -205,6 +205,21 @@ function debugSendLootersOut() {
   showMessage('Debug: the looters are on their way out.', 3, 'info');
 }
 
+// Your health, by hand: a hit of a quarter of it (which can be the death of you), and all of it back.
+function debugHurtMe() {
+  markDebugUsed();
+  const damage = TUNING.playerMaxHealth * 0.25;
+  if (player.health - damage < 0.5) { showMessage('Debug: that would kill you. Let something do it.', 3, 'info'); return; }
+  player.health -= damage; player.hurtFlash = 1; playHurt();
+  showMessage('Debug: hurt. ' + Math.round(player.health) + ' of ' + TUNING.playerMaxHealth + ' left.', 3, 'info');
+}
+
+function debugHealMe() {
+  markDebugUsed();
+  healPlayer(TUNING.playerMaxHealth);
+  showMessage('Debug: all of your health is back.', 3, 'info');
+}
+
 function debugWakeStills() {
   markDebugUsed();
   if (!game.difficulty.stillsEnabled) { showMessage('Debug: the Stills are switched off on this threat level.', 4, 'info'); return; }
@@ -700,6 +715,8 @@ function initializeDebugMode() {
     ['debug-action-remove', 'Remove the Hollow', debugRemoveHollow],
     ['debug-action-stills', 'Wake the Stills', debugWakeStills],
     ['debug-action-looters', 'Send the looters out', debugSendLootersOut],
+    ['debug-action-hurt', 'Hurt me (a quarter)', debugHurtMe],
+    ['debug-action-heal', 'Heal me', debugHealMe],
     ['debug-action-lift', 'Bring the lift now', debugBringLift],
     ['debug-action-map', 'Reveal the whole map', debugRevealMap],
     ['debug-action-clear', 'Clear the point cloud', debugClearPoints],

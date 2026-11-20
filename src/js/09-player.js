@@ -39,6 +39,8 @@ const player = {
   timeSinceSprint: 9,
   isCrouching: false,
   isInVent: false,
+  health: TUNING.playerMaxHealth, // what is left of you: 0 is dead (09-health.js)
+  hurtGraceSeconds: 0,            // just hit: nothing can hit you again until this has run out
   isSprinting: false,
   isMoving: false,
   audibleRadius: 2.6,
@@ -152,6 +154,7 @@ function resetPlayerToStart() {
   steadyHeldScanner();
   player.stamina = 1; player.isStaminaLocked = false;
   player.heat = 0; player.isOverheated = false;
+  resetPlayerHealth();
   player.sweepTimeRemaining = 0;
   player.eyeHeight = (TUNING.playerHeight * TUNING.playerEyeHeightToBody);
   player.floorY = getFloorHeightAt(player.x, player.z);

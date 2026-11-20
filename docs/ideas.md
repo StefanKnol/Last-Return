@@ -5,9 +5,10 @@
 - Live game test option for people to test new features and provide feedback (github issue feedback instead of bug)
   - in game bug reporting or feedback instead of github issue, direct in game with screenshot of current location (no menu's)?
 
-- health system
-  - not instant death on being caught, monster gives chance to escape after attack
-  - health items to be found (physics based)
+- ~~health system~~ (in: 09-health.js)
+  - ~~not instant death on being caught, monster gives chance to escape after attack~~ (a hit, a moment of grace, and what hit you holds off)
+  - ~~health items to be found (physics based)~~ (first aid kits, a few to a station, used with Q)
+  - still open: hurt by a fall (the drop in a vent costs nothing but noise), hurt by what the Hollow throws back, a first aid kit to buy in the shop, the others seeing how hurt you are
 
 - shop in item collection mode (repo mode)
 
@@ -56,7 +57,7 @@
     - scared off by sound
     - ~~likes what you have handled or carry best, so it goes for the salvage bays~~ (in)
     - ~~a thing taken back from it, it wants back: waits a moment, then comes for it again~~ (in)
-    - ~~mad, not scared, at whoever is in its vents~~ (in: it scolds). Wants the health system: after scolding for a while it bites (the place is marked in updateLooter)
+    - ~~mad, not scared, at whoever is in its vents~~ (in: it scolds, and then it bites)
     - makes noise to summon other monsters (hits objects, walks in vents, etc.)
     - throws things at the player when angered (throwing the small monster or hitting it with stuff)
     - fetches a bigger monster if the player pisses it off enough?

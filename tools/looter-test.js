@@ -381,6 +381,18 @@ const labSource = String(function () {
     seen.turnedToYou = Math.abs(Math.atan2(Math.sin(towardsYou - looter.figure.yaw), Math.cos(towardsYou - looter.figure.yaw))) < 0.5;
     seen.scolded = d.captionCounts.looterMad || 0;
     seen.stillMad = { state: lab.state(looter), keepsIt: looter.carried === jar };
+    // And if you stay, it bites: a little off your health each time, again and again, and never the last of it.
+    seen.bites = { after: d.tuning.looterBiteAfterSeconds, every: d.tuning.looterBiteEverySeconds, takes: d.getHitDamage('looter') * d.game.difficulty.damageFactor, of: d.tuning.playerMaxHealth };
+    d.setDebugOption('invulnerable', false);
+    p.health = seen.bites.of; p.hurtGraceSeconds = 0; d.captionCounts.looterBites = 0;
+    seen.bites.secondsToTheFirst = lab.until(() => p.health < seen.bites.of, seen.bites.every + 1);
+    seen.bites.afterTheFirst = { lost: lab.round(seen.bites.of - p.health), mode: d.game.mode, said: d.captionCounts.looterBites || 0 };
+    const healthThen = p.health;
+    seen.bites.secondsToTheNext = lab.until(() => p.health < healthThen, seen.bites.every + 1);
+    p.health = 2; p.hurtGraceSeconds = 0;
+    lab.until(() => p.health < 2, seen.bites.every + 1);
+    seen.bites.atTheLast = { health: p.health, mode: d.game.mode };
+    d.setDebugOption('invulnerable', true); p.health = seen.bites.of;
     // Out of the vents again: a moment more, and it goes back to what it was about. And noise frightens it again.
     lab.standBy();
     d.simulate(0.2);
@@ -413,6 +425,9 @@ const labSource = String(function () {
   check('it comes for you faster than you crawl, stops an arm\'s length in front of you, turned to you, and scolds for as long as you are there',
     mad !== null && mad.speeds.mad > mad.speeds.crawl && mad.secondsToYou >= 0 && mad.metresFromYou > mad.near - 0.4 && mad.metresFromYou < mad.near + 0.4 && mad.turnedToYou && mad.scolded >= 2 &&
     mad.stillMad.state === 'driving somebody out of its vents' && mad.stillMad.keepsIt, mad);
+  check('if you stay it bites: a little off your health, again every few seconds, heard by anybody near; and a bite never takes the last of it',
+    mad !== null && mad.bites.secondsToTheFirst >= 0 && Math.abs(mad.bites.afterTheFirst.lost - mad.bites.takes) < 0.01 && mad.bites.afterTheFirst.mode === 'playing' && mad.bites.afterTheFirst.said >= 1 &&
+    mad.bites.secondsToTheNext > 0 && mad.bites.secondsToTheNext <= mad.bites.every + 0.3 && mad.bites.atTheLast.health >= 1 && mad.bites.atTheLast.health < 2 && mad.bites.atTheLast.mode === 'playing', mad.bites);
   check('out of the vents again it is mad a moment more and then goes on home with its thing, and noise frightens it again. In a vent far from it you are nothing to it until you make a noise there, and then it is mad and not afraid',
     mad !== null && mad.secondsStillMad >= mad.calm - 0.3 && mad.secondsStillMad <= mad.calm + 0.6 && mad.then.state === 'carrying a thing home' && mad.then.keepsIt && mad.afterANoiseOutside === 'frightened' &&
     (mad.farVent === null || (mad.farVent.quiet === 'in its nest' && mad.farVent.afterANoise === 'driving somebody out of its vents')), mad);

@@ -106,6 +106,13 @@ const LOOSE_OBJECT_KINDS = {
     parts: FUEL_CAN_PARTS,
     update: updateFuelCan
   },
+  // A first aid kit: what mends you (09-health.js). Q with it in the beam uses it up. A station has a few,
+  // lying on the floor out of the way (planStationLooseObjects).
+  firstAidKit: {
+    label: 'first aid kit', mass: 1.2, value: 20, fragile: 0.3, material: 'case', loud: 0.8, lies: 'onItsSide', bulky: false, bounce: 0.15, grip: 0.6,
+    parts: [{ shape: 'box', center: [0, 0, 0], half: [0.13, 0.09, 0.045] }, { shape: 'capsule', from: [-0.04, 0.1, 0], to: [0.04, 0.1, 0], radius: 0.012 }],
+    use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit }
+  },
   // ... and what is left when it has run out: the same can, a sixth of the weight, and as loud as an empty can
   // is. Nothing needs it any more. It is worth a little to Salvage, and it is something to throw.
   emptyFuelCan: {
@@ -2003,7 +2010,7 @@ function updateLooseCarryInput(dt) {
   if (input.wantsUseCarried) {
     input.wantsUseCarried = false;
     const carried = looseState.held;
-    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0) askToAct({ what: 'setOff', id: carried.id });
+    if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0 && (!carried.kind.use.canUse || carried.kind.use.canUse(carried))) askToAct({ what: 'setOff', id: carried.id });
   }
   // The right mouse button: down on something in reach takes it into the beam, up lets it go as it is moving.
   if (input.isGrabHeld && !looseState.held && player.focusedLooseObject && !player.focusedLooseObject.isRemoved) {
@@ -2501,6 +2508,19 @@ function planStationLooseObjects() {
       isOnItsSide, lies === 'onItsSide' ? false : isTurnedTheOtherWay, 'floor');
     placed++;
   }
+  // First aid kits: a few to a station, on bare floor that is in nobody's way. They have numbers of their own,
+  // so that nothing else here is moved by how many of them there are.
+  const kitRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0xa1d417);
+  const kitsWanted = Math.max(1, Math.round(rooms * TUNING.firstAidKitsPerRoom));
+  let kits = 0;
+  for (; kits < kitsWanted && nextTile < tiles.length; nextTile++) {
+    if (tiles[nextTile][2] !== 1) continue;
+    const index = tiles[nextTile][1];
+    addStationLooseObject('firstAidKit', index % GRID_WIDTH + 0.3 + kitRandom() * 0.4, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.3 + kitRandom() * 0.4,
+      kitRandom() * TWO_PI, true, false, 'floor');
+    kits++;
+  }
+  level.firstAidKitCount = kits;
   level.looseObjectCount = stationLooseObjects.length;
 }
 

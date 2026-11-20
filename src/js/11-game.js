@@ -81,6 +81,7 @@ function getActingPlayer() {
 function saveCheckpoint() {
   if (game.actor) return; // somebody else's doing: it is not your place to come back to
   game.checkpoint.x = player.x; game.checkpoint.z = player.z; game.checkpoint.yaw = player.yaw;
+  game.checkpoint.health = player.health;
 }
 
 function setKeycardLevel(cardLevel) {
@@ -189,6 +190,7 @@ function resetWorldState() {
   createPhantoms();
   resetPlayerToStart();
   game.checkpoint.x = PLAYER_START.x; game.checkpoint.z = PLAYER_START.z; game.checkpoint.yaw = PLAYER_START.yaw;
+  game.checkpoint.health = TUNING.playerMaxHealth;
   clearAllPoints();
   clearMap();
   clearMessages();
@@ -615,14 +617,24 @@ function completeLiftArrival(radioKey) {
 // Death and retry
 // ---------------------------------------------------------------------------
 
-// Something has got hold of one of `players`. If that is you, it is your death. Anybody else is not this
-// game's to kill.
+// Something has got hold of one of `players`: `kind` is what ('hollow', 'still', 'looter'). That is a hit
+// (09-health.js). If it is you, your game says what the hit does; anybody else is told, and it is their game
+// that hurts or kills them (11-together.js).
 function catchPlayer(caught, kind, figure) {
-  if (caught === player) triggerPlayerDeath(kind, figure);
-  else catchOtherPlayer(caught, kind, figure); // 11-together.js: they are told, and it is their game that kills them
+  if (caught !== player) { catchOtherPlayer(caught, kind, figure); return; }
+  if (hitPlayer(kind, figure) === 'hurt') recoilAfterHit(kind, figure);
 }
 
-// Returns whether you died of it.
+// What has just hit somebody who is still on their feet holds off for a moment: the Hollow stands where it
+// struck, a Still does not move again for a while. (In the game that runs the creatures. A looter bites again
+// in its own time: 08-looter.js.)
+function recoilAfterHit(kind, figure) {
+  if (isWorldTheHosts()) return;
+  if (kind === 'hollow') hollow.recoverSeconds = TUNING.hollowAfterHitSeconds;
+  else if (kind === 'still') { for (const still of stills) if (still.figure === figure) still.restSeconds = TUNING.stillAfterHitSeconds; }
+}
+
+// The hit that took the last of your health (hitPlayer, 09-health.js). Returns whether you died of it.
 function triggerPlayerDeath(kind, figure) {
   // Down there with others the station does not wait while you read or have the menu open, and neither does this.
   const isAway = isWorldShared() && (game.mode === 'paused' || game.mode === 'reading');
@@ -683,6 +695,7 @@ function standUpAgainAt(x, z) {
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
   steadyHeldScanner();
   player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
+  player.health = TUNING.playerRetryHealth; player.hurtGraceSeconds = 0; player.hurtFlash = 0;
   player.sweepTimeRemaining = 0;
   input.keysDown.clear();
   game.interference = 0; game.danger = 0; game.fade = 0;
@@ -702,6 +715,8 @@ function retryFromCheckpoint() {
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
   steadyHeldScanner();
   player.heat = 0; player.isOverheated = false; player.stamina = 1; player.isStaminaLocked = false;
+  // As hurt as you were when you passed the checkpoint, and never worse than half.
+  player.health = Math.max(game.checkpoint.health || 0, TUNING.playerRetryHealth); player.hurtGraceSeconds = 0; player.hurtFlash = 0;
   player.sweepTimeRemaining = 0;
   input.keysDown.clear();
   releaseHeldLooseObject(0); // whatever you were carrying lies where you fell
@@ -863,6 +878,7 @@ function updateAtmosphere(dt) {
   game.interference = approachValue(game.interference, pressure, dt * 1.8);
   const isCloseHunt = hollow.isActive && hollow.state === HOLLOW_STATE_HUNT;
   game.danger = approachValue(game.danger, isCloseHunt ? clampNumber(1 - hollowDistance / 7, 0, 1) : 0, dt * 1.5);
+  updatePlayerHealth(dt); // (here, so that it also runs while you have the menu open down there with others)
   if (game.fade < 1) game.fade = Math.min(1, game.fade + dt * 0.9);
 
   updateAudioListener(player.x, getPlayerEyeY(), player.z, player.yaw);
@@ -1053,7 +1069,7 @@ function runFrame(timestamp) {
   frameState.time = game.time;
   frameState.realTime = game.realTime;
   frameState.interference = game.interference;
-  frameState.danger = game.danger;
+  frameState.danger = Math.max(game.danger, player.hurtFlash); // (a hit is a flash of the same red)
   frameState.fade = game.mode === 'intro' || game.mode === 'dead' || game.mode === 'ending' ? 0 : game.fade;
   frameState.powerOn = game.flags.powerOn;
   frameState.hasKeycard = game.flags.hasKeycard;
@@ -1242,6 +1258,7 @@ function startApplication() {
     // What the creatures have in common (08-creatures.js): the kinds, their ways of getting around, and the path finding of a way.
     roamingWaypoints: roamingWaypoints,
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
+    hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
     looters: looters, looterStates: LOOTER_STATE_NAMES, frightenLooter: frightenLooter, chooseLooterOuting: chooseLooterOuting, isLootable: isLootable,
     creatureKinds: CREATURE_KINDS, creatureWays: CREATURE_WAYS, createCreatureWay: createCreatureWay, createCreatureLegs: createCreatureLegs,
     computeWayDistanceField: computeWayDistanceField, refreshCreatureDoorBlocks: refreshCreatureDoorBlocks, moveCreatureToward: moveCreatureToward,
