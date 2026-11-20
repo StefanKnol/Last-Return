@@ -70,7 +70,7 @@ function getCreatureWorkshopOtherKindKey() {
 
 // Which heading each proportion is listed under. One that is not named here goes under "Other".
 const CREATURE_WORKSHOP_GROUPS = [
-  ['Legs', ['thigh', 'shin', 'footLength', 'hipWidth', 'legRadius']],
+  ['Legs', ['thigh', 'shin', 'footLength', 'footRadius', 'hipWidth', 'legRadius']],
   ['Body', ['torsoLength', 'lowerSpine', 'upperSpine', 'shoulderWidth', 'torsoRadius']],
   ['Head', ['neckLength', 'headLength', 'headRadius', 'jawLength']],
   ['Arms and hands', ['upperArm', 'foreArm', 'handLength', 'fingerLengths', 'limbRadius', 'fingerRadius', 'jointRadius']]

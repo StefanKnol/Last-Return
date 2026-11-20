@@ -1,0 +1,9 @@
+{
+  "label": "Player-Slim",
+  "skeleton": "person",
+  "scansAs": "player",
+  "playerSkin": true,
+  "proportions": { "torsoLength": 0.255, "neckLength": 0.15, "headRadius": 0.12, "headLength": 0, "shoulderWidth": 0.38, "hipWidth": 0.21, "upperArm": 0.14, "foreArm": 0.125, "handLength": 0.045, "thigh": 0.23, "shin": 0.12, "footLength": 0.09, "footRadius": 0.045, "torsoRadius": 0.13, "limbRadius": 0.055, "legRadius": 0.065, "jointRadius": 0.075 },
+  "hides": [],
+  "parts": []
+}
