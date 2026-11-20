@@ -171,27 +171,48 @@ const labSource = String(function () {
     fetch !== null && fetch.carrySpeed > 0.5 && fetch.carrySpeed <= fetch.speeds.carry + 0.05 && fetch.speeds.carry < fetch.speeds.crouch && fetch.secondsHome > 0 && fetch.jarInTheNest && fetch.jarLiesStill &&
     fetch.jarOnTheFloor < 0.2 && fetch.itRests && fetch.said.takes === 1 && fetch.said.steps >= 5 && fetch.leavesItThere, fetch);
 
-  // --- noise: it drops what it has and runs home ---
+  // --- noise: how loud it is where the looter stands says what comes of it ---
   const fear = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, looter = lab.station();
     if (!looter) return null;
-    const seen = {};
+    const run = d.tuning.noiseRadiusSprintStep, hearsTo = run * d.tuning.looterHearingFactor;
+    const seen = { startledAt: d.tuning.looterStartledAt, scaredAt: d.tuning.looterScaredAt, backsOffFor: d.tuning.looterStartledSeconds, backsOffAt: d.tuning.looterBackOffSpeed,
+      onEdgeFor: d.tuning.looterOnEdgeSeconds, steadyFor: d.tuning.looterSteadySeconds };
+    // A running step, as loud to the looter as `loudness` says: so many metres to one side of it.
+    const metresFor = function (loudness) { return hearsTo * (1 - loudness); };
+    let noiseAt = [0, 0];
+    const aRunningStep = function (loudness) { noiseAt = [looter.figure.x + metresFor(loudness), looter.figure.z]; d.emitNoise(noiseAt[0], noiseAt[1], run); };
+    const metresFromTheNoise = function () { return Math.hypot(looter.figure.x - noiseAt[0], looter.figure.z - noiseAt[1]); };
     lab.standBy();
     const jar = lab.putDown('jar');
     lab.sendOut(looter);
     seen.tookIt = lab.until(() => looter.carried === jar, 60) >= 0;
     d.simulate(1.5);
-    const at = [looter.figure.x, looter.figure.z];
     // What it is used to: a walking step, right beside it.
-    d.emitNoise(at[0] + 0.5, at[1], d.tuning.noiseRadiusWalkStep);
+    d.emitNoise(looter.figure.x + 0.5, looter.figure.z, d.tuning.noiseRadiusWalkStep);
     d.simulate(0.3);
     seen.afterAStep = { state: lab.state(looter), hasIt: looter.carried === jar };
-    // And what it is not: a running step ten metres off.
+    // A running step that it hears, but far off: quieter to it than what startles it.
+    d.captionCounts.looterStartled = 0; d.captionCounts.looterScared = 0;
+    aRunningStep(seen.startledAt * 0.5);
+    d.simulate(0.3);
+    seen.afterAFarOne = { state: lab.state(looter), hasIt: looter.carried === jar, said: d.captionCounts.looterStartled || 0 };
+    // Nearer: between what startles it and what frightens it. It stops, turns to the noise and backs away from it, with the thing still in its arms.
+    aRunningStep((seen.startledAt + seen.scaredAt) / 2);
+    seen.startled = { state: lab.state(looter), hasIt: looter.carried === jar, said: d.captionCounts.looterStartled || 0, squealed: d.captionCounts.looterScared || 0 };
+    const from = [looter.figure.x, looter.figure.z, metresFromTheNoise(), d.game.time];
+    d.simulate(1.5);
+    const towards = Math.atan2(noiseAt[0] - looter.figure.x, -(noiseAt[1] - looter.figure.z));
+    seen.backingOff = { state: lab.state(looter), hasIt: looter.carried === jar, moved: lab.round(Math.hypot(looter.figure.x - from[0], looter.figure.z - from[1])),
+      fartherBy: lab.round(metresFromTheNoise() - from[2]), speed: lab.round(Math.hypot(looter.figure.x - from[0], looter.figure.z - from[1]) / (d.game.time - from[3])),
+      facesIt: Math.abs(Math.atan2(Math.sin(towards - looter.figure.yaw), Math.cos(towards - looter.figure.yaw))) < 0.5, hasNowhereToGo: looter.isTargetOutOfReach === true };
+    seen.secondsStartled = lab.until(() => looter.state !== 9, 6) + 1.5;
+    seen.thenGoesOn = { state: lab.state(looter), hasIt: looter.carried === jar };
+    // Still on edge: the same noise again is too much. It lets the thing fall where it stands, squeals and runs home.
     const where = [looter.figure.x, looter.figure.z];
-    d.captionCounts.looterScared = 0;
-    d.emitNoise(where[0] + 10, where[1], d.tuning.noiseRadiusSprintStep);
+    aRunningStep((seen.startledAt + seen.scaredAt) / 2);
     d.simulate(0.2);
-    seen.afterARun = { state: lab.state(looter), hasIt: looter.carried === jar, jarIsItsOwnAgain: jar.looterIndex === -1, said: d.captionCounts.looterScared || 0 };
+    seen.onEdge = { state: lab.state(looter), hasIt: looter.carried === jar, jarIsItsOwnAgain: jar.looterIndex === -1, said: d.captionCounts.looterScared || 0 };
     const before = [looter.figure.x, looter.figure.z, d.game.time];
     d.simulate(1);
     seen.runsAt = lab.round(Math.hypot(looter.figure.x - before[0], looter.figure.z - before[1]) / (d.game.time - before[2]));
@@ -199,20 +220,32 @@ const labSource = String(function () {
     seen.staysIn = looter.timer >= d.tuning.looterFearSeconds[0] - 0.5;
     d.simulate(3);
     seen.jarLiesWhereItFell = Math.hypot(jar.x - where[0], jar.z - where[1]) < 2.5 && !lab.inNest(looter, jar) && jar.isAsleep;
-    // A noise that is too far off for it to hear does nothing.
+    // Out again, and calm again: a running step near it, louder to it than what frightens it, frightens it at once.
     lab.sendOut(looter);
     seen.wentOutAgain = lab.until(() => looter.carried === jar, 60) >= 0;
-    d.emitNoise(looter.figure.x + d.tuning.noiseRadiusSprintStep * d.tuning.looterHearingFactor + 3, looter.figure.z, d.tuning.noiseRadiusSprintStep);
+    d.simulate(0.5);
+    // (And one out of its hearing does nothing at all.)
+    d.emitNoise(looter.figure.x + hearsTo + 3, looter.figure.z, run);
     d.simulate(0.3);
-    seen.afterAFarNoise = { state: lab.state(looter), hasIt: looter.carried === jar };
+    seen.afterOneOutOfHearing = { state: lab.state(looter), hasIt: looter.carried === jar };
+    aRunningStep(Math.min(0.98, seen.scaredAt + 0.1));
+    seen.afterANearOne = { state: lab.state(looter), hasIt: looter.carried === jar };
     seen.speeds = { flee: d.tuning.looterFleeSpeed, walk: d.tuning.walkSpeed };
     return seen;
   });
-  check('a walking step beside it does not trouble it; a running step ten metres off does: it lets the thing fall where it stands, squeals, and runs home faster than you walk, where it stays for a while. A noise out of its hearing does nothing',
-    fear !== null && fear.tookIt && fear.afterAStep.state === 'carrying a thing home' && fear.afterAStep.hasIt &&
-    fear.afterARun.state === 'frightened' && !fear.afterARun.hasIt && fear.afterARun.jarIsItsOwnAgain && fear.afterARun.said === 1 &&
-    fear.runsAt > fear.speeds.walk && fear.runsAt <= fear.speeds.flee + 0.1 && fear.secondsHome > 0 && fear.staysIn && fear.jarLiesWhereItFell &&
-    fear.wentOutAgain && fear.afterAFarNoise.state === 'carrying a thing home' && fear.afterAFarNoise.hasIt, fear);
+  check('a walking step beside it does not trouble it, and neither does a running step far off, though it hears it: quieter to it than what startles it is nothing to it',
+    fear !== null && fear.tookIt && fear.afterAStep.state === 'carrying a thing home' && fear.afterAStep.hasIt && fear.afterAFarOne.state === 'carrying a thing home' && fear.afterAFarOne.hasIt && fear.afterAFarOne.said === 0 &&
+    fear.startledAt > 0 && fear.scaredAt > fear.startledAt && fear.scaredAt < 1, fear);
+  check('a noise between what startles it and what frightens it startles it: it chirps, turns to the noise and backs away from it slowly with the thing still in its arms, and after a few seconds goes on home with it',
+    fear !== null && fear.startled.state === 'startled' && fear.startled.hasIt && fear.startled.said === 1 && fear.startled.squealed === 0 &&
+    fear.backingOff.state === 'startled' && fear.backingOff.hasIt && fear.backingOff.facesIt && fear.backingOff.fartherBy > -0.05 && fear.backingOff.speed <= fear.backsOffAt + 0.05 &&
+    (fear.backingOff.moved > 0.2 || fear.backingOff.hasNowhereToGo) && fear.secondsStartled >= fear.backsOffFor[0] - 0.2 && fear.secondsStartled <= fear.backsOffFor[1] + 0.3 &&
+    fear.thenGoesOn.state === 'carrying a thing home' && fear.thenGoesOn.hasIt, fear);
+  check('still on edge, the same noise again frightens it: it lets the thing fall where it stands, squeals, and runs home faster than you walk, where it stays for a while',
+    fear !== null && fear.onEdgeFor > fear.backsOffFor[1] + fear.steadyFor && fear.onEdge.state === 'frightened' && !fear.onEdge.hasIt && fear.onEdge.jarIsItsOwnAgain && fear.onEdge.said === 1 &&
+    fear.runsAt > fear.speeds.walk && fear.runsAt <= fear.speeds.flee + 0.1 && fear.secondsHome > 0 && fear.staysIn && fear.jarLiesWhereItFell, fear);
+  check('a noise louder to it than what frightens it frightens it at once; one out of its hearing does nothing',
+    fear !== null && fear.wentOutAgain && fear.afterOneOutOfHearing.state === 'carrying a thing home' && fear.afterOneOutOfHearing.hasIt && fear.afterANearOne.state === 'frightened' && !fear.afterANearOne.hasIt, fear);
 
   // --- out of your beam: only if it can reach ---
   const hands = await inGame(() => {
@@ -337,7 +370,7 @@ const labSource = String(function () {
     d.simulate(0.1);
     takeItBack();
     seen.crossAgain = lab.state(looter);
-    d.emitNoise(looter.figure.x + 8, looter.figure.z, d.tuning.noiseRadiusSprintStep);
+    d.emitNoise(looter.figure.x + 3, looter.figure.z, d.tuning.noiseRadiusSprintStep);
     d.simulate(0.2);
     seen.afterANoise = { state: lab.state(looter), wantsIt: looter.wanted === jar, yours: d.getHeldLooseObject() === jar };
     return seen;

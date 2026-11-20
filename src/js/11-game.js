@@ -851,7 +851,7 @@ function updateGameProgress(dt) {
   // The first looter your scanner finds: what it is, said once.
   if (!game.hasShownLooterHint && looters.some(function (looter) { return looter.figure.totalHits > 25; })) {
     game.hasShownLooterHint = true;
-    showMessage('Something small. It is after what lies loose, not after you. Noise frightens it.', 7, 'info');
+    showMessage('Something small. It is after what lies loose, not after you. Noise startles it; enough of it frightens it off.', 7, 'info');
   }
   // The first time one is mad at you, in a vent: why, said once.
   if (!game.hasShownLooterMadHint && player.isInVent && looters.some(function (looter) { return looter.state === LOOTER_STATE_MAD && distanceBetweenPoints(looter.figure.x, looter.figure.z, player.x, player.z) < 3; })) {

@@ -54,7 +54,7 @@
     - under a metre: walks through vents, cannot reach a hatch. Its nest is in a vent
     - moves objects (including what you need, chaseable and interruptable to get item back): from an open bay, the fuel can
     - out of your hands only if it can reach: held up high it tries and cannot
-    - scared off by sound
+    - scared off by sound (by how loud: startled first, backing away, and frightened by louder or by a second noise)
     - ~~likes what you have handled or carry best, so it goes for the salvage bays~~ (in)
     - ~~a thing taken back from it, it wants back: waits a moment, then comes for it again~~ (in)
     - ~~mad, not scared, at whoever is in its vents~~ (in: it scolds, and then it bites)

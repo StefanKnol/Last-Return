@@ -176,7 +176,15 @@ const TUNING = {
   looterTakeMetres: 0.8,            // how near it has to be to a thing to take it
   looterRangeSteps: 100,             // how far from its nest it goes for a thing, in steps on foot
   looterRestSeconds: [2, 45],      // how long it sits in its nest between two outings: [shortest, longest]
-  looterHearingFactor: 1.2,         // it hears a noise this many times as far as the noise carries. Then it drops what it has and runs home
+  looterHearingFactor: 1.2,         // it hears a noise this many times as far as the noise carries
+  // How loud a noise is to it: 0 at the edge of its hearing, 1 right beside it. (A running step carries 14 m,
+  // so it hears one from 16.8 m: startled within 12.6 m of it and frightened within 6.7 m, at 0.25 and 0.6.)
+  looterStartledAt: 0.25,           // as loud as this, it is startled: it stops and backs away, and keeps what it has. Quieter, it does nothing
+  looterScaredAt: 0.6,              // as loud as this, it is frightened: it drops what it has and runs home
+  looterStartledSeconds: [2, 3.5],  // how long it backs away from what startled it
+  looterBackOffSpeed: 0.7,          // ... and how fast
+  looterOnEdgeSeconds: 8,           // startled, it is on edge for this long: a second noise that would startle it frightens it instead
+  looterSteadySeconds: 1,           // ... but not in the first moment of it (one clatter of several knocks is one fright)
   looterDeafMetres: 4.5,            // ... unless the noise carries less far than this: a walking step and the hum of the scanner
                                     // carry 4, and those it is used to. A door (8), a running step (14), a knock, a sweep (22) it is not
   looterFearSeconds: [8, 14],       // and how long it stays there before it dares come out again
@@ -184,7 +192,7 @@ const TUNING = {
   looterLikesHandled: 3,            // what one of you has had in the beam is worth this many times as much to it as what nobody has touched
   looterLikesCarried: 5,            // ... what is in somebody's beam now, this many times
   looterLikesBay: 2,                // and what lies in a salvage bay that stands open, this many times again
-  looterWantsBackSeconds: [2.5, 4.5], // a thing taken out of its arms: how long it stands there cross before it comes after it
+  looterWantsBackSeconds: [1.5, 4.5], // a thing taken out of its arms: how long it stands there cross before it comes after it
   looterChaseSpeed: 2.6,            // ... and how fast it comes: quicker than you walk (2.2), slower than you run
   looterTerritoryMetres: 9,         // one of you in a vent this near to it, or to its nest, is in its vents: it does not run, it goes for them
   looterMadSpeed: 2.6,              // on its way to them: twice as fast as you crawl
@@ -683,6 +691,7 @@ const CAPTIONS = {
   looterTries: { text: '[a chitter, cross: it cannot reach]', level: 'sound', withinMetres: 10, seconds: 2, slot: 'looterVoice', rank: 1 },
   looterRobbed: { text: '[a chitter, cross: it wants that back]', level: 'sound', withinMetres: 12, seconds: 2.2, slot: 'looterVoice', rank: 1 },
   looterBites: { text: '[a snap: it has bitten somebody]', level: 'sound', withinMetres: 12, seconds: 2, slot: 'looterVoice', rank: 2 },
+  looterStartled: { text: '[a chirp: something small has heard that]', level: 'sound', withinMetres: 12, seconds: 1.8, slot: 'looterVoice', rank: 1 },
   looterMad: { text: '[a furious chitter: it wants you out of its vent]', level: 'sound', withinMetres: 12, seconds: 2, slot: 'looterVoice', rank: 1 },
   looterScared: { text: '[a squeal, and small feet running]', level: 'sound', withinMetres: 18, seconds: 2.2, slot: 'looterVoice', rank: 2 },
 

@@ -704,6 +704,7 @@ function wrapForTogether() {
   playStinger = shareWorldSound('playStinger', playStinger);
   // The looters (08-looter.js): their voices. (Their feet each game sounds for itself: soundLooterSteps.)
   playLooterChitter = shareWorldSound('playLooterChitter', playLooterChitter);
+  playLooterChirp = shareWorldSound('playLooterChirp', playLooterChirp);
   playLooterSqueal = shareWorldSound('playLooterSqueal', playLooterSqueal);
   // The Hollow treading on glass, cans or a loose plate, and flinging a thing: your warning, and so the others' too.
   // (Shared only while the host's creatures are being run, like the rest: your own step on glass is your own.)

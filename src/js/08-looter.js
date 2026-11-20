@@ -11,9 +11,13 @@
 // What it likes best is what one of you has had in the beam: a thing you carry, a thing you have put down, and
 // so what stands in a salvage bay. What nobody has touched it takes too, but it goes a long way round for yours.
 //
-// What it is afraid of is noise. Anything loud enough for it to hear, and it hears well, makes it drop what it
-// has where it stands and run home, where it stays for a while. So a thing is got back from one by startling
-// it; and a thing held high, where it cannot reach, it only stands under and scolds.
+// What it is afraid of is noise, by how loud the noise is where the looter stands (0 at the edge of its
+// hearing, 1 right beside it). Far off or small, it lives with it. Louder than TUNING.looterStartledAt, it is
+// startled: it stops what it is doing, turns to the noise and backs away from it for a few seconds, keeping
+// what it has, and then goes on. Louder than TUNING.looterScaredAt, or startled a second time while it is still
+// on edge, it is frightened: it drops what it has where it stands and runs home, where it stays for a while.
+// So a thing is got back from one by being loud near it, or loud twice; and a thing held high, where it
+// cannot reach, it only stands under and scolds.
 //
 // Take a thing out of its arms and it is not frightened, it is robbed: it stands there cross for a moment, and
 // then it comes after you for it, quicker than you walk, and takes it again if it can reach it.
@@ -44,8 +48,9 @@ const LOOTER_STATE_FLEE = 5;    // frightened, running home
 const LOOTER_STATE_WANDER = 6;  // out for a look, with nothing in mind
 const LOOTER_STATE_CROSS = 7;   // a thing was taken out of its arms: standing there, about to go and get it back
 const LOOTER_STATE_MAD = 8;     // one of you is in its vents: going for them, scolding
+const LOOTER_STATE_STARTLED = 9; // it has heard something: backing away from it, not running yet
 const LOOTER_STATE_NAMES = ['in its nest', 'after a thing', 'reaching for a thing', 'carrying a thing home', 'going home', 'frightened', 'wandering',
-  'wanting a thing back', 'driving somebody out of its vents'];
+  'wanting a thing back', 'driving somebody out of its vents', 'startled'];
 
 // Doors: the ones that open for anything that walks up to them, and the powered ones once the mains is on.
 function canLooterOpenDoor(door) {
@@ -82,6 +87,8 @@ function createLooter(index, nest) {
     state: LOOTER_STATE_NEST, timer: 0, wanted: null, carried: null, goalX: nest.x, goalZ: nest.z, ignored: {},
     nestField: new Int16Array(TILE_COUNT), nestFieldVersion: -1, // how far it is on foot from its nest to everywhere, by its way
     isRobbed: false, madAt: null,
+    startledX: 0, startledZ: 0, // startled: where the noise was
+    onEdgeSeconds: 0,    // it has been startled, and for this much longer the next noise that would startle it frightens it
     scoldSeconds: 0,     // mad: until it scolds again
     biteSeconds: 0,      // mad, and in front of them: until it bites
     calmSeconds: 0,      // mad: how long it stays so once nobody is in its vents
@@ -279,15 +286,26 @@ function frightenLooter(looter) {
   if (looter.state === LOOTER_STATE_FLEE) return;
   const wasAtHome = looter.state === LOOTER_STATE_NEST;
   letGoAsLooter(looter, false);
-  looter.wanted = null; looter.isRobbed = false; looter.madAt = null;
+  looter.wanted = null; looter.isRobbed = false; looter.madAt = null; looter.onEdgeSeconds = 0;
   looter.state = LOOTER_STATE_FLEE;
   looter.outSeconds = 0;
   if (!wasAtHome) { playLooterSqueal(looter.figure.x, looter.figure.z); showCaption('looterScared', looter.figure); }
 }
 
-// A noise, somewhere in the station. It hears further than a noise carries to the Hollow, and what it hears
-// frightens it. (Small noises it lives with: a step, a thing set down.) Unless it comes out of a vent with one
-// of you in it: that is somebody in its vents, however far off, and it goes for them.
+// Startled: it has heard something that is not loud enough to run from. It stops, turns to where that was and
+// backs away from it, with what it has still in its arms; and it is on edge for a while after.
+function startleLooter(looter, x, z) {
+  looter.startledX = x; looter.startledZ = z;
+  looter.onEdgeSeconds = TUNING.looterOnEdgeSeconds;
+  looter.state = LOOTER_STATE_STARTLED;
+  looter.timer = randomBetween(TUNING.looterStartledSeconds[0], TUNING.looterStartledSeconds[1]);
+  playLooterChirp(looter.figure.x, looter.figure.z); showCaption('looterStartled', looter.figure);
+}
+
+// A noise, somewhere in the station. It hears further than a noise carries to the Hollow. How loud it is where
+// the looter stands says what comes of it: nothing, startled, or frightened (see the top of this file). Small
+// noises it never hears at all: a walking step, a thing set down. And a noise out of a vent with one of you
+// in it is somebody in its vents, however faint: it goes for them.
 function hearNoiseAsLooters(x, z, radius) {
   if (radius < TUNING.looterDeafMetres || debugState.options.creaturesIgnorePlayer) return;
   let whoIsInAVent = null;
@@ -295,10 +313,19 @@ function hearNoiseAsLooters(x, z, radius) {
     for (const one of players) if (isInAVent(one) && distanceBetweenPoints(x, z, one.x, one.z) < 1.5) whoIsInAVent = one;
   }
   for (const looter of looters) {
-    if (looter.deafSeconds > 0 || looter.state === LOOTER_STATE_MAD) continue;
-    if (distanceBetweenPoints(x, z, looter.figure.x, looter.figure.z) > radius * TUNING.looterHearingFactor) continue;
-    if (whoIsInAVent) maddenLooter(looter, whoIsInAVent);
-    else if (looter.state === LOOTER_STATE_NEST) looter.timer = Math.max(looter.timer, randomBetween(TUNING.looterFearSeconds[0], TUNING.looterFearSeconds[1])); // it stays in for longer
+    if (looter.deafSeconds > 0 || looter.state === LOOTER_STATE_MAD || looter.state === LOOTER_STATE_FLEE) continue;
+    const metres = distanceBetweenPoints(x, z, looter.figure.x, looter.figure.z), hearsTo = radius * TUNING.looterHearingFactor;
+    if (metres > hearsTo) continue;
+    if (whoIsInAVent) { maddenLooter(looter, whoIsInAVent); continue; }
+    const loudness = 1 - metres / hearsTo;
+    if (loudness < TUNING.looterStartledAt) continue; // far off: it lives with that
+    // On edge, and past the first moment of it (one clatter is one fright, not two): this one is too much.
+    const isOnEdge = looter.onEdgeSeconds > 0 && looter.onEdgeSeconds < TUNING.looterOnEdgeSeconds - TUNING.looterSteadySeconds;
+    if (looter.state !== LOOTER_STATE_NEST && loudness < TUNING.looterScaredAt && !isOnEdge) {
+      if (looter.onEdgeSeconds <= 0) startleLooter(looter, x, z);
+      continue;
+    }
+    if (looter.state === LOOTER_STATE_NEST) looter.timer = Math.max(looter.timer, randomBetween(TUNING.looterFearSeconds[0], TUNING.looterFearSeconds[1])); // it stays in for longer
     else frightenLooter(looter);
   }
 }
@@ -355,6 +382,7 @@ function maddenLooter(looter, one) {
 function poseLooter(looter, movedDistance, dt) {
   const figure = looter.figure, pose = figure.pose;
   const isRunning = looter.state === LOOTER_STATE_FLEE, isMad = looter.state === LOOTER_STATE_MAD, isCross = looter.state === LOOTER_STATE_CROSS;
+  const isStartled = looter.state === LOOTER_STATE_STARTLED;
   looter.walkPhase += movedDistance * (isRunning ? 9 : 11); // small legs: many steps to the metre
   const stride = dt > 0 ? Math.min(1, movedDistance / dt / 1.2) : 0;
   pose.legSwing = Math.sin(looter.walkPhase) * 0.6 * stride;
@@ -362,13 +390,13 @@ function poseLooter(looter, movedDistance, dt) {
   pose.kneeBend = 0.1 + 0.25 * stride + (isCross ? Math.abs(Math.sin(game.time * 9)) * 0.3 : 0);
   // Arms: round what it carries, up over its head for what it cannot reach, flung back when it runs, and up
   // and shaking at whoever is in its vents or has its thing.
-  const wantedArms = looter.carried ? 1.25 : (looter.state === LOOTER_STATE_REACH ? 2.7 : (isMad ? 2.2 : (isCross ? 1.0 : (isRunning ? -0.5 : 0.1))));
+  const wantedArms = looter.carried ? 1.25 : (looter.state === LOOTER_STATE_REACH ? 2.7 : (isMad ? 2.2 : (isCross ? 1.0 : (isStartled ? 0.7 : (isRunning ? -0.5 : 0.1)))));
   looter.armRaise = dt > 0 ? approachValue(looter.armRaise, wantedArms, dt * 6) : wantedArms;
   const shake = looter.carried ? 0 : (looter.state === LOOTER_STATE_REACH ? Math.sin(game.time * 14) * 0.15 : (isMad ? Math.sin(game.time * 19) * 0.3 : (isCross ? Math.sin(game.time * 16) * 0.2 : 0)));
   pose.armRaise = looter.armRaise + shake;
   pose.armSwing = looter.carried || looter.state === LOOTER_STATE_REACH || isMad || isCross ? 0 : Math.sin(looter.walkPhase) * 0.5 * stride;
   pose.elbowBend = looter.carried ? 0.9 : 0.2;
-  pose.lean = isRunning ? 0.35 : (isMad ? 0.25 : (looter.carried ? -0.08 : 0.08));
+  pose.lean = isRunning ? 0.35 : (isMad ? 0.25 : (isStartled ? -0.18 : (looter.carried ? -0.08 : 0.08))); // (startled, it leans away from what it heard)
   pose.headTilt = looter.state === LOOTER_STATE_NEST ? Math.sin(game.time * 0.7 + looter.index * 2) * 0.25 : 0;
   pose.squat = looter.state === LOOTER_STATE_NEST ? 0.5 : 0;
   updateFigureCapsules(figure);
@@ -384,6 +412,7 @@ function sendLooterHome(looter) {
 function updateLooter(looter, dt) {
   const figure = looter.figure;
   looter.deafSeconds -= dt;
+  looter.onEdgeSeconds -= dt;
   looter.outSeconds += dt;
   // What it had is no longer in its arms. Taken out of them by one of you: it wants it back. Gone altogether
   // (broken, down the pit): that frightens it.
@@ -433,6 +462,18 @@ function updateLooter(looter, dt) {
         else if (looter.isRobbed && looter.wanted) { looter.state = LOOTER_STATE_CROSS; looter.timer = 0; }
         else sendLooterHome(looter);
       }
+    }
+  } else if (looter.state === LOOTER_STATE_STARTLED) {
+    // Backing away from what it heard, a step at a time. Then on with what it was about.
+    const awayX = figure.x - looter.startledX, awayZ = figure.z - looter.startledZ, away = Math.max(0.01, Math.sqrt(awayX * awayX + awayZ * awayZ));
+    looter.goalX = figure.x + awayX / away * 2; looter.goalZ = figure.z + awayZ / away * 2;
+    speed = TUNING.looterBackOffSpeed;
+    looter.timer -= dt;
+    if (looter.timer <= 0) {
+      looter.outSeconds = 0; speed = 0;
+      if (looter.carried) looter.state = LOOTER_STATE_CARRY;
+      else if (looter.wanted && isLootable(looter.wanted) && !isLooseObjectInANest(looter.wanted)) looter.state = LOOTER_STATE_FETCH;
+      else sendLooterHome(looter);
     }
   } else if (looter.state === LOOTER_STATE_CROSS) {
     // Robbed: turned to its thing, stamping, and then after it.
@@ -496,7 +537,13 @@ function updateLooter(looter, dt) {
     }
   }
 
+  const yawBefore = figure.yaw;
   const movedDistance = speed > 0 ? moveCreatureToward(looter, looter.goalX, looter.goalZ, speed, dt) : 0;
+  // (Startled, it walks backwards: whichever way its feet go, it keeps its face to the noise.)
+  if (looter.state === LOOTER_STATE_STARTLED) {
+    const towards = Math.atan2(looter.startledX - figure.x, -(looter.startledZ - figure.z));
+    figure.yaw = yawBefore + clampNumber(wrapAngleToPi(towards - yawBefore), -dt * 9, dt * 9);
+  }
   looter.currentSpeed = movedDistance / Math.max(dt, 0.0001);
   poseLooter(looter, movedDistance, dt);
   soundLooterSteps(looter);
@@ -549,7 +596,7 @@ function followHostLooters(numbers, blend, dt) {
     figure.x = interpolateLinear(looter.fromX, numbers[at], amount);
     figure.z = interpolateLinear(looter.fromZ, numbers[at + 1], amount);
     figure.yaw = looter.fromYaw + wrapAngleToPi(numbers[at + 2] - looter.fromYaw) * amount;
-    looter.state = clampNumber(Math.round(numbers[at + 3]), LOOTER_STATE_NEST, LOOTER_STATE_MAD);
+    looter.state = clampNumber(Math.round(numbers[at + 3]), LOOTER_STATE_NEST, LOOTER_STATE_STARTLED);
     // What it has in its arms is what the host says it has (the taking and the letting go are told as they
     // happen; this is for a game that came to it late).
     const carried = numbers[at + 4] > 0 ? findLooseObjectById(numbers[at + 4]) : null;

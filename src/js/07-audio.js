@@ -1527,6 +1527,16 @@ function playFirstAid() {
   playTone({ waveform: 'sine', frequency: 660, frequencyEnd: 880, duration: 0.18, gain: 0.25 * SOUND_LEVELS.firstAid, attack: 0.01, delay: 0.5 });
 }
 
+// Startled: two short notes, the second higher. A question.
+function playLooterChirp(x, z) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.6, z);
+  if (!panner) return;
+  for (let note = 0; note < 2; note++) {
+    const pitch = (1700 + note * 520) * (0.95 + Math.random() * 0.1);
+    playTone({ waveform: 'triangle', frequency: pitch, frequencyEnd: pitch * 1.18, duration: 0.07, gain: 0.45 * SOUND_LEVELS.looterChitter, attack: 0.004, delay: note * 0.13, destination: panner });
+  }
+}
+
 // Frightened: one long note going up and breaking off.
 function playLooterSqueal(x, z) {
   const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.6, z);
