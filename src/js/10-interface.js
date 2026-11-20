@@ -940,7 +940,7 @@ function updateHud(realDt) {
     } else if (canSetOffCarried) {
       // In the beam, and it does something: say which key, or which button.
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? (heldLooseObject.kind.use.button || 'USE IT') + ' · ' : '[Q]  ') + heldLooseObject.kind.use.prompt;
+      prompt.textContent = (input.isTouchDevice ? (heldLooseObject.kind.use.button || 'USE IT') + ' · ' : '[Q]  ') + (heldLooseObject.kind.use.promptFor ? heldLooseObject.kind.use.promptFor(heldLooseObject) : heldLooseObject.kind.use.prompt);
     } else if (game.mode === 'playing' && !input.isPointerLocked && !input.useDragLook && !input.isTouchDevice) {
       prompt.hidden = false;
       prompt.textContent = 'Click to take control of the scanner';

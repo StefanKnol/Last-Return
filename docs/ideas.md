@@ -65,7 +65,8 @@
   - ~~one way down from the upper level to the lower~~ (done: a vent with a drop in it)
     - temporary: a keycard door opens from its inner side without the card (`keycardDoorsOpenFromInside`), or the drop is a trap. To be replaced by a proper way back out
     - the Hollow and the other creatures do not use the drop yet
-  - the scanner tripod: an item to find (or buy in the shop later), set down and switched on, that scans what is in front of it in pulses. The same system the scanning monster will see by, and a way to try it first
+  - ~~the scanner tripod: an item to find (or buy in the shop later), set down and switched on, that scans what is in front of it in pulses. The same system the scanning monster will see by, and a way to try it first~~ (in: 08-loose-objects.js, and fireScanCone in 09-scan-cone.js)
+    - still open: to buy in the shop; a tripod that warns you when something walks into its light; the Hollow going for a tripod that keeps lighting it
   - other types of blind monsters with different systems for it
   - kidnapping monster that moves a player somewhere else
 

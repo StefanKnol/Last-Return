@@ -270,6 +270,14 @@ const TUNING = {
   looseHoldBreakSeconds: 0.25,      // ... for this long, and the beam loses it. (Not caught on anything, it has to be two and a half times as far.)
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
   // The scan grenade (a loose object that does something: see `use` in LOOSE_OBJECT_KINDS).
+  // The scanner tripod (08-loose-objects.js): switched on with Q, it scans what is in front of it in pulses.
+  tripodPulseEverySeconds: 2,     // one pulse of light this often
+  tripodFlashSeconds: 0.22,         // how long one pulse lasts
+  tripodPulseRays: 1500,            // how many pulses of the scanner go into one of its own
+  tripodConeDegrees: 74,            // how wide its light opens, edge to edge
+  tripodBatterySeconds: 480,        // how long it scans in all, counted while it is on. Then it is spent
+  noiseRadiusTripodPulse: 5,        // each pulse ticks. The Hollow hears that from a little way off; a looter close by is startled by it
+  scannerTripodsPerRoom: 0.04,      // how many of them a station has, for each of its rooms (never fewer than one)
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
@@ -737,6 +745,7 @@ const CAPTIONS = {
   ownObjectBreak: { text: '[something breaks apart at your feet]', level: 'sound', withinMetres: 0, seconds: 3, slot: 'ownHands', rank: 2 },
   objectBreak: { text: '[something breaks apart]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   ownObjectKicked: { text: '[something skitters away from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  tripodPulse: { text: '[a tick, and a flash: a scanner tripod]', level: 'sound', withinMetres: 9, seconds: 1.7, slot: 'tripod', rank: 0 },
   scanGrenade: { text: '[a rising whine, and a crack of light]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   hollowStunned: { text: '[it stands frozen in the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },
   ownObjectKnock: { text: '[it knocks against something]', level: 'sound', withinMetres: 0, seconds: 2, slot: 'ownHands', rank: 0 },

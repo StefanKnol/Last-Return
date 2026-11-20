@@ -36,6 +36,7 @@ const SOUND_LEVELS = {
   haulBayPing: 1,         // the lamp over an open salvage bay, once a minute
   looseHandling: 1,       // taking an object in your hands, and the grunt of air as you throw it
   scanGrenade: 1,         // a scan grenade: the click of arming it, and the whine and crack as it goes off
+  tripod: 1,              // a scanner tripod: switched on or off, and the tick of each pulse
   heartbeat: 4,
 
   // ---- the scanner and the interface ----
@@ -1339,6 +1340,24 @@ function playHaulBayPing(x, y, z) {
 
 // A scan grenade at (x, y, z). `what` is 'arm' (the pin: a click and a rising tick) or 'burst' (it goes off: a
 // whine that climbs for as long as its light lasts, a crack at the start, and hiss).
+// A scanner tripod: 'on' (a click and two notes up), 'off' (a click and two notes down), 'pulse' (a tick and a
+// short whine as its light goes out), from where it is.
+function playTripodSound(what, x, y, z) {
+  if (!isAudioReady()) return;
+  const destination = createTemporaryPanner(x, y, z);
+  if (!destination) return;
+  const level = SOUND_LEVELS.tripod;
+  if (what === 'pulse') {
+    playNoiseBurst({ duration: 0.02, filterType: 'bandpass', frequency: 4200, resonance: 3, gain: 0.5 * level, attack: 0.001, destination: destination });
+    playTone({ waveform: 'sine', frequency: 1500, frequencyEnd: 2300, duration: 0.16, gain: 0.1 * level, attack: 0.01, delay: 0.01, destination: destination });
+    return;
+  }
+  const isOn = what === 'on';
+  playNoiseBurst({ duration: 0.03, filterType: 'bandpass', frequency: 3000, resonance: 2, gain: 0.8 * level, attack: 0.001, destination: destination });
+  playTone({ waveform: 'triangle', frequency: isOn ? 660 : 990, duration: 0.09, gain: 0.2 * level, delay: 0.05, destination: destination });
+  playTone({ waveform: 'triangle', frequency: isOn ? 990 : 660, duration: 0.12, gain: 0.2 * level, delay: 0.15, destination: destination });
+}
+
 function playScanGrenadeSound(what, x, y, z) {
   if (!isAudioReady()) return;
   const destination = createTemporaryPanner(x, y, z);

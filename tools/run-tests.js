@@ -28,7 +28,7 @@ const fs = require('fs');
 const path = require('path');
 
 // In the order they are run: the quick and general first, the ones that need a server and several browsers last.
-const SUITES = ['playthrough', 'generated-station', 'generators', 'quests', 'arrivals', 'custom-difficulty', 'locked-doors', 'creatures', 'looter', 'health', 'noisy-floor', 'captions',
+const SUITES = ['playthrough', 'generated-station', 'generators', 'quests', 'arrivals', 'custom-difficulty', 'locked-doors', 'creatures', 'looter', 'health', 'tripod', 'noisy-floor', 'captions',
   'loose-objects', 'apparition', 'workshop', 'players', 'together'];
 
 // `--plan` runs nothing. It reads the names of the files a pull request changes (one a line) and prints, as JSON,

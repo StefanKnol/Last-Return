@@ -910,6 +910,24 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await fine(0.6);
   check('with the host\'s looters gone they are gone from the other game', (await b.evaluate(() => window.lastReturnDebug.looters.length)) === 0);
 
+  // ---- A scanner tripod is switched on and off for everybody, and each game draws its light for itself ----
+  // (One of this check's own, put down in both games in the same place, so that it has the same number in both.)
+  const tripodIds = [];
+  if (looterSpot) for (const page of [a, b]) tripodIds.push(await page.evaluate((spot) => window.lastReturnDebug.createLooseObject('scannerTripod', spot.x, spot.y + 0.2, spot.z, 0).id, looterSpot));
+  await fine(1);
+  const tripodIn = (page) => page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; return tripod ? { isOn: tripod.isOn, fired: tripod.pulsesFired } : null; }, tripodIds[0]);
+  const switchTripodFrom = (page) => page.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'setOff', id: id }), tripodIds[0]);
+  await switchTripodFrom(b);
+  await fine(2.4);
+  const tripodOn = [await tripodIn(a), await tripodIn(b)];
+  await switchTripodFrom(a);
+  await fine(0.8);
+  const tripodOff = [await tripodIn(a), await tripodIn(b)];
+  check('a scanner tripod that one of you switches on is on in every game, each of which sends out its light for itself; switched off by another, it is off in every game',
+    tripodIds.length === 2 && tripodIds[0] === tripodIds[1] && tripodOn.every((tripod) => tripod !== null && tripod.isOn && tripod.fired > 0) && tripodOff.every((tripod) => tripod !== null && !tripod.isOn), [tripodOn, tripodOff]);
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; if (tripod) d.removeLooseObject(tripod); }, tripodIds[0]);
+  await fine(0.3);
+
   // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
   // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.
   // For this check the host's game is given its say back, with half a minute of its wait left.)

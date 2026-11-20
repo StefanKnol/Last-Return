@@ -1598,7 +1598,7 @@ function installLab() {
       // (What a quest puts out, a fuel can, is counted with them: it lies about the station like the rest.)
       const entry = { total: d.stationLooseObjects.length + d.questLooseObjects.length, fromQuests: d.questLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
         counts: {}, value: 0, onSurfaces: 0, lowestSurface: 9, cansInHeaps: d.noisyFloorCanHeaps.reduce((sum, heap) => sum + heap.cans.length, 0), problems: d.auditStationLooseObjects(),
-        mouths: d.level.ventMouths.length, wanted: { litter: Math.round(rooms * d.tuning.looseLitterPerRoom), valuables: Math.round(rooms * d.tuning.looseValuablesPerRoom), firstAidKits: Math.max(1, Math.round(rooms * d.tuning.firstAidKitsPerRoom)) }, notOnASurface: [] };
+        mouths: d.level.ventMouths.length, wanted: { litter: Math.round(rooms * d.tuning.looseLitterPerRoom), valuables: Math.round(rooms * d.tuning.looseValuablesPerRoom), firstAidKits: Math.max(1, Math.round(rooms * d.tuning.firstAidKitsPerRoom)), tripods: Math.max(1, Math.round(rooms * d.tuning.scannerTripodsPerRoom)) }, notOnASurface: [] };
       // At most this many of the valuables go on tables and shelves (as the game rounds it).
       entry.wanted.onSurfacesAtMost = Math.round(entry.wanted.valuables * d.tuning.looseValuablesShareOnSurfaces);
       d.stationLooseObjects.forEach((item, index) => {
@@ -1651,12 +1651,13 @@ function installLab() {
     // when it runs out of floor: these stations have plenty). Of the valuables no more than their share on tables
     // and shelves, and each of those really lies on the top of one, 35 cm high or more (findStationSurfaces).
     // (Which kinds they are is the game's draw, from its tables: that is not looked at here.)
-    const litterAndValuables = entry.total - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0) - (entry.counts.firstAidKit || 0);
+    const litterAndValuables = entry.total - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0) - (entry.counts.firstAidKit || 0) - (entry.counts.scannerTripod || 0);
     entry.shortOfWhatTheRoomsAskFor = entry.wanted.litter + entry.wanted.valuables - litterAndValuables;
     check(stationName + ': cans where the draw put cans, litter, and things worth carrying out, as many as its rooms ask for in a station with floor enough, and no more than their share on tables and shelves, each lying on one',
       entry.counts.can >= entry.cansInHeaps && (entry.counts.ventCover || 0) <= entry.mouths && entry.shortOfWhatTheRoomsAskFor === 0 &&
       entry.onSurfaces <= entry.wanted.onSurfacesAtMost && entry.notOnASurface.length === 0 && (entry.onSurfaces === 0 || entry.lowestSurface >= 0.35), entry);
-    check(stationName + ': and the first aid kits its rooms ask for, never fewer than one', entry.counts.firstAidKit === entry.wanted.firstAidKits && entry.wanted.firstAidKits >= 1, [entry.counts.firstAidKit, entry.wanted]);
+    check(stationName + ': and the first aid kits and the scanner tripods its rooms ask for, never fewer than one of either', entry.counts.firstAidKit === entry.wanted.firstAidKits && entry.wanted.firstAidKits >= 1 &&
+      entry.counts.scannerTripod === entry.wanted.tripods && entry.wanted.tripods >= 1, [entry.counts.firstAidKit, entry.counts.scannerTripod, entry.wanted]);
     check(stationName + ': woken, none of them stirs or makes a sound, and they are at rest again', entry.stirred === 0 && entry.noises === 0 && entry.asleepAgain === entry.total, entry);
     check(stationName + ': the same station has the same things in the same places, and a new descent puts them back', entry.sameAgain, entry);
   }

@@ -86,6 +86,24 @@ const LOOSE_OBJECT_KINDS = {
     use: { prompt: 'Arm the scan grenade', button: 'ARM', activate: armScanGrenade },
     update: updateScanGrenade
   },
+  // A scanner tripod: a scanner on three legs. Q with it in the beam switches it on or off; on, it scans what
+  // is in front of it, a pulse of light every second and a half, from wherever it is and whichever way it has
+  // come to face (updateScannerTripod, and fireScanCone in 09-scan-cone.js). In the beam it hangs upright and
+  // faces the way you do, so it is put down facing what you want watched. Its battery lasts so long and no
+  // longer. A station has one or two. It is worth something to Salvage too, charged: use it or sell it.
+  // (Its lens is the ball on the front of its head: TRIPOD_LENS.)
+  scannerTripod: {
+    label: 'scanner tripod', mass: 2.4, value: 60, material: 'metal', loud: 1, lies: 'upright', bulky: false, bounce: 0.1, grip: 0.8, facesAheadInTheBeam: true,
+    parts: [
+      { shape: 'capsule', from: [0, 0.4, 0], to: [0, 0.03, 0.22], radius: 0.018 },
+      { shape: 'capsule', from: [0, 0.4, 0], to: [0.19, 0.03, -0.11], radius: 0.018 },
+      { shape: 'capsule', from: [0, 0.4, 0], to: [-0.19, 0.03, -0.11], radius: 0.018 },
+      { shape: 'box', center: [0, 0.46, 0], half: [0.05, 0.045, 0.08] },
+      { shape: 'ball', center: [0, 0.46, -0.085], radius: 0.035 }
+    ],
+    use: { prompt: 'Switch the tripod on', promptFor: function (object) { return object.isOn ? 'Switch the tripod off' : 'Switch the tripod on'; }, button: 'SWITCH', activate: switchScannerTripod },
+    update: updateScannerTripod
+  },
   // A scanner: what is left of a player who was caught, down there with others (11-together.js). Its light stays
   // on. Carried back to the lift, or into an open salvage bay, it is restarted and they are on their feet again.
   // Nothing puts one in a station: one lies where somebody fell.
@@ -500,6 +518,10 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
     looterIndex: -1,                    // which looter has it in its arms (08-looter.js), or -1: then it goes where that looter goes
     fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
+    // A scanner tripod: whether it is on, how much of its battery is left, the count to its next pulse, how much
+    // of the pulse that is going out now is still to come, and what its light has fallen on since it was switched on.
+    isOn: false, batterySeconds: kindKey === 'scannerTripod' ? TUNING.tripodBatterySeconds : 0, pulseSeconds: 0, flashSeconds: 0, flashBudget: 0,
+    pulsesFired: 0, pulsesOnCreatures: 0, lastLitPlayerTime: -999,
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
     fuel: kindKey === 'fuelCan' ? 1 : 0, pourSeconds: 0, hasBeenTaken: false,
@@ -1580,6 +1602,8 @@ function multiplyLooseTurns(ax, ay, az, aw, bx, by, bz, bw) {
 
 // Notes how the object is turned compared with the way you face. The beam holds it like that from now on.
 function gripLooseObject(object) {
+  // (A thing that has a front, like the scanner tripod, is held upright with its front the way you face.)
+  if (object.kind.facesAheadInTheBeam) { object.gripX = 0; object.gripY = 0; object.gripZ = 0; object.gripW = 1; return; }
   const grip = multiplyLooseTurns(0, -Math.sin(-player.yaw / 2), 0, Math.cos(-player.yaw / 2),
     object.orientationX, object.orientationY, object.orientationZ, object.orientationW);
   object.gripX = grip.x; object.gripY = grip.y; object.gripZ = grip.z; object.gripW = grip.w;
@@ -2521,6 +2545,17 @@ function planStationLooseObjects() {
     kits++;
   }
   level.firstAidKitCount = kits;
+  // Scanner tripods: one or two to a station, standing on bare floor that is in nobody's way. Numbers of their own again.
+  const tripodRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0x7217d0);
+  const tripodsWanted = Math.max(1, Math.round(rooms * TUNING.scannerTripodsPerRoom));
+  let tripods = 0;
+  for (; tripods < tripodsWanted && nextTile < tiles.length; nextTile++) {
+    if (tiles[nextTile][2] !== 1) continue;
+    const index = tiles[nextTile][1];
+    addStationLooseObject('scannerTripod', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, tripodRandom() * TWO_PI, false, false, 'floor');
+    tripods++;
+  }
+  level.scannerTripodCount = tripods;
   level.looseObjectCount = stationLooseObjects.length;
 }
 
@@ -3132,6 +3167,72 @@ function flingLooseObjectFromHollow(object) {
 }
 
 // ---------------------------------------------------------------------------
+// The scanner tripod
+// ---------------------------------------------------------------------------
+
+// Where its lens is and which way it looks, in the coordinates its parts are given in: the ball on the front
+// of its head, looking the way a thing faces that has not been turned (the way you face at yaw 0).
+const TRIPOD_LENS = { x: 0, y: 0.46, z: -0.125, forwardX: 0, forwardY: 0, forwardZ: -1 };
+
+// Q, with it in the beam ('setOff', carried out in every browser): on, or off again.
+function switchScannerTripod(object) {
+  object.isOn = !object.isOn;
+  object.pulseSeconds = 0.5; object.flashSeconds = 0; object.flashBudget = 0;
+  if (object.isOn) { object.pulsesFired = 0; object.pulsesOnCreatures = 0; object.lastLitPlayerTime = -999; }
+  playTripodSound(object.isOn ? 'on' : 'off', object.x, object.y, object.z);
+  if (looseState.held === object) showMessage(object.isOn ? 'The tripod is on. Put it down facing what you want scanned.' : 'The tripod is off.', 4, 'info');
+}
+
+// Where its light leaves it and which way, in the station, for how it stands or lies now. Fills `into`.
+function getScannerTripodLens(object, into) {
+  const matrix = object.matrix, prepared = object.prepared;
+  const x = TRIPOD_LENS.x - prepared.centreX, y = TRIPOD_LENS.y - prepared.centreY, z = TRIPOD_LENS.z - prepared.centreZ;
+  into.x = object.x + matrix[0] * x + matrix[1] * y + matrix[2] * z;
+  into.y = object.y + matrix[3] * x + matrix[4] * y + matrix[5] * z;
+  into.z = object.z + matrix[6] * x + matrix[7] * y + matrix[8] * z;
+  into.directionX = matrix[0] * TRIPOD_LENS.forwardX + matrix[1] * TRIPOD_LENS.forwardY + matrix[2] * TRIPOD_LENS.forwardZ;
+  into.directionY = matrix[3] * TRIPOD_LENS.forwardX + matrix[4] * TRIPOD_LENS.forwardY + matrix[5] * TRIPOD_LENS.forwardZ;
+  into.directionZ = matrix[6] * TRIPOD_LENS.forwardX + matrix[7] * TRIPOD_LENS.forwardY + matrix[8] * TRIPOD_LENS.forwardZ;
+  return into;
+}
+const tripodLensScratch = { x: 0, y: 0, z: 0, directionX: 0, directionY: 0, directionZ: -1 };
+
+// Every frame, in every browser (the light is each game's own to draw, like your scanner's). On, it counts
+// its battery down and sends a pulse of light out of its lens every so often: a cone of the scanner's pulses,
+// spread over a fifth of a second. Each pulse ticks, which is a noise (said by the game that moves the thing,
+// so that it is one noise however many of you there are).
+function updateScannerTripod(object, dt) {
+  if (!object.isOn || object.isSpent) return;
+  object.batterySeconds -= dt;
+  if (object.batterySeconds <= 0) {
+    object.batterySeconds = 0; object.isOn = false; object.isSpent = true;
+    object.worth = Math.min(object.worth, 10); // (flat, it is scrap)
+    playTripodSound('off', object.x, object.y, object.z);
+    if (looseState.held === object) showMessage('The tripod\'s battery is flat.', 4, 'warning');
+    return;
+  }
+  object.pulseSeconds -= dt;
+  if (object.pulseSeconds <= 0) {
+    object.pulseSeconds += TUNING.tripodPulseEverySeconds;
+    object.flashSeconds = TUNING.tripodFlashSeconds;
+    playTripodSound('pulse', object.x, object.y, object.z);
+    showCaption('tripodPulse', { x: object.x, z: object.z });
+    if (!isLooseObjectAnothers(object)) emitNoise(object.x, object.z, TUNING.noiseRadiusTripodPulse);
+  }
+  if (object.flashSeconds <= 0) return;
+  object.flashBudget += TUNING.tripodPulseRays * Math.min(dt, object.flashSeconds) / TUNING.tripodFlashSeconds;
+  object.flashSeconds -= dt;
+  const pulses = Math.min(4000, Math.floor(object.flashBudget));
+  object.flashBudget -= pulses;
+  if (pulses <= 0) return;
+  const lens = getScannerTripodLens(object, tripodLensScratch);
+  const result = fireScanCone(lens.x, lens.y, lens.z, lens.directionX, lens.directionY, lens.directionZ, TUNING.tripodConeDegrees / 2, pulses, object);
+  object.pulsesFired += result.fired;
+  object.pulsesOnCreatures += result.onCreatures;
+  if (result.litPlayers.length > 0) object.lastLitPlayerTime = game.time;
+}
+
+// ---------------------------------------------------------------------------
 // The scan grenade
 // ---------------------------------------------------------------------------
 
@@ -3233,6 +3334,7 @@ function sayNeededThingIsBack(object) {
 function getLooseObjectLabel(object) {
   if (object.kindKey === 'fuelCan' && object.fuel < 0.995) return object.kind.label + ', ' + Math.max(1, Math.round(object.fuel * 100)) + ' % full';
   if (object.isSpent) return 'spent ' + object.kind.label;
+  if (object.kindKey === 'scannerTripod') return object.kind.label + (object.isOn ? ', on' : '') + ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + ' % charged';
   if (object.armedTime >= 0) return object.kind.label + ', armed';
   return object.kind.label;
 }
