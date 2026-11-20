@@ -33,7 +33,7 @@
   - fuel not always required (already a thing it seems)
   - multiple generators, could be only objective (3 or more if only objective, random fuel required per generator)
   - fuel spawn closer to generators, not across the map and back
-    - fuel as object to carry with physics engine
+    - ~~fuel as object to carry with physics engine~~
   - REPO item collection
     - collecting items with value until target is reached
     - multiple stages, lower levels unlock with stages

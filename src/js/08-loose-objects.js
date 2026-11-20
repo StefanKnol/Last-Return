@@ -52,6 +52,11 @@
 //              What it then does over time is `update(object, dt)`, called every frame for every object of the kind.
 // Where it hangs is the same for all of them: straight out from the scanner's lens, `looseHoldDistance` (in
 // 00-config.js) beyond its own size. How much of the beam it takes follows from how big it is.
+const FUEL_CAN_PARTS = [
+  { shape: 'box', center: [0, 0, 0], half: [0.16, 0.19, 0.09] },
+  { shape: 'box', center: [-0.03, 0.215, 0], half: [0.08, 0.025, 0.025] },
+  { shape: 'cylinder', from: [0.1, 0.19, 0], to: [0.135, 0.265, 0], radius: 0.025 }
+];
 const LOOSE_OBJECT_KINDS = {
   jar: {
     label: 'sample jar', mass: 0.8, value: 60, fragile: 1, shattersAt: 3.4, material: 'glass', loud: 1, lies: 'upright', bulky: false, bounce: 0.2, grip: 0.45,
@@ -90,6 +95,22 @@ const LOOSE_OBJECT_KINDS = {
       { shape: 'box', center: [0, 0, 0], half: [0.16, 0.05, 0.05] },
       { shape: 'capsule', from: [0.22,-0.215,0], to: [0.155,0, 0], radius: 0.05 },
     ]
+  },
+  // A fuel can: ten litres of diesel for a generator whose day tank is empty (09-quests.js, "Fuel"). Held
+  // against the generator, or set down against it, it runs out into the tank: updateFuelCan below. Full, it is
+  // heavy and you cannot run with it. A station only has one where a quest puts it, on a low crate; one that is
+  // lost with fuel still in it (down the shaft, sealed into a salvage bay) is back on that crate.
+  // The shape is the same full and empty: the can, the grip along its top, and the spout at one corner.
+  fuelCan: {
+    label: 'fuel can', mass: 9, value: 0, material: 'metal', loud: 1, lies: 'upright', bulky: true, bounce: 0.1, grip: 0.7,
+    parts: FUEL_CAN_PARTS,
+    update: updateFuelCan
+  },
+  // ... and what is left when it has run out: the same can, a sixth of the weight, and as loud as an empty can
+  // is. Nothing needs it any more. It is worth a little to Salvage, and it is something to throw.
+  emptyFuelCan: {
+    label: 'empty fuel can', mass: 1.5, value: 6, fragile: 0.3, material: 'tin', loud: 1.6, lies: 'either', bulky: false, bounce: 0.3, grip: 0.5,
+    parts: FUEL_CAN_PARTS
   },
   // ---- litter: what lies about a station that nobody has swept in forty years ----
   // An empty can. Six of them lie wherever the noisy floor's draw says "cans" (03-noisy-floor.js). Kicked at a
@@ -470,6 +491,14 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // and whether it was moving when its mover last said where it is.
     ownerId: 0, heldById: 0, wasMovingWhenSaid: false,
     fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
+    // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
+    // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
+    fuel: kindKey === 'fuelCan' ? 1 : 0, pourSeconds: 0, hasBeenTaken: false,
+    // Put out by a quest (09-quests.js): the number the quest knows it by, and where it stood, to be put back
+    // there if it is lost while it is still needed.
+    questObjectId: 0, homeEntry: null,
+    // Where you last knew it to be, for your map: where a pulse of yours last landed on it, or where you last had it in the beam.
+    isKnownOnMap: false, mapX: x, mapZ: z,
     isRemoved: false
   };
   setLooseObjectYaw(object, yaw || 0);
@@ -597,6 +626,7 @@ function changePointsOnLooseObject(object, seconds) {
 // A pulse has landed on this object.
 function noteLooseObjectScanned(object) {
   object.lastScannedTime = game.time;
+  object.isKnownOnMap = true; object.mapX = object.x; object.mapZ = object.z; // (the map shows the few kinds that matter to a quest: 10-interface.js)
   if (object.isAsleep) object.hasRestPoints = true;
   // Enough pulses on it, and the scanner has read what it is: from then on the screen says what it is worth.
   object.scanHits++;
@@ -1877,6 +1907,7 @@ function pickUpLooseObjectNow(object, isByButton) {
   looseState.isLettingGo = false; // the press that picked it up is not also the press that lets go of it
   looseState.lettingGoSeconds = 0;
   playLooseObjectHandlingSound(object.kind.material, true);
+  refreshObjective(); // (what you carry may be what a quest is waiting for)
   if (!looseState.hasShownCarryHint) {
     looseState.hasShownCarryHint = true;
     showMessage(input.isTouchDevice
@@ -1895,6 +1926,7 @@ function releaseHeldLooseObject(throwStrength) {
   looseState.lettingGoSeconds = 0;
   object.isHeld = false;
   object.lastHandledTime = game.time;
+  refreshObjective();
   askToAct({ what: 'release', id: object.id }); // so that somebody else can take it (it is still yours to move until it lies still)
   if (throwStrength > 0) {
     const speed = TUNING.looseThrowSpeed * throwStrength / (1 + object.kind.mass * TUNING.looseThrowLossPerKilogram);
@@ -2200,6 +2232,16 @@ function addStationLooseObject(kindKey, x, surfaceY, z, yaw, isOnItsSide, alongX
   stationLooseObjects.push({ kindKey: kindKey, x: x, y: surfaceY + getLooseRestHeight(kindKey, orientation) + 0.001, z: z, orientation: orientation, on: on });
 }
 
+// What the quests of this station have put out besides (09-quests.js): a fuel can for a generator with an empty
+// tank. The same kind of entry, standing upright on something, with the number its quest knows it by. They are
+// a list of their own because the quests are kept apart from the map: what lies about a station is part of how
+// it was built, and no quest alters that. Put out after the station's own things, so those keep their numbers.
+const questLooseObjects = []; // { kindKey, x, y, z, orientation, on: 'surface', questObjectId }
+function addQuestLooseObject(kindKey, x, surfaceY, z, yaw, questObjectId) {
+  const orientation = getLooseRestOrientation(kindKey, yaw, false, false);
+  questLooseObjects.push({ kindKey: kindKey, x: x, y: surfaceY + getLooseRestHeight(kindKey, orientation) + 0.001, z: z, orientation: orientation, on: 'surface', questObjectId: questObjectId });
+}
+
 // TWEAK: what the litter is, and what is worth carrying out, with how often each turns up among its sort.
 const STATION_LITTER = [['carton', 5], ['plate', 3], ['can', 2]];
 const STATION_VALUABLES_ON_THE_FLOOR = [['crate', 3], ['pipe', 3], ['toolCase', 2], ['pumpMotor', 1]];
@@ -2419,12 +2461,36 @@ function planStationLooseObjects() {
 // Puts the station's loose things out, at rest. Whatever was loose before is cleared away first.
 function spawnStationLooseObjects() {
   clearLooseObjects();
-  for (const entry of stationLooseObjects) {
+  for (const entry of stationLooseObjects.concat(questLooseObjects)) {
     const object = createLooseObject(entry.kindKey, entry.x, entry.y, entry.z, 0);
     setLooseObjectOrientation(object, entry.orientation[0], entry.orientation[1], entry.orientation[2], entry.orientation[3]);
     object.isAsleep = true;
     object.isFromTheStation = true;
+    if (entry.questObjectId) { object.questObjectId = entry.questObjectId; object.homeEntry = entry; }
   }
+}
+
+// Puts a thing back where the station had it, at rest, in nobody's beam. For what a quest cannot do without
+// (a fuel can with fuel in it) when it has gone where nobody can follow. Returns false for a thing the station
+// did not put out for a quest.
+function returnLooseObjectToWhereItStood(object) {
+  const entry = object.homeEntry;
+  if (!entry) return false;
+  changePointsOnLooseObject(object, 0); // the points on it stay where it was no longer
+  wakeLooseObjectsTouching(object);
+  if (looseState.held === object) { looseState.held = null; looseState.isLettingGo = false; looseState.lettingGoSeconds = 0; }
+  object.isHeld = false; object.heldById = 0; object.ownerId = 0; object.isLost = false; object.rideCrateId = 0;
+  object.x = entry.x; object.y = entry.y; object.z = entry.z;
+  setLooseObjectOrientation(object, entry.orientation[0], entry.orientation[1], entry.orientation[2], entry.orientation[3]);
+  object.velocityX = 0; object.velocityY = 0; object.velocityZ = 0;
+  object.spinX = 0; object.spinY = 0; object.spinZ = 0;
+  object.lastGoodX = object.x; object.lastGoodY = object.y; object.lastGoodZ = object.z;
+  object.settleX = object.x; object.settleY = object.y; object.settleZ = object.z; object.settleSeconds = 0; object.restSeconds = 0;
+  object.isAsleep = true; object.hasRestPoints = false; object.wasMovingWhenSaid = false;
+  object.wasHandled = false; object.isKnownOnMap = false; object.hasBeenTaken = false;
+  refreshLooseObjectTiles(object);
+  refreshObjective();
+  return true;
 }
 
 // Checks the station's loose things. Returns a list of problems (empty when fine).
@@ -2675,7 +2741,13 @@ function finishSealingHaulBay(bay) {
 
 function sealHaulBayNow(bay, ids, value) {
   bay.isBeingSealed = false;
-  for (const id of ids) { const object = findLooseObjectById(id); if (object) removeLooseObject(object); }
+  for (const id of ids) {
+    const object = findLooseObjectById(id);
+    if (!object) continue;
+    // A fuel can with fuel in it is not salvage, and is not shut in where nobody can get at it.
+    if (isLooseObjectStillNeeded(object) && returnLooseObjectToWhereItStood(object)) { sayNeededThingIsBack(object); continue; }
+    removeLooseObject(object);
+  }
   bay.state = 'sealed'; bay.taken = value;
   haulState.taken += value;
   bay.interactable.isAvailable = false;
@@ -2942,8 +3014,48 @@ function updateScanGrenade(object, dt) {
   }
 }
 
+// ---- The fuel can ----
+//
+// What it pours into, how much, and what that does is the quests' business (09-quests.js, "Fuel"). This is the
+// can's side of it: noticing that it is at a tank that wants fuel, and running out.
+
+// Every frame, for every fuel can with fuel in it: is it at a tank that is not full? Then a splash goes in,
+// every TUNING.fuelPourStepSeconds. A splash is a thing done to the station ('pour'): alone it is done here
+// and now; down there with others the host's game decides it, and every browser carries it out.
+function updateFuelCan(object, dt) {
+  if (object.fuel <= 0 || !object.hasBeenTaken || isWorldTheHosts()) return;
+  const tank = findFuelTankAt(object.x, object.y, object.z);
+  if (!tank) { object.pourSeconds = TUNING.fuelPourStepSeconds; return; } // (so that the first splash comes the moment it touches)
+  object.pourSeconds += dt;
+  if (object.pourSeconds < TUNING.fuelPourStepSeconds) return;
+  object.pourSeconds = Math.min(object.pourSeconds - TUNING.fuelPourStepSeconds, TUNING.fuelPourStepSeconds);
+  askToAct({ what: 'pour', id: object.id, tank: tank.index });
+}
+
+// The last of it has gone into a tank. The can is what it was, without the weight: lighter to carry and to
+// throw, louder when it lands, and nothing to any generator.
+function emptyFuelCan(object) {
+  object.fuel = 0;
+  object.kindKey = 'emptyFuelCan'; object.kind = LOOSE_OBJECT_KINDS.emptyFuelCan; object.prepared = prepareLooseObjectKind('emptyFuelCan');
+  object.worth = object.kind.value;
+  object.isKnownOnMap = false; // nothing to go back for
+  object.wasMovingWhenSaid = true; // (down there with others: whoever moves it says once more what it is worth now, even if it lies still)
+  wakeLooseObject(object);
+}
+
+// Is this something a quest cannot be finished without? (A fuel can, for as long as there is fuel in it.)
+function isLooseObjectStillNeeded(object) {
+  return object.kindKey === 'fuelCan' && object.fuel > 0;
+}
+
+function sayNeededThingIsBack(object) {
+  if (game.mode === 'title') return;
+  showMessage('The ' + object.kind.label + ' is out of reach. It is back where it first stood.', 6, 'warning');
+}
+
 // What the screen calls an object: a thing that has been used up says so.
 function getLooseObjectLabel(object) {
+  if (object.kindKey === 'fuelCan' && object.fuel < 0.995) return object.kind.label + ', ' + Math.max(1, Math.round(object.fuel * 100)) + ' % full';
   if (object.isSpent) return 'spent ' + object.kind.label;
   if (object.armedTime >= 0) return object.kind.label + ', armed';
   return object.kind.label;
@@ -3029,6 +3141,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
   }
 
   const held = looseState.held;
+  if (held) { held.isKnownOnMap = true; held.mapX = held.x; held.mapZ = held.z; }
   // What you carry is against something straight ahead: the beam gives. It holds the thing nearer to you, by
   // as much as the thing is short of where the beam wanted it, so you can walk right up to a wall with it.
   // It lets it out again as soon as there is room. (Only along the beam: a thing caught to one side, or left
