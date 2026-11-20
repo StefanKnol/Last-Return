@@ -6,7 +6,6 @@
   "proportions": { "torsoLength": 0.34, "neckLength": 0.055, "headRadius": 0.115, "headLength": 0.01, "shoulderWidth": 0.385, "hipWidth": 0.15, "upperArm": 0.1104, "foreArm": 0.0992, "handLength": 0.071, "thigh": 0.1, "shin": 0.1, "footLength": 0.07, "footRadius": 0.035, "torsoRadius": 0.165, "limbRadius": 0.0237, "legRadius": 0.05, "jointRadius": 0.0474 },
   "hides": ["belly"],
   "parts": [
-    { "bone": "head", "mirror": false, "shape": "capsule", "from": [0.1,0.15,0.05], "to": [0.065,0.065,0], "radius": 0.015 },
-    { "bone": "head", "mirror": false, "shape": "capsule", "from": [-0.1,0.15,0.05], "to": [-0.065,0.065,0], "radius": 0.015 }
+    { "bone": "head", "mirror": true, "shape": "capsule", "from": [0.1,0.15,0.05], "to": [0.065,0.065,0], "radius": 0.015 }
   ]
 }
