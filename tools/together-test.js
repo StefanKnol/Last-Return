@@ -431,6 +431,8 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     d.releaseHeldLooseObject(0);
   });
   for (let turn = 0; turn < 24; turn++) { await both(0.9); if (await b.evaluate(() => window.lastReturnDebug.game.mode === 'playing')) break; }
+  // (The host counts them as a player again at its next turn, not in the moment it hears they are up.)
+  await play(a, 0.1);
   const restarted = { other: await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, metresFromCar: Math.hypot(d.player.x - d.playerStart.x, d.player.z - d.playerStart.z), scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }),
     host: await a.evaluate(() => { const d = window.lastReturnDebug; return { players: d.players.length, isDown: d.together.others[0].isDown, isFallen: d.together.others[0].isFallen, scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }) };
   check('carried, it does nothing; put down in the lift car, it restarts and they are on their feet there, and one of the players again',
@@ -1065,13 +1067,18 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   const hasHostHeard = await a.waitForFunction(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return other && Math.hypot(other.x - d.player.x, other.z - d.player.z) > 4; }, null, { polling: 200, timeout: 20000 }).then(() => true, () => false);
   await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.spawnHollow(other.x + 0.3, other.z); d.hollow.graceTimer = 0; });
+  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
+  await drawUntilDead(c);
+  const waitingDead = await c.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }));
+  // (Shown when the check fails: whether the host's game caught them at all, and where its Hollow went.)
+  waitingDead.asTheHostHasIt = await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { mode: d.game.mode, others: d.together.others.length, players: d.players.length, isDown: other && other.isDown, hasBeenHeardFrom: other && other.hasBeenHeardFrom,
+    metresToHost: other ? Math.hypot(other.x - d.player.x, other.z - d.player.z) : null, hollow: { isActive: d.hollow.isActive, state: d.hollow.state, metresToThem: other ? Math.hypot(d.hollow.figure.x - other.x, d.hollow.figure.z - other.z) : null, graceTimer: d.hollow.graceTimer } }; }).catch(() => null);
   // Being caught is the host's to say, and is heard when it is said, drawn or not. Dying is their own game's to
   // carry out, a second and a half of it, and that takes frames: so their page is drawn until they are dead.
   // (Only once they are dying. A picture of a page that is still playing is the slowest there is, and has been
   // seen to take longer than the thirty seconds a picture is given, which ended the suite then and there.)
   const isCaught = await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'dying' || window.lastReturnDebug.game.mode === 'dead', null, { polling: 200, timeout: 30000 }).then(() => true, () => false);
   if (isCaught) await drawUntilDead(c);
-  const waitingDead = await c.evaluate((heard) => ({ hasHostHeardWhereTheyWent: heard[0], isCaught: heard[1], mode: window.lastReturnDebug.game.mode, told: document.getElementById('death-lines').textContent, canRetry: !document.getElementById('button-retry').hidden }), [hasHostHeard, isCaught]);
 
   // The host leaves altogether. The lobby is over: whoever is down there stays, alone, and whoever waited has their own title screen back.
   await first.browser.close();
