@@ -55,7 +55,7 @@ function installLetTheBrowserCatchUp() {
 const gamePagePath = path.join(__dirname, '..', 'index.html');
 const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 
-// Runs in the page before any of its own script, and settles two things about the stations the checks build.
+// Runs in the page before any of its own script, and settles three things about the stations the checks build.
 // The game is told as soon as it puts out its test hook, so that both hold after a reload too.
 //
 // From the code alone. The checks are made on stations that are built without the rooms in src/rooms/ and the
@@ -72,6 +72,12 @@ const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 //     node tools/run-tests.js --other-stations=1000
 // A check that passes as usual and fails like this was written against one station, not against a rule. (Only
 // the stations a check builds through the test hook are other ones. A seed typed into the menu is taken as it is.)
+//
+// Nothing arrives by itself. In a generated station the Hollow comes in its own time: after some minutes drawn
+// by chance, sooner for every noise (src/js/08-arrivals.js). A check about doors or fuel that plays a few
+// minutes of a descent would be walked in on, now and then, and fail for it. So in these pages it only comes
+// when Generator 2 is started, as it always did, unless the suite opens its page with `arrivals: true`
+// (arrivals-test.js, which is about exactly this, and one check of together-test.js).
 function installTestStations(testStations) {
   let hook;
   Object.defineProperty(window, 'lastReturnDebug', {
@@ -81,6 +87,7 @@ function installTestStations(testStations) {
       hook = value;
       if (!value) return;
       if (testStations.areFromCodeAlone && value.setWorkshopContentUsed) value.setWorkshopContentUsed(false);
+      if (testStations.areArrivalsHeld && value.debugState) value.debugState.areArrivalsHeld = true;
       if (testStations.otherStations && value.loadStation) {
         const loadStationAsAsked = value.loadStation;
         value.loadStation = function (kind, seed) {
@@ -101,8 +108,9 @@ function readOtherStations() {
 }
 
 // `workshopContent: true` leaves the stations as the game builds them, with what the workshop made.
+// `arrivals: true` lets the Hollow come by itself, as it does in the game.
 async function openGame(options) {
-  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false }, options || {});
+  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false, arrivals: false }, options || {});
   const browser = await chromium.launch({
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
   });
@@ -119,7 +127,7 @@ async function openGame(options) {
   });
   page.on('pageerror', (error) => problems.push('page error: ' + error.message));
   await page.addInitScript(installLetTheBrowserCatchUp);
-  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations() });
+  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations(), areArrivalsHeld: !settings.arrivals });
   // `address` opens the game where a server has it (together-test.js); otherwise it is opened from its file.
   await page.goto(settings.address || 'file://' + (settings.dev ? devPagePath : gamePagePath));
   await page.waitForFunction((needsDebugMode) => Boolean(window.lastReturnDebug && (!needsDebugMode || window.lastReturnDebug.setDebugOption)), settings.dev);

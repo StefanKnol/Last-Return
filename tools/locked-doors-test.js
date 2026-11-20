@@ -229,21 +229,28 @@ const labSource = String(function () {
     openDoor.openForThePlayer && openDoor.reachedThePlayer && !openDoor.usedCrawlspace && openDoor.seconds < 6 && openDoor.lowestOpenWhileInDoorway > 0.6, openDoor);
 
   // --- it does not take to the ceiling for a short walk ---
+  // (Going up and coming down count for hollowCrawlFixedSteps steps of walking, before a metre has been crawled.
+  // So a place that is no further away on foot than that is never nearer over the ceiling, wherever the hatches
+  // are. Ten metres as the crow flies used to stand for "near" here, and with a hatch to every few rooms it does
+  // not: the walk round to such a place can be long, and another hatch can be right beside it.)
   const shortWalk = await inGame(() => {
-    const d = window.lastReturnDebug, lab = window.lab, result = { trips: 0, crawls: 0 };
+    const d = window.lastReturnDebug, lab = window.lab, result = { trips: 0, crawls: 0, steps: [] };
     lab.fresh();
     d.game.flags.powerOn = true;
-    lab.far();
-    // From every hatch, sent to a place ten metres off in the same part of the station.
+    // From every hatch, sent to a place a short walk off in the same part of the station.
     for (const hatch of d.hollowHatches) {
-      let target = null;
-      for (const step of [[10, 0], [-10, 0], [0, 10], [0, -10], [7, 7], [-7, -7], [7, -7], [-7, 7]]) {
+      let target = null, steps = 0;
+      d.teleport(hatch.x, hatch.z, 0);
+      for (const step of [[6, 0], [-6, 0], [0, 6], [0, -6], [4, 4], [-4, -4], [4, -4], [-4, 4]]) {
         const spot = d.findWalkableSpotNear(hatch.x + step[0], hatch.z + step[1]);
-        if (spot && d.getHollowPartAt(spot.x, spot.z) === hatch.part && Math.hypot(spot.x - hatch.x, spot.z - hatch.z) > 6) { target = spot; break; }
+        if (!spot || d.getHollowPartAt(spot.x, spot.z) !== hatch.part || Math.hypot(spot.x - hatch.x, spot.z - hatch.z) < 4) continue;
+        steps = d.stepsFromPlayerTo(spot.x, spot.z);
+        if (steps >= 4 && steps <= d.tuning.hollowCrawlFixedSteps - 2) { target = spot; break; }
       }
       if (!target) continue;
+      lab.far();
       d.spawnHollow(hatch.x, hatch.z); d.hollow.graceTimer = 999;
-      result.trips++;
+      result.trips++; result.steps.push(steps);
       for (let time = 0; time < 4; time += 0.1) { d.hollow.state = 0; d.hollow.targetX = target.x; d.hollow.targetZ = target.z; d.simulate(0.1); if (d.hollow.crawlspace) { result.crawls++; break; } }
       d.hollow.isActive = false;
     }

@@ -30,6 +30,9 @@ const DIFFICULTY_PRESETS = {
     staminaFactor: 1.0,         // multiplies how long a full bar of stamina lasts. It does not change how fast it refills.
     phantomFactor: 1.0,         // multiplies how many apparitions a descent has, and divides the wait between them.
                                 // 0 means none at all, not even the ones that stand at fixed places.
+    arrivalFactor: 1.0,         // how soon the Hollow comes by itself in a generated station (08-arrivals.js): it divides
+                                // the wait in TUNING.hollowArrivalQuietSeconds. 2 is in half the time. 0: it only comes when
+                                // Generator 2 is started, as it always does in Kessel-9.
     checkpointsEnabled: true    // false: one life. Being caught ends the descent; there is no resuming from a checkpoint.
   },
   standard: {
@@ -44,6 +47,7 @@ const DIFFICULTY_PRESETS = {
     angerFactor: 1.0,
     staminaFactor: 1.0,
     phantomFactor: 1.0,
+    arrivalFactor: 1.0,         // it wakes four to seven quiet minutes after you leave the lift, sooner for every noise
     checkpointsEnabled: true
   },
   nightmare: {
@@ -58,6 +62,7 @@ const DIFFICULTY_PRESETS = {
     angerFactor: 1.2,
     staminaFactor: 1.0,
     phantomFactor: 1.4,
+    arrivalFactor: 1.5,         // two minutes forty to four minutes forty
     checkpointsEnabled: true
   }
 };
@@ -71,7 +76,8 @@ const DIFFICULTY_PRESETS = {
 // TUNING in 09-difficulty.js, so it stays true when TUNING changes.
 // A custom threat level starts out as a copy of Standard.
 const CUSTOM_DIFFICULTY_OPTIONS = [
-  { key: 'hollowEnabled', kind: 'switch', label: 'The Hollow', onText: 'It comes once the power is on.', offText: 'It never appears.' },
+  { key: 'hollowEnabled', kind: 'switch', label: 'The Hollow', onText: 'It is down there.', offText: 'It never appears.' },
+  { key: 'arrivalFactor', kind: 'choice', label: 'When it comes', choices: [[0, 'With the power'], [0.5, 'Late'], [1, 'Normal'], [1.5, 'Soon'], [3, 'Very soon']] },
   { key: 'stillsEnabled', kind: 'switch', label: 'The Stills', onText: 'They move while nothing is scanning them.', offText: 'They stay ordinary statues.' },
   { key: 'hollowSpeedFactor', kind: 'percent', label: 'Hollow speed', minimum: 0.7, maximum: 1.4, step: 0.05 },
   { key: 'hearingFactor', kind: 'percent', label: 'Hollow hearing', minimum: 0.5, maximum: 1.6, step: 0.05 },
@@ -312,10 +318,13 @@ const TUNING = {
                                       // as this many steps of walking when it works out the shortest way ...
   hollowCrawlStepsPerMetre: 1.5,      // ... and every metre crawled counts as this many. Raise both and it only goes up
                                       // when a lock leaves it no choice; lower them and it takes short cuts over your head.
-  hollowHatchTilesPerExtra: 260,      // a locked-off part of the station gets one hatch, plus one more for every so many
-                                      // square metres of floor ...
-  hollowHatchMostPerPart: 3,          // ... up to this many ...
-  hollowHatchLeastMetresApart: 10,    // ... and never two closer together than this
+  // The hatches are its second way through the whole station, not only a way round locked doors: the station is
+  // cut into the pieces its doors can shut off (keycard doors, the lift door, and the powered doors, which are
+  // shut to it until the mains is on), and each piece gets hatches by its size.
+  hollowHatchSmallestPieceTiles: 8,   // a piece smaller than this many square metres of floor gets none (a gap between two doors)
+  hollowHatchTilesPerExtra: 120,      // a piece gets one hatch, plus one more for every so many square metres of floor ...
+  hollowHatchMostPerPart: 6,          // ... up to this many ...
+  hollowHatchLeastMetresApart: 9,     // ... and never two of a piece closer together than this
 
   // ---- Breaking a door down (see 08-crawlspace.js) ----
   // Hunting, with a keycard door shut between it and you that you have the card for, it goes at the door first.
@@ -393,7 +402,13 @@ const TUNING = {
                                       // with three 75 %. 0 = the same from start to finish. This multiplies with the threat
                                       // level's pressureFactor.
   directorReliefShortestSeconds: 12,  // however much the cycle is sped up, a breather is never shorter than this
-  hollowWakeDelaySeconds: 6,        // seconds between starting the generator and the Hollow appearing at the shaft
+  hollowWakeDelaySeconds: 6,        // seconds between starting the generator and the Hollow appearing at the shaft, if it was still asleep
+  // When it comes by itself (08-arrivals.js). In a generated station it does not wait for the generator.
+  hollowArrivalQuietSeconds: [240, 420], // with nothing making a sound it wakes this long after you leave the lift: somewhere between the
+                                    // two, drawn afresh for every descent. A threat level's arrivalFactor divides it (Nightmare: 1.5).
+  arrivalQuietNoiseRadius: 4,       // a noise that carries no further than this takes no time off the wait: a walking step, the scanner's hum
+  arrivalSecondsPerNoiseMetre: 0.3, // a louder one takes this many seconds off for every metre it carries beyond that: a door (8 m) 1.2 s,
+                                    // a running step (14 m) 3 s, a full sweep (22 m) 5.4 s, a small generator starting (30 m) 7.8 s
   hollowImprintSeconds: 4,        // how long the red points a scan leaves on it stay visible (maximum 63)
 
   // ---- The Stills (calibration dummies) ------------------------------------
@@ -496,6 +511,8 @@ const RADIO_MESSAGES = {
   firstSpoolOfMany: 'That is one. Crew 2 logged more of them. One is in the calibration store, one is at the shaft, and the rest are wherever they left them.',
   generatorStarted: 'We see the load up here. Powered doors should answer now.',
   generatorFollowUp: 'Odd. The motion sensor in the shaft chamber just tripped. Probably the mains coming back.',
+  // Said when it wakes by itself, in a generated station: with nothing to blame it on (08-arrivals.js).
+  shaftSensorTripped: 'Odd. The motion sensor in the shaft chamber just tripped, and you are nowhere near it. Keep the noise down.',
   keycardTaken: 'That card opens the keycard doors. Shaft 9 is behind one of them.',
   // Only in stations with more than one keycard: said for every card except the last.
   lowerKeycardTaken: 'That card opens some of the doors. Not the way to Shaft 9. There is another card further in.',
@@ -536,12 +553,14 @@ const RADIO_MESSAGES = {
 
 // TWEAK: when Dispatch speaks. Each entry: something that happens (`when`), the line of RADIO_MESSAGES he says,
 // and how many seconds after it. `onlyWithHollow: true` leaves a line out on a threat level with no Hollow.
+// `ifItWasAsleep: true` leaves one out if the Hollow is already about when the thing happens.
 // `ifCarLeaves: true` keeps a line for a descent where the car goes back up when you step out (alone), and
 // `ifCarStays: true` for one where it stays (down there with others).
 // `ifSpools: 3` keeps a line for stations with exactly that many survey spools, `unlessSpools: 3` for the others:
 // two of the recordings count ("two more", "That is two"), which is only true where there are three.
 // What can happen:
 //   leftLift, mainsOn, firstSpool, allSpools, keycard (any card), lowerKeycard, lastKeycard,
+//   hollowArrives   the Hollow has woken by itself, before the mains was on or without it (08-arrivals.js)
 //   stillsWake      the Stills of a room have woken: a line that goes with that room, whatever you came for
 //   enter:NAME      the first time you set foot in a room, by the name on its door: 'enter:PUMP HALL B'
 // A line about a quest is not here but with its quest (`tell` in 09-quests.js). Three lines are said from the
@@ -556,7 +575,8 @@ const DISPATCH_CUES = [
   { when: 'stillsWake', line: 'stillsWake', seconds: 1.5, unlessSpools: 3 },
   { when: 'allSpools', line: 'allSpools', seconds: 1.5 },
   { when: 'mainsOn', line: 'generatorStarted', seconds: 4.5 },
-  { when: 'mainsOn', line: 'generatorFollowUp', seconds: 11, onlyWithHollow: true },
+  { when: 'mainsOn', line: 'generatorFollowUp', seconds: 11, onlyWithHollow: true, ifItWasAsleep: true },
+  { when: 'hollowArrives', line: 'shaftSensorTripped', seconds: 4, onlyWithHollow: true },
   { when: 'lastKeycard', line: 'keycardTaken', seconds: 1.5 },
   { when: 'lowerKeycard', line: 'lowerKeycardTaken', seconds: 1.5 }
 ];

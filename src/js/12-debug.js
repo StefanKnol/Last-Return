@@ -13,7 +13,11 @@ const DEBUG_MAXIMUM_LINE_VERTICES = 6000; // how many line ends the renderer can
 const debugState = {
   isPanelOpen: false,
   hasBeenUsedThisRun: false,
-  options: {} // the switches; src/dev/10-debug.js adds them
+  options: {}, // the switches; src/dev/10-debug.js adds them
+  // Set by the tests (tools/browser-harness.js), never by the game: nothing arrives by itself, whatever the threat
+  // level says, so that a check about something else is not walked in on. The same as the switch "Nothing arrives
+  // by itself" in debug mode, which a new page starts with off.
+  areArrivalsHeld: false
 };
 
 // Filled in by src/dev/10-debug.js.

@@ -99,6 +99,7 @@ function emitNoise(x, z, radius) {
 }
 
 function hearNoise(x, z, radius) {
+  noteNoiseForArrivals(x, z, radius); // what is not here yet comes sooner for it (08-arrivals.js)
   const effectiveRadius = radius * game.difficulty.hearingFactor * getHollowHearingBoost();
   if (debugHooks.recordNoise) debugHooks.recordNoise(x, z, effectiveRadius);
   if (!hollow.isActive || hollow.graceTimer > 0 || debugState.options.creaturesIgnorePlayer) return;
@@ -510,6 +511,7 @@ function moveHollowToward(targetX, targetZ, speed, dt) {
     } else if (field[currentIndex] > 0 && findHollowHatchAtTile(currentIndex) && findHollowCrawlFrom(findHollowHatchAtTile(currentIndex), field)) {
       // Under a ceiling hatch, and the shortest way on is up through it: stand right under it, then climb in.
       const hatch = findHollowHatchAtTile(currentIndex);
+      if (chooseDoorBeforeCrawling()) return 0; // (hunting, with a door in its face: the door first. 08-crawlspace.js)
       if (distanceBetweenPoints(figure.x, figure.z, hatch.x, hatch.z) < 0.25) {
         beginHollowCrawl(hatch, findHollowCrawlFrom(hatch, field));
         return 0;

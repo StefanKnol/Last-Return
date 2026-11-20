@@ -13,6 +13,7 @@ const dispatchDirections = {
   firstSpoolOfMany: 'The same, a little wearier: the list is longer than he would like. Only on a Survey order with more than three spools.',
   generatorStarted: 'Matter-of-fact, eyes on a gauge.',
   generatorFollowUp: 'Mild curiosity on "Odd." Then talks himself out of it. Not worried.',
+  shaftSensorTripped: 'The same "Odd." as the line above, but this time he has nothing to blame it on, and it shows. The last sentence is an order, quietly given.',
   keycardTaken: 'Helpful, brief.',
   generatorNoFuel: 'Reading it off a screen. Mildly annoyed at the station, not at you. Said the first time any generator will not start for want of fuel.',
   generatorsWanted: 'Starts as a routine correction. Slows down on the last sentence: he knows what noise means down there. Only on a Restart order, a little after Generator 2 starts.',
