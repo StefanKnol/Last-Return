@@ -1238,6 +1238,50 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; if (tripod) d.removeLooseObject(tripod); }, tripodIds[0]);
   await fine(0.3);
 
+  // ---- A scan grenade goes off in every game when the game that moves it says so ----
+  // Only the browser that moves a thing knows when it landed, and a grenade goes off a moment after it lands. So
+  // that browser says when each scan begins, and the others begin theirs then: not when the fuse runs out in
+  // their own game, seconds later. The one thrown here is the bouncing betty, which jumps before each of its
+  // scans: the other throws it, so it is theirs to move while it flies and the host's whenever it lies still.
+  const bettyIds = [];
+  for (const page of [a, b]) bettyIds.push(await page.evaluate((lane) => lane ? window.lastReturnDebug.createLooseObject('bouncingBetty', lane.x + lane.wayX * 1.7, lane.floor + 0.15, lane.z + lane.wayZ * 1.7, 0).id : 0, lane));
+  await fine(1.5);
+  const bettyIn = (page) => page.evaluate((id) => {
+    const d = window.lastReturnDebug, betty = d.looseObjects.filter((object) => object.id === id)[0];
+    return betty ? { isArmed: betty.armedTime >= 0, isScanning: betty.burstSeconds > 0 && !betty.isSpent, done: betty.burstsDone, isSpent: betty.isSpent, height: Math.round((betty.y - d.getFloorHeightAt(betty.x, betty.z)) * 100) / 100,
+      wanted: d.getLooseNumber(betty, 'scanGrenadeBursts'), fuse: d.getLooseNumber(betty, 'scanGrenadeFuseSeconds') } : null;
+  }, bettyIds[0]);
+  await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.5; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+  await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, bettyIds[0]);
+  await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
+  await fine(0.5);
+  await b.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'setOff', id: id }), bettyIds[0]);
+  for (let turn = 0; turn < 20 && !([await bettyIn(a), await bettyIn(b)].every((betty) => betty !== null && betty.isArmed)); turn++) await fine(0.2);
+  const bettyArmed = [await bettyIn(a), await bettyIn(b)];
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.player.pitch = 0; d.releaseHeldLooseObject(0.4); });
+  // Watched a tenth of a second at a time, in both games: when each first saw it scan (in tenths of a second
+  // since it was thrown), and the lowest it was above the floor in each while its light was on. (Spent, its light
+  // is off: one game is done a moment before the other, and by the next look the thing has come down.)
+  const bettySeen = [{ firstScanAt: -1, lowestScanning: 99, scansSeen: 0, wasScanning: false }, { firstScanAt: -1, lowestScanning: 99, scansSeen: 0, wasScanning: false }];
+  let bettyNow = bettyArmed;
+  for (let turn = 0; turn < 260 && !(bettyNow[0] && bettyNow[0].isSpent && bettyNow[1] && bettyNow[1].isSpent); turn++) {
+    await fine(0.1);
+    bettyNow = [await bettyIn(a), await bettyIn(b)];
+    bettyNow.forEach((betty, index) => {
+      if (!betty) return;
+      const seen = bettySeen[index];
+      if (betty.isScanning) { if (seen.firstScanAt < 0) seen.firstScanAt = turn; seen.lowestScanning = Math.min(seen.lowestScanning, betty.height); if (!seen.wasScanning) seen.scansSeen++; }
+      seen.wasScanning = betty.isScanning;
+    });
+  }
+  check('a scan grenade the other throws goes off in both games a moment after it lands, long before its fuse is out, and in both at the same moment',
+    bettyIds[0] > 0 && bettyIds[0] === bettyIds[1] && bettyArmed.every((betty) => betty !== null && betty.isArmed) && bettySeen.every((seen) => seen.firstScanAt >= 0 && seen.firstScanAt < (bettyArmed[0].fuse - 2) * 10) &&
+    Math.abs(bettySeen[0].firstScanAt - bettySeen[1].firstScanAt) <= 5, [bettyIds, bettySeen]);
+  check('the bouncing betty scans as often as it says in both games, each time from the air in both, and is spent in both',
+    bettyNow.every((betty) => betty !== null && betty.isSpent && betty.done === betty.wanted && betty.wanted >= 2) && bettySeen.every((seen) => seen.scansSeen >= bettyNow[0].wanted - 1 && seen.lowestScanning > 0.3), [bettyNow, bettySeen]);
+  for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, betty = d.looseObjects.filter((object) => object.id === id)[0]; if (betty) d.removeLooseObject(betty); }, bettyIds[0]);
+  await fine(0.3);
+
   // ---- Pockets: what is in whose pockets is the same in both games ----
   const pocketIds = [];
   for (const page of [a, b]) pocketIds.push(await page.evaluate((lane) => {

@@ -150,6 +150,8 @@ const SOUND_BOARD_ENTRIES = [
     play: function () { playScanGrenadeSound('arm', getSoundBoardListenerX(), 1.2, getSoundBoardSourceZ()); } },
   { group: 'You', key: 'scanGrenadeBurst', level: 'scanGrenade', label: 'A scan grenade goes off', hint: 'A crack, then a whine that climbs for as long as its light lasts. The Hollow comes to where it went off.', seconds: 1.5, hasPlace: true,
     play: function () { playScanGrenadeSound('burst', getSoundBoardListenerX(), 0.2, getSoundBoardSourceZ()); } },
+  { group: 'You', key: 'scanGrenadeHop', level: 'scanGrenade', label: 'A bouncing betty jumps', hint: 'Before each of its scans: a thump and a spring let go. Its light comes on when it is nearly at the top.', seconds: 0.3, hasPlace: true,
+    play: function () { playScanGrenadeSound('hop', getSoundBoardListenerX(), 0.1, getSoundBoardSourceZ()); } },
   { group: 'You', key: 'looseHandlingPickUp', level: 'looseHandling', label: 'Taking an object in your hands', seconds: 0.4, play: function () { playLooseObjectHandlingSound('metal', true); } },
   { group: 'You', key: 'looseHandlingThrow', level: 'looseHandling', label: 'Throwing it', seconds: 0.5, play: function () { playLooseObjectHandlingSound('metal', false); } },
   ...createSoundBoardMetalPair({ group: 'You', key: 'ventCrawl', level: 'ventCrawl', label: 'Crawling in a vent', hint: 'A crouched footstep and the sheet metal under you, as in play.', seconds: 0.8,

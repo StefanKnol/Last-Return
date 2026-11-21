@@ -27,6 +27,7 @@ function check(description, condition, detail) {
       d.loadStation('classic', 0);
       d.game.flags.hasLeftLift = true;
       d.hollow.isActive = false;
+      d.tuning.pocketCount = 4
       d.setDebugOption('freezeCreatures', true);
       d.clearMessages();
       d.teleport(d.playerStart.x, d.playerStart.z, 0);
@@ -56,8 +57,10 @@ function check(description, condition, detail) {
     return { pocketed: pocketed.filter((key) => !d.looseObjectKinds[key].isDesigned), count: d.tuning.pocketCount, all: Object.keys(d.looseObjectKinds).length,
       marks: pocketed.filter((key) => d.looseObjectKinds[key].isDesigned).map((key) => [key, d.looseObjectKinds[key].worksLike, d.looseObjectKinds[d.looseObjectKinds[key].worksLike].pocket === true]) };
   });
-  check('three kinds of thing go into a pocket, the scan grenade, the first aid kit and the survey spool (and whatever is a better mark of one of them), and you have four pockets',
-    kinds.pocketed.join() === 'firstAidKit,scanGrenade,spool' && kinds.marks.every((mark) => mark[2]) && kinds.count === 4 && kinds.all > 10, kinds);
+  // (How many pockets you have is a number of the game's, tuned like any other: what is checked of it here is that
+  // it is one the screen has places for. The checks about what four pockets do give themselves four: lab.fresh.)
+  check('three kinds of thing go into a pocket, the scan grenade, the first aid kit and the survey spool (and whatever is a better mark of one of them), and you have pockets: at least one, and no more than the four the screen has places for',
+    kinds.pocketed.join() === 'firstAidKit,scanGrenade,spool' && kinds.marks.every((mark) => mark[2]) && Number.isInteger(kinds.count) && kinds.count >= 1 && kinds.count <= 4 && kinds.all > 10, kinds);
 
   // --- in and out ---
   const inAndOut = await inGame(() => {
@@ -244,19 +247,24 @@ function check(description, condition, detail) {
     d.simulate(0.1);
   });
   await drawFrames(phone.page, 3);
-  const phoneCarrying = await phone.page.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, buttonsHidden: document.getElementById('touch-pockets').hidden,
-    labels: [0, 1, 2, 3].map((slot) => document.getElementById('touch-pocket-' + slot).textContent), held: window.lastReturnDebug.getHeldLooseObject() !== null }));
-  await phone.page.tap('#touch-pocket-1');
+  // (With as many pockets as the game gives you: the phone's buttons are tied to them when the page starts.)
+  const phoneCarrying = await phone.page.evaluate(() => ({ mode: window.lastReturnDebug.game.mode, buttonsHidden: document.getElementById('touch-pockets').hidden, count: window.lastReturnDebug.tuning.pocketCount,
+    labels: [0, 1, 2, 3].map((slot) => document.getElementById('touch-pocket-' + slot).textContent), held: window.lastReturnDebug.getHeldLooseObject() !== null,
+    shown: [0, 1, 2, 3].map((slot) => document.getElementById('touch-pocket-' + slot).getBoundingClientRect().width > 0) }));
+  const phonePocket = Math.min(1, phoneCarrying.count - 1); // the pocket that is tapped: the second, if there is one
+  await phone.page.tap('#touch-pocket-' + phonePocket);
   await drawFrames(phone.page, 3);
   const phoneStowed = await phone.page.evaluate(() => ({ pockets: window.lastReturnDebug.getOwnPockets().map((object) => object ? object.kindKey : null), held: window.lastReturnDebug.getHeldLooseObject() !== null,
     labels: [0, 1, 2, 3].map((slot) => document.getElementById('touch-pocket-' + slot).textContent), buttonsHidden: document.getElementById('touch-pockets').hidden }));
-  await phone.page.tap('#touch-pocket-1');
+  await phone.page.tap('#touch-pocket-' + phonePocket);
   await drawFrames(phone.page, 3);
   const phoneOut = await phone.page.evaluate(() => ({ pockets: window.lastReturnDebug.getOwnPockets().map((object) => object ? object.kindKey : null), held: window.lastReturnDebug.getHeldLooseObject() !== null }));
-  check('on a phone, with a first aid kit in the beam, four buttons for the pockets appear',
-    phoneCarrying.mode === 'playing' && phoneCarrying.held && !phoneCarrying.buttonsHidden && phoneCarrying.labels.join('|') === 'EMPTY|EMPTY|EMPTY|EMPTY', phoneCarrying);
+  check('on a phone, with a first aid kit in the beam, a button appears for each pocket you have, and none for a pocket you do not have',
+    phoneCarrying.mode === 'playing' && phoneCarrying.held && !phoneCarrying.buttonsHidden && phoneCarrying.count >= 1 &&
+    phoneCarrying.labels.every((label, slot) => slot >= phoneCarrying.count || label === 'EMPTY') && phoneCarrying.shown.every((isShown, slot) => isShown === (slot < phoneCarrying.count)), phoneCarrying);
   check('a tap on one puts the kit into that pocket, and a tap on it again takes it out',
-    phoneStowed.pockets.join() === ',firstAidKit,,' && !phoneStowed.held && phoneStowed.labels[1] === 'FIRST AID KIT' && !phoneStowed.buttonsHidden &&
+    phoneStowed.pockets.length === phoneCarrying.count && phoneStowed.pockets.every((thing, slot) => thing === (slot === phonePocket ? 'firstAidKit' : null)) && !phoneStowed.held &&
+    phoneStowed.labels[phonePocket] === 'FIRST AID KIT' && !phoneStowed.buttonsHidden &&
     phoneOut.pockets.every((thing) => thing === null) && phoneOut.held, [phoneStowed, phoneOut]);
   check('no script errors were reported on the phone', phone.problems.length === 0, phone.problems);
   await phone.browser.close();

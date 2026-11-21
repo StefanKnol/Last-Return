@@ -19,6 +19,7 @@
 
 - shop in item collection mode (repo mode)
   - what the tools sell for is set already and is meant to be far below what they cost: a scan grenade 15, a scanner tripod 60, a first aid kit 20
+  - ~~a rare and expensive consumable: the bouncing betty, a scan grenade that jumps and scans from the air several times~~ (in: `src/objects/bouncingBetty.json`, the scan grenade's mark 5, and `hopScanGrenade` in 08-loose-objects.js. Sells for 75; found in about one grenade in sixty-six until there is a shop to buy it in)
 
 - Even better models
   - player models (overdone and funny, only visible when scanning)

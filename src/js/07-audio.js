@@ -1341,8 +1341,10 @@ function playHaulBayPing(x, y, z) {
   playTone({ waveform: 'triangle', frequency: 2640, duration: 0.25, gain: 0.15 * level, attack: 0.002, delay: 0.22, destination: destination });
 }
 
-// A scan grenade at (x, y, z). `what` is 'arm' (the pin: a click and a rising tick) or 'burst' (it goes off: a
-// whine that climbs for as long as its light lasts, a crack at the start, and hiss).
+// A scan grenade at (x, y, z). `what` is 'arm' (the pin: a click and a rising tick), 'burst' (it goes off: a
+// whine that climbs for as long as its light lasts, a crack at the start, and hiss; `seconds` is how long that
+// is, for a make whose scan is not as long as the plain one's) or 'hop' (a bouncing betty throws itself into
+// the air: the thump of its charge and a spring let go).
 // A scanner tripod: 'on' (a click and two notes up), 'off' (a click and two notes down), 'pulse' (a tick and a
 // short whine as its light goes out), from where it is.
 function playTripodSound(what, x, y, z) {
@@ -1361,7 +1363,7 @@ function playTripodSound(what, x, y, z) {
   playTone({ waveform: 'triangle', frequency: isOn ? 990 : 660, duration: 0.12, gain: 0.2 * level, delay: 0.15, destination: destination });
 }
 
-function playScanGrenadeSound(what, x, y, z) {
+function playScanGrenadeSound(what, x, y, z, seconds) {
   if (!isAudioReady()) return;
   const destination = createTemporaryPanner(x, y, z);
   if (!destination) return;
@@ -1371,7 +1373,13 @@ function playScanGrenadeSound(what, x, y, z) {
     playTone({ waveform: 'triangle', frequency: 880, frequencyEnd: 1320, duration: 0.18, gain: 0.18 * level, delay: 0.05, destination: destination });
     return;
   }
-  const seconds = TUNING.scanGrenadeBurstSeconds;
+  if (what === 'hop') {
+    playNoiseBurst({ duration: 0.07, frequency: 260, gain: 1.6 * level, attack: 0.002, useBrownNoise: true, destination: destination });
+    playNoiseBurst({ duration: 0.03, filterType: 'bandpass', frequency: 1900, resonance: 1.5, gain: 0.9 * level, attack: 0.001, destination: destination });
+    playTone({ waveform: 'triangle', frequency: 190, frequencyEnd: 620, duration: 0.16, gain: 0.3 * level, attack: 0.004, delay: 0.01, destination: destination });
+    return;
+  }
+  seconds = seconds > 0 ? seconds : TUNING.scanGrenadeBurstSeconds;
   playNoiseBurst({ duration: 0.05, filterType: 'bandpass', frequency: 2600, resonance: 0.9, gain: 3.2 * level, attack: 0.001, destination: destination });
   playResonantNoise({ frequency: 500, frequencyEnd: 2600, resonance: 24, duration: seconds, gain: 0.5 * level, attack: 0.03, reverbAmount: 0.8, destination: destination });
   playTone({ waveform: 'sine', frequency: 300, frequencyEnd: 1900, duration: seconds, gain: 0.12 * level, attack: 0.04, reverbAmount: 0.5, destination: destination });
