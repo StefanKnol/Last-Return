@@ -1,0 +1,11 @@
+{
+  "label": "Surveyor",
+  "skeleton": "person",
+  "scansAs": "still",
+  "playerSkin": false,
+  "proportions": { "torsoLength": 0.56, "neckLength": 0.09, "headRadius": 0.07, "headLength": 0.12, "shoulderWidth": 0.255, "hipWidth": 0.11, "upperArm": 0.325, "foreArm": 0.315, "handLength": 0.125, "thigh": 0.5531, "shin": 0.4318, "footLength": 0.045, "footRadius": 0.035, "torsoRadius": 0.075, "limbRadius": 0.025, "legRadius": 0.045, "jointRadius": 0.015 },
+  "hides": [],
+  "parts": [
+    { "bone": "chest", "mirror": false, "shape": "cone", "from": [0,-1.0947,0], "to": [0,0.395,0], "radius": 0.2998 }
+  ]
+}
