@@ -23,6 +23,9 @@
 //                  'passage' (no corridor at all: a way through the rock that winds, 04-caverns.js)
 //   corridorWidth  how many tiles wide its corridors are planned. Left out: two. A passage wants three, to wind in.
 //   corridorName   what its corridors are called on the map: CORRIDOR A, DRIFT A, PASSAGE A
+//   roomDressing   what the place has done to the rooms that were built in it, on top of what they have in them
+//                  everywhere: 'mine' (props under the roof, bars, what came down) or 'cave' (what grows from a
+//                  roof and through a floor). Left out: nothing (dressBuiltRoom, 04-caverns.js)
 //   scrawls        what may be scratched on its corridor walls
 //
 // To add a location: add an entry here, give it rooms (tick it for rooms in the workshop, or list rooms written
@@ -60,7 +63,7 @@ const LOCATIONS = {
     signTexts: { 'KESSEL-9 · INTAKE LEVEL': 'CORVEN DEEP · No. 2 LEVEL', 'SECURITY': 'SHIFT OFFICE' },
     // What was built down there is brick; what was only dug is the rock itself.
     look: 'masonry', roomLooks: { pumpHall: 'rock', shaftChamber: 'rock', stairwell: 'rock', floodedRoom: 'rock', oldWorkings: 'rock', pipeGallery: 'rock', storageHall: 'rock' }, corridorLook: 'rock',
-    corridorStyle: 'drift', corridorName: 'DRIFT',
+    corridorStyle: 'drift', corridorName: 'DRIFT', roomDressing: 'mine',
     scrawls: CORRIDOR_SCRAWLS.concat(['IT CAME UP THE SHAFT', 'LAMPS OUT', 'NOT THE ROOF. LISTEN'])
   },
   // A cave that somebody built a works into: what was built is still what the job is about (the lift, the pumps,
@@ -74,7 +77,7 @@ const LOCATIONS = {
     roomNames: {},
     signTexts: { 'KESSEL-9 · INTAKE LEVEL': 'VESPER POT · INTAKE WORKS' },
     look: 'panel', roomLooks: { pumpHall: 'rock', shaftChamber: 'rock', stairwell: 'rock', floodedRoom: 'rock', oldWorkings: 'rock', pipeGallery: 'rock' }, corridorLook: 'rock',
-    corridorStyle: 'passage', corridorWidth: 3, corridorName: 'PASSAGE',
+    corridorStyle: 'passage', corridorWidth: 3, corridorName: 'PASSAGE', roomDressing: 'cave',
     scrawls: CORRIDOR_SCRAWLS.concat(['THIS WAY OUT', 'IT KNOWS THE CAVE', 'NO ECHO HERE'])
   }
 };

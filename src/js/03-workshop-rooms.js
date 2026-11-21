@@ -288,7 +288,12 @@ function normalizeDesignedItem(source, room) {
     item.x = Math.floor(normalizeDesignedNumber(source.x, 0, 0, room.width - 1));
     item.z = Math.floor(normalizeDesignedNumber(source.z, 0, 0, room.depth - 1));
   }
-  return normalizeDesignedFields(item, source, type.fields);
+  normalizeDesignedFields(item, source, type.fields);
+  // How often it is there, from 0 to 1: a thing may be in one station's room of this kind and not in the
+  // next one's. A thing that is always there says nothing about it (and so does every file from before this).
+  const chance = Math.round(normalizeDesignedNumber(source.chance, 1, 0.05, 1) * 20) / 20;
+  if (chance < 1) item.chance = chance;
+  return item;
 }
 
 // Returns a clean copy of a room file: everything present, in range, and of the right kind.
@@ -569,12 +574,19 @@ function withQuarterTurnsAbout(pivotX, pivotZ, quarterTurns, action) {
 // it receives one [first, end] pair per item, saying which entries of worldProps that item turned into.
 // `shape` is what resolveDesignedRoomShape made of the room (null for a plain box). In a room with a shape, a
 // thing stands on the floor of the tile its middle is over, and under that tile's ceiling.
-function furnishDesignedRoom(room, random, roomName, builtRanges, shape) {
+// A thing that is only sometimes there (`chance`) is left out as often as that says, unless `keepsEverything`
+// (the workshop, where every thing has to be there to be worked on). Leaving a thing out only ever leaves more
+// floor to walk on, so a room that is right with everything in it is right with less.
+function furnishDesignedRoom(room, random, roomName, builtRanges, shape, keepsEverything) {
   const context = { yaw: 0, random: random, ceiling: room.ceiling, roomName: roomName || room.name, room: room, shape: shape || null };
   const roomFloorY = placement.offsetY;
   for (const item of room.items) {
     const type = ROOM_ITEM_TYPES[item.type];
     const firstProp = worldProps.length;
+    if (item.chance !== undefined && random() >= item.chance && !keepsEverything) {
+      if (builtRanges) builtRanges.push([firstProp, firstProp]);
+      continue;
+    }
     const tile = shape && type.placement === 'floor' ? findDesignedShapeTile(shape, item.x, item.z) : -1;
     context.ceiling = tile >= 0 ? shape.ceiling[tile] - shape.floor[tile] : room.ceiling;
     if (tile >= 0) placement.offsetY = roomFloorY + shape.floor[tile];

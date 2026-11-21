@@ -25,6 +25,7 @@ const roomWorkshop = {
   selectedIndex: -1,     // which of room.items is selected
   seed: 1,               // for the things that come out a little different every time (shelf contents, crate stacks)
   previewLocation: '',   // which location the room is shown in: a key of LOCATIONS, or '' for the first one it belongs to
+  showsAsAStationHasIt: false, // things that are only sometimes there are left out as a station would leave them out
   showUnwalkable: false,
   needsRebuild: false,
   itemRanges: [],        // per item: which worldProps it became
@@ -213,11 +214,16 @@ function rebuildRoomWorkshopWorld() {
   const random = createSeededRandomGenerator(state.seed);
   state.itemRanges.length = 0;
   if (state.room) {
-    furnishDesignedRoom(state.room, random, name, state.itemRanges, definition.shape);
+    furnishDesignedRoom(state.room, random, name, state.itemRanges, definition.shape, !state.showsAsAStationHasIt);
     // Show what a spool looks like on the spot it may be left on.
     if (definition.itemSpot) addSurveySpool(OBJECT_SPOOL_1, definition.itemSpot[0], definition.itemSpot[1], definition.itemSpot[2], 'SPOOL');
   } else {
     definition.furnish(random, name);
+    // What the place it is shown in has done to it since it was built, as a station there would have it (04-caverns.js).
+    const dressing = getLocation(locationKey).roomDressing;
+    if (dressing && !definition.isGrown) {
+      dressBuiltRoom({ key: state.key, zone: 1, startX: WORKSHOP_ORIGIN_X, startZ: WORKSHOP_ORIGIN_Z, endX: WORKSHOP_ORIGIN_X + rect[2] - rect[0], endZ: WORKSHOP_ORIGIN_Z + rect[3] - rect[1] }, random, dressing);
+    }
   }
   clearPlacement();
   if (state.key !== 'liftLobby' && !definition.shape && !definition.isGrown) {
@@ -247,6 +253,7 @@ function describeRoomWorkshopItem(item, itemIndex) {
   let text = (itemIndex + 1) + '. ' + (item.type === 'sign' ? 'Lettering "' + item.text + '"' : type.label.replace(/ \(.*\)$/, ''));
   if (type.placement === 'wall') text += ' · ' + item.wall + ' wall';
   else text += ' · ' + formatWorkshopNumber(item.x) + ', ' + formatWorkshopNumber(item.z);
+  if (item.chance !== undefined) text += ' · there ' + Math.round(item.chance * 100) + '% of the time';
   return text;
 }
 
@@ -315,8 +322,17 @@ function findRoomWorkshopProblems() {
     }
   });
 
-  // The spot for a spool or the keycard must be within arm's reach of somewhere a player can stand.
+  // The spot for a spool or the keycard must be within arm's reach of somewhere a player can stand, and on
+  // something that is always there.
   if (room.itemSpot) {
+    room.items.forEach(function (item, itemIndex) {
+      const bounds = item.chance !== undefined ? getRoomWorkshopItemBounds(itemIndex) : null;
+      if (!bounds || bounds.maximumY > room.itemSpot.y + (shape && findDesignedShapeTile(shape, room.itemSpot.x, room.itemSpot.z) >= 0 ? shape.floor[findDesignedShapeTile(shape, room.itemSpot.x, room.itemSpot.z)] : 0) + 0.1) return;
+      const spotWorldX = WORKSHOP_ORIGIN_X + room.itemSpot.x, spotWorldZ = WORKSHOP_ORIGIN_Z + room.itemSpot.z;
+      if (spotWorldX >= bounds.minimumX && spotWorldX <= bounds.maximumX && spotWorldZ >= bounds.minimumZ && spotWorldZ <= bounds.maximumZ && room.itemSpot.y > 0.1) {
+        problems.push('The spool spot is on ' + describeRoomWorkshopItem(item, itemIndex) + ', which is not always there: the spool would hang in the air.');
+      }
+    });
     const spotX = WORKSHOP_ORIGIN_X + room.itemSpot.x, spotZ = WORKSHOP_ORIGIN_Z + room.itemSpot.z;
     const standIndex = findNearestWalkableTileIndex(spotX, spotZ);
     const standDistance = standIndex < 0 ? Infinity
@@ -806,6 +822,14 @@ function renderRoomWorkshopSelection(body) {
     else if (field.kind === 'choice') addWorkshopSelect(body, field.label, item[field.key], field.choices, function (value) { change(value); renderWorkshopPanel(); });
     else addWorkshopText(body, field.label, item[field.key], change);
   }
+  // How often a station's room of this kind has it. (Always: the file says nothing about it.)
+  state.selectedSetters.chance = addWorkshopNumber(body, 'How often it is there (%)', Math.round((item.chance === undefined ? 1 : item.chance) * 100), 5, 100, 5, function (value) {
+    beginRoomWorkshopEdit('chance');
+    if (value >= 100) delete selected().chance; else selected().chance = Math.round(value / 5) / 20;
+    finishRoomWorkshopEdit();
+  });
+  state.selectedSetters.chance.element.id = 'workshop-item-chance';
+  state.selectedSetters.chance.element.addEventListener('change', renderWorkshopPanel); // (the list below says how often, too)
   const row = addWorkshopRow(body);
   addWorkshopButton(row, 'Copy', duplicateSelectedRoomWorkshopItem, 'Ctrl+D');
   addWorkshopButton(row, 'Delete', deleteSelectedRoomWorkshopItem, 'Delete key');
@@ -847,6 +871,10 @@ function renderRoomWorkshopPanel(body) {
   addWorkshopCheckbox(body, 'Lights on (L). Off: what the scanner would show', workshop.isLit, function (isLit) { setWorkshopLights(isLit); });
   addWorkshopCheckbox(body, 'Walk instead of fly (G)', workshop.isWalking, function (isWalking) { setWorkshopWalking(isWalking); });
   addWorkshopCheckbox(body, 'Mark floor nothing can walk on (N)', state.showUnwalkable, function (isOn) { state.showUnwalkable = isOn; markWorkshopStateChanged(); });
+  if (room) {
+    addWorkshopCheckbox(body, 'Leave out what is only sometimes there, as a station might', state.showsAsAStationHasIt, function (isOn) { state.showsAsAStationHasIt = isOn; state.needsRebuild = true; markWorkshopStateChanged(); },
+      'Each thing with "How often it is there" under 100% is left out as often as that says. "Shuffle the random bits" shows another station\'s room. What is left out cannot be clicked: switch this off to work on it.').id = 'workshop-as-a-station';
+  }
   // A room looks different from place to place: what it is made of (unless it says so itself), and what is outside its doors.
   const locationChoices = Object.keys(LOCATIONS).filter(function (key) { return !room || room.locations.indexOf(key) >= 0; }).map(function (key) { return [key, LOCATIONS[key].label]; });
   if (locationChoices.length > 1) {
@@ -1225,6 +1253,7 @@ workshop.tools.rooms = {
     state.seed = Number.isFinite(stored.seed) ? clampNumber(Math.round(stored.seed), 1, 99) : 1;
     state.showUnwalkable = stored.showUnwalkable === true;
     state.previewLocation = typeof stored.previewLocation === 'string' ? stored.previewLocation : '';
+    state.showsAsAStationHasIt = stored.showsAsAStationHasIt === true;
     if (Number.isFinite(stored.growNumber)) state.growNumber = Math.max(1, Math.round(stored.growNumber));
     if (Number.isFinite(stored.growFill)) state.growFill = clampNumber(stored.growFill, 0.3, 0.55);
     if (ROOM_WORKSHOP_BRUSHES.some(function (brush) { return brush[0] === stored.brush; })) state.brush = stored.brush;
@@ -1253,6 +1282,7 @@ workshop.tools.rooms = {
     stored.seed = state.seed;
     stored.showUnwalkable = state.showUnwalkable;
     stored.previewLocation = state.previewLocation;
+    stored.showsAsAStationHasIt = state.showsAsAStationHasIt;
     stored.growNumber = state.growNumber; stored.growFill = state.growFill;
     stored.isPainting = state.isPainting;
     stored.brush = state.brush; stored.brushFloor = state.brushFloor; stored.brushCeiling = state.brushCeiling; stored.brushSize = state.brushSize;

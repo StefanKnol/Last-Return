@@ -6,6 +6,7 @@ initializeWorkshop();
 
 // For the tests (tools/workshop-test.js) and for poking at things from the browser console.
 window.lastReturnDebug.roomWorkshop = roomWorkshop;
+window.lastReturnDebug.rebuildRoomWorkshop = rebuildRoomWorkshopWorld;
 window.lastReturnDebug.creatureWorkshop = creatureWorkshop;
 window.lastReturnDebug.objectWorkshop = objectWorkshop;
 window.lastReturnDebug.soundBoard = soundBoardForTools;

@@ -1748,6 +1748,9 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey, locationKey)
     // Apparitions travel with their rooms.
     if (room.key === 'coldRoom') pushPhantom(10.7, 24.2, Math.PI + 0.7, room.zone, false);
     if (room.key === 'pumpHall') pushPhantom(62.5, 55.5, -1.9, room.zone, true);
+    // And what the place has done to a room that was built in it (04-caverns.js). A room that is grown, or made
+    // in the workshop for the place, is of the place already.
+    if (location.roomDressing && !definition.isGrown && !definition.isDesigned) dressBuiltRoom(room, random, location.roomDressing);
   }
   clearPlacement();
 

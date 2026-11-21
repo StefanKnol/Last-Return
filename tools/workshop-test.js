@@ -208,6 +208,29 @@ function checkSourcePatching() {
     await frames();
     check('and the room is as it was once the pump unit is removed', (await inPage(() => window.lastReturnDebug.roomWorkshop.room.items.length)) === 2);
 
+    // --- a thing that is only sometimes there: in one station's room of this kind and not in the next one's ---
+    await page.click('.workshop-list-entry:has-text("Table")');
+    await setNumber('workshop-item-chance', 50);
+    await page.locator('#workshop-as-a-station').check();
+    const sometimes = await inPage((index) => {
+      const debug = window.lastReturnDebug, state = debug.roomWorkshop;
+      const there = [];
+      // (Twenty of the workshop's shuffles: each is another station's room.)
+      for (let seed = 1; seed <= 20; seed++) {
+        state.seed = seed;
+        debug.rebuildRoomWorkshop();
+        there.push(state.itemRanges[index][1] > state.itemRanges[index][0] ? 1 : 0);
+      }
+      state.seed = 1;
+      return { chance: state.room.items[index].chance, there: there.join(''), problems: state.problems.slice() };
+    }, tableIndex);
+    await page.locator('#workshop-as-a-station').uncheck();
+    await frames();
+    const allThere = await inPage((index) => { const state = window.lastReturnDebug.roomWorkshop; return state.itemRanges[index][1] > state.itemRanges[index][0]; }, tableIndex);
+    check('a thing set to be there half the time is in some stations\' rooms and not in others, and is always there to be worked on',
+      sometimes.chance === 0.5 && sometimes.there.includes('1') && sometimes.there.includes('0') && sometimes.problems.length === 0 && allThere, sometimes);
+    await page.keyboard.press('Escape');
+
     // --- the shape of the room: the mouse as a brush ---
     // Where the workshop puts the room it shows (its north-west corner), read from where that is written.
     const workshopOrigin = /WORKSHOP_ORIGIN_X = (\d+), WORKSHOP_ORIGIN_Z = (\d+)/.exec(fs.readFileSync(path.join(root, 'src', 'dev', '20-workshop.js'), 'utf8')).slice(1).map(Number);
@@ -335,6 +358,8 @@ function checkSourcePatching() {
     const savedFile = fs.existsSync(roomPath) ? JSON.parse(fs.readFileSync(roomPath, 'utf8')) : null;
     check('saving writes src/rooms/testRoom.json with the table in it',
       savedFile !== null && savedFile.name === 'TEST ROOM' && savedFile.useInStations === true && savedFile.items.some((item) => item.type === 'table' && item.z === 1.5), savedFile);
+    check('and with how often the table is there, which the lettering says nothing of because it always is',
+      savedFile !== null && savedFile.items.find((item) => item.type === 'table').chance === 0.5 && savedFile.items.every((item) => item.type === 'table' || item.chance === undefined), savedFile && savedFile.items);
     check('and with where it belongs and what it is made of', savedFile !== null && Array.isArray(savedFile.locations) && savedFile.locations.join() === 'annex,' + places.other && savedFile.look === ownLook, savedFile && { locations: savedFile.locations, look: savedFile.look });
     check('and with the room\'s shape in it, as it was painted',
       savedFile !== null && Array.isArray(savedFile.tiles) && savedFile.tiles.join() === paintedTiles.join() && Object.keys(savedFile.tileKinds).length === 1, savedFile && { tiles: savedFile.tiles, tileKinds: savedFile.tileKinds });

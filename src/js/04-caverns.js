@@ -36,9 +36,12 @@ function createGrowthRandom(seed, number) {
 //   fill       how much of it starts as rock, from 0 to 1 (more: narrower, with more pillars)
 //   isLevel    true: one floor level everywhere (for water to lie on)
 //   rise       how much higher than `ceiling` the roof is where it is high
+//   pillarEvery  one pillar of rock is left standing for every so many tiles of floor (fewer tiles: more pillars)
+//   low, high  how much of the floor is a step down and a step up: the floor is laid by a number from 0 to 1 that
+//              changes slowly from place to place, down a step under `low` and up a step over `high`
 //   keepOpen   rectangles [startX, startZ, endX, endZ] that are plain floor whatever grows: for what stands in it
 function growCavern(width, depth, doors, random, options) {
-  const settings = Object.assign({ ceiling: 2.8, fill: 0.44, isLevel: false, rise: 0.9, keepOpen: [] }, options || {});
+  const settings = Object.assign({ ceiling: 2.8, fill: 0.44, isLevel: false, rise: 0.9, pillarEvery: 34, low: 0.3, high: 0.72, keepOpen: [] }, options || {});
   const count = width * depth;
   const isInside = function (x, z) { return x >= 0 && z >= 0 && x < width && z < depth; };
   const doorTiles = doors.map(function (door) { return getDesignedDoorInsideTile({ width: width, depth: depth }, door); });
@@ -139,7 +142,7 @@ function growCavern(width, depth, doors, random, options) {
   // And pillars: a tile of rock left standing where there is floor all round it, so that a big cavern cannot be
   // seen across from one end. (With floor all round it, it cuts nothing off; and no two stand side by side.)
   const pillars = [];
-  for (let wanted = Math.floor(openCount / 34), guard = 0; pillars.length < wanted && guard < 200; guard++) {
+  for (let wanted = Math.floor(openCount / settings.pillarEvery), guard = 0; pillars.length < wanted && guard < 200; guard++) {
     const x = 1 + Math.floor(random() * (width - 2)), z = 1 + Math.floor(random() * (depth - 2));
     let standsFree = !mustBeOpen[z * width + x] && !pillars.some(function (other) { return Math.abs(other[0] - x) <= 2 && Math.abs(other[1] - z) <= 2; });
     for (let offsetZ = -1; offsetZ <= 1 && standsFree; offsetZ++) for (let offsetX = -1; offsetX <= 1 && standsFree; offsetX++) if (!open[(z + offsetZ) * width + x + offsetX]) standsFree = false;
@@ -159,7 +162,7 @@ function growCavern(width, depth, doors, random, options) {
     for (let z = 0; z < depth; z++) for (let x = 0; x < width; x++) {
       if (!open[z * width + x] || isNearDoor(x, z)) continue;
       const height = smoothNoise(x * 0.24 + offsetA, z * 0.24 + offsetA * 0.61);
-      level[z * width + x] = height < 0.3 ? -1 : (height > 0.72 ? 1 : 0);
+      level[z * width + x] = height < settings.low ? -1 : (height > settings.high ? 1 : 0);
     }
     for (let hasChanged = true, pass = 0; hasChanged && pass < 20; pass++) {
       hasChanged = false;
@@ -223,10 +226,11 @@ function getDoorsOfSockets(sockets, width, depth) {
   });
 }
 
-// What stands in a cavern: stalagmites where there is room all round one, stalactites where the roof is high
-// enough to hang them out of the way, rubble, and its name chalked on the rock by whoever was here before.
-// Nothing of it can cut the cavern in two: a stalagmite stands only where every tile round it is floor, and no
-// two stand near each other.
+// What stands in a cavern: stalagmites and boulders where there is room all round one, stalactites where the
+// roof is high enough to hang them out of the way, rubble, and its name chalked on the rock by whoever was here
+// before. Nothing of it can cut the cavern in two: what is in the way stands only where every tile round it is
+// floor, and no two of those stand near each other. How much of each a kind of cavern has is its `dress`: 1 is
+// the usual amount, 0 none, and `boulders` how many of what would be stalagmites are boulders instead.
 function furnishGrownRoom(definition, shape, random, roomName) {
   const width = shape.width, depth = shape.depth, roomFloorY = placement.offsetY;
   const doors = getDoorsOfSockets(definition.sockets, width, depth);
@@ -244,6 +248,7 @@ function furnishGrownRoom(definition, shape, random, roomName) {
     placement.offsetY = roomFloorY;
   };
   if (definition.furnishCamp) definition.furnishCamp(random);
+  const dress = Object.assign({ stalagmites: 1, stalactites: 1, rubble: 1, boulders: 0 }, definition.dress || {});
 
   const openTiles = [];
   for (let z = 0; z < depth; z++) for (let x = 0; x < width; x++) if (isOpenAt(x, z)) openTiles.push([random(), x, z]);
@@ -251,7 +256,7 @@ function furnishGrownRoom(definition, shape, random, roomName) {
 
   const stalagmites = [];
   for (const entry of openTiles) {
-    if (stalagmites.length >= Math.round(openTiles.length / 20)) break;
+    if (stalagmites.length >= Math.round(openTiles.length / 20 * dress.stalagmites)) break;
     const x = entry[1], z = entry[2], index = z * width + x;
     if (isKeptClear(x, z)) continue;
     let hasRoom = true;
@@ -260,12 +265,20 @@ function furnishGrownRoom(definition, shape, random, roomName) {
     }
     if (!hasRoom || stalagmites.some(function (other) { return Math.abs(other[0] - x) <= 2 && Math.abs(other[1] - z) <= 2; })) continue;
     stalagmites.push([x, z]);
-    onTile(x, z, function (headroom) { addStalagmite(x + 0.5, z + 0.5, Math.min(headroom - 0.3, 0.9 + random() * 1.1), 0.16 + random() * 0.1); });
+    const isBoulder = random() < dress.boulders;
+    onTile(x, z, function (headroom) {
+      if (!isBoulder) { addStalagmite(x + 0.5, z + 0.5, Math.min(headroom - 0.3, 0.9 + random() * 1.1), 0.16 + random() * 0.1); return; }
+      // A boulder: one big one (it stays inside its own tile, so only that tile is lost to it) and a smaller one on its shoulder.
+      const radius = 0.3 + random() * 0.14;
+      addSphereProp(x + 0.5, radius * 0.75, z + 0.5, radius, {});
+      const angle = random() * Math.PI * 2;
+      addSphereProp(x + 0.5 + Math.cos(angle) * radius * 0.8, radius * 0.45, z + 0.5 + Math.sin(angle) * radius * 0.8, radius * 0.55, CLUTTER);
+    });
   }
   let hung = 0, strewn = 0;
   for (const entry of openTiles) {
     const x = entry[1], z = entry[2];
-    if (hung < openTiles.length / 7 && random() < 0.4) {
+    if (hung < openTiles.length / 7 * dress.stalactites && random() < 0.4 * Math.min(2, dress.stalactites)) {
       onTile(x, z, function (headroom) {
         const length = Math.min(headroom - 1.95, 0.25 + random() * 0.9);
         if (length < 0.2) return;
@@ -275,7 +288,7 @@ function furnishGrownRoom(definition, shape, random, roomName) {
     }
     // Rubble lies at the foot of the walls.
     const isByRock = !isOpenAt(x + 1, z) || !isOpenAt(x - 1, z) || !isOpenAt(x, z + 1) || !isOpenAt(x, z - 1);
-    if (isByRock && !isKeptClear(x, z) && strewn < openTiles.length / 9 && random() < 0.3) {
+    if (isByRock && !isKeptClear(x, z) && strewn < openTiles.length / 9 * dress.rubble && random() < 0.3 * Math.min(2.5, dress.rubble)) {
       strewn++;
       onTile(x, z, function () {
         const radius = 0.08 + random() * 0.14;
@@ -296,7 +309,8 @@ function furnishGrownRoom(definition, shape, random, roomName) {
 }
 
 // A catalogue entry for a cavern. `spec` is what ROOM_CATALOGUE holds for any room (name, rect, ceiling, tiers,
-// sockets, itemSpot) and `grow`: the options growCavern takes. It is a room of the cave, unless `locations`
+// sockets, itemSpot) and `grow`: the options growCavern takes; `dress`, how much of what stands in it (see
+// furnishGrownRoom); and `hasPools`, for water in its low parts. It is a room of the cave, unless `locations`
 // (keys of LOCATIONS, 03-locations.js) says where else; and a station may have three of a kind, since no two
 // are alike (`mostInAStation`).
 function createGrownRoomDefinition(spec) {
@@ -312,6 +326,12 @@ function createGrownRoomDefinition(spec) {
     if (room) room.grownShape = shape;
     definition.lastShape = shape;
     carveDesignedRoomShape(shape);
+    // Water stands where the floor is lowest.
+    if (spec.hasPools) {
+      for (let tileZ = 0; tileZ < depth; tileZ++) for (let tileX = 0; tileX < width; tileX++) {
+        if (shape.isOpen[tileZ * width + tileX] && shape.floor[tileZ * width + tileX] < 0) setTileFlagInRectangle(tileX, tileZ, tileX + 1, tileZ + 1, TILE_FLAG_WATER);
+      }
+    }
   };
   definition.furnish = function (random, roomName, room) { furnishGrownRoom(definition, room ? room.grownShape : definition.lastShape, random, roomName || spec.name); };
   return definition;
@@ -322,8 +342,20 @@ ROOM_CATALOGUE.cavernGrotto = createGrownRoomDefinition({ name: 'GROTTO', rect: 
   sockets: [[4, 7, WALL_SOUTH], [-1, 3, WALL_WEST]], grow: { fill: 0.4 } });
 ROOM_CATALOGUE.cavernChamber = createGrownRoomDefinition({ name: 'CAVERN', rect: [0, 0, 12, 10], ceiling: 3.1, tiers: [0, 1, 2],
   sockets: [[-1, 5, WALL_WEST], [12, 4, WALL_EAST], [6, 10, WALL_SOUTH]], grow: { fill: 0.43, rise: 1.2 } });
-ROOM_CATALOGUE.cavernGreat = createGrownRoomDefinition({ name: 'GREAT CHAMBER', rect: [0, 0, 17, 13], ceiling: 3.6, tiers: [1, 2],
+ROOM_CATALOGUE.cavernGreat = createGrownRoomDefinition({ name: 'GREAT CHAMBER', rect: [0, 0, 17, 13], ceiling: 3.6, tiers: [1, 2], hasPools: true,
   sockets: [[8, 13, WALL_SOUTH], [-1, 6, WALL_WEST], [17, 6, WALL_EAST], [9, -1, WALL_NORTH]], grow: { fill: 0.42, rise: 2.2 } });
+// A hall held up by what was left standing: rock pillars every few steps, nowhere a clear look across.
+ROOM_CATALOGUE.cavernPillars = createGrownRoomDefinition({ name: 'PILLAR HALL', rect: [0, 0, 14, 11], ceiling: 3.0, tiers: [0, 1, 2], mostInAStation: 2,
+  sockets: [[-1, 5, WALL_WEST], [14, 5, WALL_EAST], [7, 11, WALL_SOUTH]], grow: { fill: 0.36, pillarEvery: 11 }, dress: { stalagmites: 0.4 } });
+// Where the roof came down: tight, and full of what fell.
+ROOM_CATALOGUE.cavernChoke = createGrownRoomDefinition({ name: 'BOULDER CHOKE', rect: [0, 0, 10, 8], ceiling: 2.5, tiers: [1, 2], mostInAStation: 2,
+  sockets: [[-1, 3, WALL_WEST], [10, 4, WALL_EAST]], grow: { fill: 0.5, rise: 0.5 }, dress: { stalagmites: 1.6, boulders: 0.8, rubble: 2.5, stalactites: 0.3 } });
+// A floor in steps, more of it up or down than level.
+ROOM_CATALOGUE.cavernTerraces = createGrownRoomDefinition({ name: 'TERRACES', rect: [0, 0, 13, 9], ceiling: 3.2, tiers: [0, 1, 2], mostInAStation: 2,
+  sockets: [[6, 9, WALL_SOUTH], [3, -1, WALL_NORTH], [13, 4, WALL_EAST]], grow: { fill: 0.4, low: 0.41, high: 0.59, rise: 1.5 } });
+// High, wet, and grown full: water in its low parts, and more hanging and standing in it than anywhere.
+ROOM_CATALOGUE.cavernDrip = createGrownRoomDefinition({ name: 'DRIP CHAMBER', rect: [0, 0, 9, 9], ceiling: 3.4, tiers: [1, 2], mostInAStation: 2, hasPools: true,
+  sockets: [[4, 9, WALL_SOUTH], [-1, 4, WALL_WEST]], grow: { fill: 0.4, rise: 2.4, low: 0.36 }, dress: { stalagmites: 2.2, stalactites: 2.5 } });
 ROOM_CATALOGUE.cavernGallery = createGrownRoomDefinition({ name: 'GALLERY', rect: [0, 0, 18, 6], ceiling: 2.6, tiers: [0, 1, 2],
   sockets: [[-1, 2, WALL_WEST], [18, 3, WALL_EAST], [9, 6, WALL_SOUTH]], grow: { fill: 0.47, rise: 0.7 } });
 ROOM_CATALOGUE.cavernLake = createGrownRoomDefinition({ name: 'SUMP LAKE', rect: [0, 0, 11, 9], ceiling: 2.9, tiers: [1, 2], isFlooded: true,
@@ -428,4 +460,93 @@ function furnishWindingPassage(corridor, random, location) {
     const firstTile = findBlankCorridorWall(corridor, wall, 5);
     if (firstTile >= 0) addCorridorWallSign(corridor, wall, firstTile, 5, text, { width: 4.4, height: 0.5, centerY: 1.45, isScrawled: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// What a place leaves in the rooms that were built in it
+//
+// The rooms the job is about are the same rooms wherever a station is, and so are the extra rooms that are
+// written as code. This goes through such a room once it is furnished and adds what the place has done to it
+// since: in a cave, what has grown from its roof and through its floor; in a mine, props under a roof that
+// nobody trusts any more, and what came down anyway.
+//
+// It only uses floor nothing is on, and keeps clear of doors, vents, water, pits and anything to press. What it
+// puts in the way stands only where every tile round it is bare floor too, and never near another, so it cuts
+// nothing off. Nothing of it is in the room where the Stills stand, on the stairs or round the generator.
+// ---------------------------------------------------------------------------
+
+const UNDRESSED_ROOMS = ['calibrationStore', 'stairwell', 'generatorRoom'];
+
+function dressBuiltRoom(room, random, dressing) {
+  if (UNDRESSED_ROOMS.indexOf(room.key) >= 0) return;
+  clearPlacement();
+  const unusable = TILE_FLAG_DOOR | TILE_FLAG_VENT | TILE_FLAG_PIT | TILE_FLAG_GRATE | TILE_FLAG_HAZARD | TILE_FLAG_WATER;
+  const isBare = function (tileX, tileZ) {
+    if (!isTileOpenAt(tileX, tileZ)) return false;
+    const index = tileIndexAt(tileX, tileZ);
+    return tileZone[index] === room.zone && (tileFlags[index] & unusable) === 0 && tilePropLists[index] === null;
+  };
+  // Kept clear of: doors (two tiles), and whatever is pressed, stood at or appears somewhere in particular.
+  const isNearSomething = function (tileX, tileZ) {
+    for (let offsetZ = -2; offsetZ <= 2; offsetZ++) for (let offsetX = -2; offsetX <= 2; offsetX++) {
+      if (isInsideGrid(tileX + offsetX, tileZ + offsetZ) && (tileFlags[tileIndexAt(tileX + offsetX, tileZ + offsetZ)] & (TILE_FLAG_DOOR | TILE_FLAG_VENT | TILE_FLAG_PIT))) return true;
+    }
+    const isNear = function (thing) { return Math.abs(thing.x - tileX - 0.5) < 2.2 && Math.abs(thing.z - tileZ - 0.5) < 2.2; };
+    return interactables.some(isNear) || phantomDefinitions.some(isNear) || stillSpawnPoints.some(isNear) || lateStillSpawnPoints.some(isNear);
+  };
+  const bare = [];
+  for (let tileZ = room.startZ; tileZ < room.endZ; tileZ++) for (let tileX = room.startX; tileX < room.endX; tileX++) if (isBare(tileX, tileZ)) bare.push([random(), tileX, tileZ]);
+  bare.sort(function (first, second) { return first[0] - second[0] || first[2] - second[2] || first[1] - second[1]; });
+  const onTile = function (tileX, tileZ, build) {
+    const index = tileIndexAt(tileX, tileZ);
+    placement.offsetY = tileFloorHeight[index];
+    build(tileCeilingHeight[index] - tileFloorHeight[index]);
+    placement.offsetY = 0;
+  };
+
+  // In the way: only with bare floor all round, on the same level, and a good way from the next one.
+  const standing = [];
+  const mostStanding = room.key === 'liftLobby' ? 0 : Math.floor(bare.length / 40);
+  for (const entry of bare) {
+    if (standing.length >= mostStanding) break;
+    const tileX = entry[1], tileZ = entry[2];
+    let hasRoom = !isNearSomething(tileX, tileZ) && !standing.some(function (other) { return Math.abs(other[0] - tileX) <= 3 && Math.abs(other[1] - tileZ) <= 3; });
+    for (let offsetZ = -1; offsetZ <= 1 && hasRoom; offsetZ++) for (let offsetX = -1; offsetX <= 1 && hasRoom; offsetX++) {
+      if (!isBare(tileX + offsetX, tileZ + offsetZ) || tileFloorHeight[tileIndexAt(tileX + offsetX, tileZ + offsetZ)] !== tileFloorHeight[tileIndexAt(tileX, tileZ)]) hasRoom = false;
+    }
+    if (!hasRoom) continue;
+    standing.push([tileX, tileZ]);
+    onTile(tileX, tileZ, function (headroom) {
+      if (dressing === 'cave') addStalagmite(tileX + 0.5, tileZ + 0.5, Math.min(headroom - 0.3, 0.8 + random() * 1.0), 0.15 + random() * 0.09);
+      else addTimberProp(tileX + 0.5, tileZ + 0.5, headroom);
+    });
+  }
+  const isTaken = function (tileX, tileZ) { return standing.some(function (other) { return Math.abs(other[0] - tileX) <= 1 && Math.abs(other[1] - tileZ) <= 1; }); };
+  // Overhead, and at the foot of the walls: in nobody's way.
+  let overhead = 0, strewn = 0;
+  for (const entry of bare) {
+    const tileX = entry[1], tileZ = entry[2];
+    if (isTaken(tileX, tileZ)) continue;
+    if (overhead < bare.length / 8 && random() < 0.3) {
+      onTile(tileX, tileZ, function (headroom) {
+        if (headroom < 2.3) return;
+        overhead++;
+        if (dressing === 'cave') addStalactite(tileX + 0.2 + random() * 0.6, tileZ + 0.2 + random() * 0.6, headroom, Math.min(headroom - 1.95, 0.2 + random() * 0.7), 0.06 + random() * 0.08);
+        // In a mine: a bar wedged across under the roof, or a lamp left hanging.
+        else if (random() < 0.7) addBoxProp(tileX + 0.5, headroom - 0.07, tileZ + 0.5, 0.48, 0.07, 0.07, { yaw: random() * Math.PI, blocksMovement: false });
+        else addHangingLamp(tileX + 0.5, tileZ + 0.5, headroom, 0.3);
+      });
+    }
+    const isByWall = !isTileOpenAt(tileX + 1, tileZ) || !isTileOpenAt(tileX - 1, tileZ) || !isTileOpenAt(tileX, tileZ + 1) || !isTileOpenAt(tileX, tileZ - 1);
+    if (isByWall && strewn < bare.length / 16 && random() < 0.25 && !isNearSomething(tileX, tileZ)) {
+      strewn++;
+      onTile(tileX, tileZ, function () {
+        for (let piece = 0, pieces = 1 + Math.floor(random() * 3); piece < pieces; piece++) {
+          const radius = 0.06 + random() * 0.12;
+          addSphereProp(tileX + 0.2 + random() * 0.6, radius * 0.5, tileZ + 0.2 + random() * 0.6, radius, CLUTTER);
+        }
+      });
+    }
+  }
+  clearPlacement();
 }
