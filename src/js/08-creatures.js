@@ -303,7 +303,8 @@ function moveCreatureToward(creature, targetX, targetZ, speed, dt) {
 //   holdStill  (optional) function (): a frame in which nothing that walks moves, because one of them has hold
 //              of somebody, or debug mode has them frozen
 //   reset      function (): a new descent. It is as it is before anything has happened.
-//   hear       (optional) function (x, z, radius): a noise was made there, and carries that far
+//   hear       (optional) function (x, z, radius, space): a noise was made there, in that space (see "Spaces"),
+//              and carries that far within it
 //   walkers    (optional) function (into): adds to the list `into` each of this kind that is on its feet in the
 //              station now, as something with a `figure` and a `way`: a door opens for it as its way says
 // Down there with others (11-together.js), for a kind that is to be seen by the others:
@@ -349,18 +350,75 @@ function findCreatureWalkers() {
 }
 
 // ---------------------------------------------------------------------------
+// Spaces: where a thing is, besides its x and its z
+//
+// A station is drawn on one sheet: every tile has one floor and one ceiling, and "how far is this from that" is
+// measured across the sheet, in x and z. That is true for nearly everything, because nearly everything is in
+// the rooms and corridors. But not all of it. The Hollow above the ceilings, on its way from one hatch to
+// another, has an x and a z that put it "half a metre from you" while there is a ceiling between you.
+//
+// So a thing is also in a SPACE, and whatever asks how near two things are asks this section what being in two
+// different spaces does to the answer. There are three questions, and each is asked here and nowhere else:
+//
+//   reach      Can the one touch the other: catch it, kick it, wake it, stand in its way, be hit by its light?
+//              Only in the same space (areInTheSameSpace).
+//   noise      How much of the distance a noise carries is left when it has to get from the one space into
+//              the other (getNoiseCarryBetweenSpaces)? All of it within a space. Through a ceiling, a part
+//              (TUNING.noiseThroughCeilingFactor).
+//   presence   How much does the one weigh on the other from there: the scanner's interference, the
+//              heartbeat (getPresenceBetweenSpaces)? Through a ceiling, a part (TUNING.presenceThroughCeilingFactor).
+//
+// Today there are two spaces. A thing says which it is in with a `space` of its own (a creature's figure has
+// one); a thing that says nothing is in the station, which is where you, the loose things and every noise you
+// make are.
+//
+// This is not levels one above the other, and it is half of what those would need. Stacked levels need the
+// station itself kept as several floors to a tile (walls, path finding, what a scan hits: none of that is
+// here), and they need every "how near" question to know that a floor is in between. The second half is this
+// section: a level above would be one more space, and the three questions would be asked of it as they are of
+// the crawlspace.
+// ---------------------------------------------------------------------------
+
+const SPACE_STATION = 0;    // the rooms, corridors and vents: where you walk
+const SPACE_CRAWLSPACE = 1; // above the ceilings: where the Hollow goes from hatch to hatch (08-crawlspace.js)
+const SPACE_NAMES = ['in the station', 'above the ceiling'];
+
+// The space a thing is in: a figure, a player, a loose object, anything with or without a `space`.
+function getSpaceOf(thing) {
+  return thing && thing.space !== undefined ? thing.space : SPACE_STATION;
+}
+
+function areInTheSameSpace(first, second) {
+  return getSpaceOf(first) === getSpaceOf(second);
+}
+
+// How much of the distance a noise carries is left on the way from one space into another: 1 for all of it.
+function getNoiseCarryBetweenSpaces(fromSpace, toSpace) {
+  return fromSpace === toSpace ? 1 : TUNING.noiseThroughCeilingFactor;
+}
+
+// How much something in one space weighs on somebody in another: 1 for all of it.
+function getPresenceBetweenSpaces(fromSpace, toSpace) {
+  return fromSpace === toSpace ? 1 : TUNING.presenceThroughCeilingFactor;
+}
+
+// ---------------------------------------------------------------------------
 // Noise: anything loud that happens in the station is reported here
 // ---------------------------------------------------------------------------
 
-function emitNoise(x, z, radius) {
+// `space` is the space the noise is made in (see "Spaces"). Left out: the station, which is where everything
+// that makes a noise today is. (Down there with others a noise is told to the host without it, for that reason.)
+function emitNoise(x, z, radius, space) {
   // Down there with others, in the host's station: the creatures that hear this are the host's (11-together.js).
   if (isWorldTheHosts()) { tellHostOfNoise(x, z, radius); return; }
-  shareWorldSoundsDuring(function () { hearNoise(x, z, radius); }); // what it sounds like when one of them hears this is everybody's
+  shareWorldSoundsDuring(function () { hearNoise(x, z, radius, space); }); // what it sounds like when one of them hears this is everybody's
 }
 
 // A noise, in the game that decides the station: what is not here yet comes sooner for it, and every kind of
-// creature that listens is told.
-function hearNoise(x, z, radius) {
+// creature that listens is told, with the space it was made in. How far it carries to a creature in another
+// space is that creature's to work out, with getNoiseCarryBetweenSpaces: it knows where it is.
+function hearNoise(x, z, radius, space) {
   noteNoiseForArrivals(x, z, radius); // (08-arrivals.js)
-  for (const kind of CREATURE_KINDS) if (kind.hear) kind.hear(x, z, radius);
+  const madeIn = space === undefined ? SPACE_STATION : space;
+  for (const kind of CREATURE_KINDS) if (kind.hear) kind.hear(x, z, radius, madeIn);
 }

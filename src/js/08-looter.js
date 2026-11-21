@@ -310,7 +310,8 @@ function startleLooter(looter, x, z) {
 // the looter stands says what comes of it: nothing, startled, or frightened (see the top of this file). Small
 // noises it never hears at all: a walking step, a thing set down. And a noise out of a vent with one of you
 // in it is somebody in its vents, however faint: it goes for them.
-function hearNoiseAsLooters(x, z, radius) {
+function hearNoiseAsLooters(x, z, radius, space) {
+  radius *= getNoiseCarryBetweenSpaces(space === undefined ? SPACE_STATION : space, SPACE_STATION); // (the looters are in the station: its vents are on its floor)
   if (radius < TUNING.looterDeafMetres || debugState.options.creaturesIgnorePlayer) return;
   let whoIsInAVent = null;
   if ((getTileFlagsAtPosition(x, z) & TILE_FLAG_VENT) !== 0) {

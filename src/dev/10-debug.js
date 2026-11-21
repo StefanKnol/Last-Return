@@ -613,6 +613,9 @@ function buildDebugReadout() {
         (crawl.phase === CRAWL_PHASE_TRAVELLING ? crawl.travelSeconds - crawl.timer : TUNING.hollowCrawlDropWarningSeconds - crawl.timer);
       lines.push('  CRAWLSPACE ' + CRAWL_PHASE_NAMES[crawl.phase] + ', ' + Math.max(0, secondsLeft).toFixed(1) + ' s more; it comes out ' +
         distanceBetweenPoints(crawl.to.x, crawl.to.z, player.x, player.z).toFixed(0) + ' m from you');
+      // Which space it is in ("Spaces", 08-creatures.js), and what that does to a noise of yours and to how it weighs on you.
+      lines.push('  SPACE      ' + SPACE_NAMES[getSpaceOf(hollow.figure)] + ': a noise of yours carries x' + getNoiseCarryBetweenSpaces(getSpaceOf(player), getSpaceOf(hollow.figure)) +
+        ' to it, it weighs x' + getPresenceBetweenSpaces(getSpaceOf(hollow.figure), getSpaceOf(player)) + ' on you' + (crawl.listenSeconds > 0 ? '; LISTENING, ' + crawl.listenSeconds.toFixed(1) + ' s more' : (crawl.hasListened ? '; it has listened once' : '')));
     }
     lines.push('DIRECTOR    ' + (isDirectorOverruled() ? 'OVERRULED (the ending)' : DIRECTOR_PHASE_NAMES[director.phase]) + '   menace ' + director.menace.toFixed(2) + (director.hasPeaked ? ' (breather owed)' : '') + '   pace x' + getDirectorPaceFactor().toFixed(2));
     lines.push('  steering  to rooms ' + director.ringMinimumSteps + ' to ' + (director.ringMaximumSteps > 9000 ? 'any' : director.ringMaximumSteps) + ' steps from you; it is ' +

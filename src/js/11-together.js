@@ -753,7 +753,7 @@ function tellHostOfNoise(x, z, radius) {
 // ---- How the host's station stands ----
 
 const WORLD_POSE_KEYS = ['legSwing', 'kneeBend', 'armSwing', 'armRaise', 'elbowBend', 'lean', 'headTilt', 'stretch', 'fingerSplay', 'stoop', 'crawl'];
-const WORLD_HOLLOW_NUMBERS = 6 + 3 + WORLD_POSE_KEYS.length; // what `h` holds, below
+const WORLD_HOLLOW_NUMBERS = 7 + 3 + WORLD_POSE_KEYS.length; // what `h` holds, below
 const WORLD_STILL_NUMBERS = 6;                               // and what `s` holds for each Still
 
 // A figure as numbers: where it stands, which way it faces, and its pose.
@@ -766,7 +766,7 @@ function describeFigure(figure, into) {
 
 // The host's station, for everyone else:
 //   h   the Hollow, or null while there is none: what it is doing, how angry, enraged or not, how held, whether
-//       a scan can find it (not while it is above the ceiling), its speed, and then its figure
+//       a scan can find it (not while it is above the ceiling), its speed, the space it is in, and then its figure
 //   s   whether the Stills are hunting, and for each: there or not, where, facing where, arms, legs
 //   d   one letter for each door: 1 wanted open, 0 not, b broken down
 //   c   one letter for each ceiling hatch: 1 forced open, 0 still shut
@@ -775,7 +775,7 @@ function describeWorld() {
   const world = { k: 'world', h: null, s: [stillsAreHunting ? 1 : 0], d: '', c: '' };
   if (hollow.isActive) {
     world.h = describeFigure(hollow.figure, [hollow.state, round(hollow.anger), hollow.enragedTimer > 0 ? 1 : 0, round(hollow.heldAmount),
-      raycastableFigures.indexOf(hollow.figure) >= 0 ? 1 : 0, round(hollow.currentSpeed)]);
+      raycastableFigures.indexOf(hollow.figure) >= 0 ? 1 : 0, round(hollow.currentSpeed), getSpaceOf(hollow.figure)]);
   }
   for (const still of stills) {
     const figure = still.figure;
@@ -838,7 +838,8 @@ function followHostStation(dt) {
     hollow.state = given[0]; hollow.anger = given[1]; hollow.enragedTimer = given[2] === 1 ? 1 : 0; hollow.heldAmount = given[3]; hollow.currentSpeed = given[5];
     if (figure !== yourCatcher) {
       setFigureRaycastable(figure, given[4] === 1);
-      const from = together.hollowFrom, at = 6;
+      figure.space = given[6] === SPACE_CRAWLSPACE ? SPACE_CRAWLSPACE : SPACE_STATION; // (so that what your own game asks about it knows where it is: "Spaces", 08-creatures.js)
+      const from = together.hollowFrom, at = 7;
       // Sent somewhere else at once (after it has caught somebody): it is simply there, it does not slide across the station.
       const amount = distanceBetweenPoints(from[0], from[1], given[at], given[at + 1]) > 4 ? 1 : together.worldBlend;
       figure.x = interpolateLinear(from[0], given[at], amount);

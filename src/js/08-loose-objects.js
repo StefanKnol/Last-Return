@@ -3003,7 +3003,7 @@ function updateHaulBays(dt) {
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) if (looseObjects[objectIndex].fallenPlayerId && isLooseObjectInHaulBay(looseObjects[objectIndex], bay)) return;
   if (inside <= 0 || (inside < bay.quota && progress.done < progress.total)) return;
   if (isPlayerInTheWay || isLooseObjectInDoorway(bay.door)) return;
-  if (hollow.isActive && isPointInHaulBay(bay, hollow.figure.x, hollow.figure.z, 0.6)) return;
+  if (hollow.isActive && getSpaceOf(hollow.figure) === SPACE_STATION && isPointInHaulBay(bay, hollow.figure.x, hollow.figure.z, 0.6)) return; // (above the ceiling it is not in the bay, wherever on the map it is)
   askToAct({ what: 'bayState', index: bay.index, state: 'sealing' });
 }
 
@@ -3058,6 +3058,7 @@ function fillHaulBays() {
 // as loud as a sheet of steel thrown eight metres a second is. That noise does not startle the Hollow.
 function updateHollowAtVentCovers() {
   if (!hollow.isActive || level.ventMouths.length === 0 || isWorldTheHosts()) return; // (the host's Hollow: what it throws, it throws in the host's game)
+  if (getSpaceOf(hollow.figure) !== SPACE_STATION) return; // above the ceiling: it is at no vent
   const figure = hollow.figure, reach = TUNING.hollowThrowsCoverMetres;
   for (const mouth of level.ventMouths) {
     // Where it is, measured from the middle of the mouth's face: `along` is positive inside the duct, negative out in the room.
@@ -3208,6 +3209,7 @@ function throwVentCoverFromHollow(object, mouth, isHollowInTheRoom) {
 
 function updateHollowAfterKickedObjects() {
   if (!hollow.isActive || isWorldTheHosts()) return;
+  if (getSpaceOf(hollow.figure) !== SPACE_STATION) return; // above the ceiling it goes after nothing on the floor, and throws nothing
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) {
     const object = looseObjects[objectIndex];
     if (object.isHeld || !object.wasHandled || object.kind.mass > TUNING.hollowChasesKickedMass) continue;
@@ -3524,7 +3526,7 @@ function updateLooseObjects(dt, eyeX, eyeY, eyeZ) {
     if (!object.isAsleep) continue;
     if (isLooseObjectAnothers(object)) continue; // woken by its mover, where it is moved
     if (player.isMoving && isAtTheControls) wakeLooseObjectIfWalkedInto(object, player.x, player.z, TUNING.playerRadius, player.floorY, player.floorY + TUNING.playerHeight);
-    if (hollow.isActive) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
+    if (hollow.isActive && areInTheSameSpace(hollow.figure, object)) wakeLooseObjectIfWalkedInto(object, hollow.figure.x, hollow.figure.z, 0.34, hollow.figure.y, hollow.figure.y + 1.9);
     for (let index = 0; index < players.length; index++) {
       const one = players[index], floorY = getFloorHeightAt(one.x, one.z);
       // (Walked into: one who only stands beside a thing does not wake it, any more than you do. It used to wake for
