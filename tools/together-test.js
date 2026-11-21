@@ -1057,6 +1057,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
       kitIsThere: kit !== null, kitHeldById: kit ? kit.heldById : -1, pocketedBy: pocketed ? pocketed.playerId : 0, holding: d.getHeldLooseObject() ? d.getHeldLooseObject().id : 0 };
   }, [pocketIds[0], ids.other]);
   await fine(1.5);
+  // Is it so in the host's game and in the other's? What the other does with a pocket is asked of the host, done in
+  // the host's game at once, and done in the other's own game only when the host's word has come back to it. So
+  // each step here waits until it is so in both, and never only in the host's: a moment later the other's game is
+  // told to do the next thing, and until that word is in it still has the pockets it had before. (It was waited for
+  // in the host's game alone. Now and then the other was then told to fall with a pocket their own game did not
+  // know was full yet: nothing fell, the grenade never came back, and the suite stopped on reading where it lay.)
+  const isSoInBothGames = async (lookIn, isSo) => isSo(await lookIn(a)) && isSo(await lookIn(b));
   // Not out of thin air: a thing that is not in their beam does not go into their pocket.
   await b.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'stow', id: id, slot: 0 }), pocketIds[0][0]);
   await fine(0.8);
@@ -1067,19 +1074,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
   await fine(0.5);
   await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.pocketedBy === ids.other)); turn++) await fine(0.2);
   const pocketStowed = { host: await pocketsIn(a), other: await pocketsIn(b) };
   // Out again, by its key.
   await b.evaluate(() => { window.lastReturnDebug.input.wantsPocket = 0; });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.grenade !== null)); turn++) await fine(0.2);
   await fine(0.6);
   const pocketTakenOut = { host: await pocketsIn(a), other: await pocketsIn(b) };
   // In again, and then they fall: what was in their pockets lies there, in both games.
   await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.pocketedBy === ids.other)); turn++) await fine(0.2);
   await b.evaluate(() => { window.lastReturnDebug.spillOwnPockets(); });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
-  for (let turn = 0; turn < 16 && !((await pocketsIn(a)).grenade.isAsleep && (await pocketsIn(b)).grenade.isAsleep); turn++) await fine(0.4);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.grenade !== null)); turn++) await fine(0.2);
+  // (Should it never come back, the check below says so: there is nothing to wait for here then, and nothing to read.)
+  for (let turn = 0; turn < 16 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.grenade !== null && pockets.grenade.isAsleep)); turn++) await fine(0.4);
   const pocketSpilled = { host: await pocketsIn(a), other: await pocketsIn(b), fellAt: await b.evaluate(() => [window.lastReturnDebug.player.x, window.lastReturnDebug.player.z]) };
   check('a thing that is not in the other\'s beam does not go into their pocket for the asking',
     pocketIds[0][0] > 0 && pocketIds[0].join() === pocketIds[1].join() && pocketNotHeld.host.grenade !== null && pocketNotHeld.other.grenade !== null && pocketNotHeld.host.pocketedBy === 0 && pocketNotHeld.other.pocketedBy === 0, pocketNotHeld);
@@ -1122,7 +1130,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await fine(0.5);
   // Into their pocket.
   await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
-  for (let turn = 0; turn < 25 && (await spoolsIn(a)).firstPocketedBy !== ids.other; turn++) await fine(0.2);
+  for (let turn = 0; turn < 25 && !(await isSoInBothGames(spoolsIn, (spools) => spools.firstPocketedBy === ids.other)); turn++) await fine(0.2);
   const spoolPocketed = { host: await spoolsIn(a), other: await spoolsIn(b) };
   // The host presses the lift terminal: there is no spool on the host, and none lies by it. Nothing is loaded.
   await a.evaluate(() => { const d = window.lastReturnDebug; d.clearMessages(); d.askToAct({ what: 'use', objectId: 1 }); });
