@@ -15,7 +15,7 @@ const input = {
   touchSprint: false,
   touchCrouch: false,
   touchUseHeld: false,  // a finger is on USE: with something in the beam, holding it winds up a throw
-  isGrabHeld: false,    // the right mouse button is down: it carries what you are looking at for as long as it is
+  isGrabHeld: false,    // the right mouse button is down: what that does to a thing in reach goes by settings.carryButton (updateCarryButton, 08-loose-objects.js)
   wantsUseCarried: false, // Q has been pressed: set off what the beam is carrying
   wantsStow: false,       // R has been pressed: what the beam holds goes into a free pocket (08-pockets.js)
   wantsPocket: -1,        // one of the pockets' keys has been pressed (4 to 7): which pocket, counted from 0; -1 for none
@@ -82,6 +82,7 @@ const settings = {
   seedText: '',             // what is typed in the seed box; empty means a new random station each descent
   hud: 'quiet',             // 'quiet' shows instruments only while they matter; 'full' shows everything all the time
   captions: 'tells',        // the lines in square brackets: 'off', 'tells' (what the Hollow has just done) or 'all' (every sound, with where it comes from)
+  carryButton: 'hold',      // the right mouse button and a thing in reach: 'hold' carries it while the button is down, 'toggle' takes it at a click and lets go at the next (08-loose-objects.js)
   hasPickedSomethingUp: false, // the line that says how to pick a thing up is a tutorial: shown until you have done it once, and never again
   // Which work orders a generated station may be given (09-quests.js): one that is switched off never comes up.
   // A key that is missing counts as on, so that a work order added later is there without being asked for.
@@ -131,6 +132,7 @@ function loadSettings() {
       if (typeof stored.seedText === 'string') settings.seedText = stored.seedText.slice(0, 24);
       if (stored.hud === 'quiet' || stored.hud === 'full') settings.hud = stored.hud;
       if (stored.captions === 'off' || stored.captions === 'tells' || stored.captions === 'all') settings.captions = stored.captions;
+      if (stored.carryButton === 'hold' || stored.carryButton === 'toggle') settings.carryButton = stored.carryButton;
       if (stored.hasPickedSomethingUp === true) settings.hasPickedSomethingUp = true;
       if (stored.workOrders && typeof stored.workOrders === 'object') { for (const key in stored.workOrders) if (stored.workOrders[key] === false) settings.workOrders[key] = false; }
     }

@@ -947,7 +947,7 @@ function updateHud(realDt) {
     } else if (game.mode === 'playing' && focusedLooseObject && !heldLooseObject && !settings.hasPickedSomethingUp) {
       // A tutorial: how to pick a thing up is said until you have done it once, and never again.
       prompt.hidden = false;
-      prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E] or hold [Right mouse]  ') + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject);
+      prompt.textContent = (input.isTouchDevice ? 'USE · ' : (settings.carryButton === 'toggle' ? '[E] or [Right mouse]  ' : '[E] or hold [Right mouse]  ')) + 'Pick up the ' + getLooseObjectLabel(focusedLooseObject);
     } else if (game.mode === 'playing' && focused) {
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? 'USE · ' : '[E]  ') + focused.prompt;
