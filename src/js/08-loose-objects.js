@@ -207,6 +207,10 @@ const looseState = {
   nextId: 1,
   held: null,              // the object in the beam, or null
   isHeldByButton: false,   // it is carried for as long as the right mouse button is down (and not by a press of E, which stays until E again)
+  wasGrabDown: false,      // the right mouse button was down at the last look at it: for the moment it goes down
+  wasCarrying: false,      // the beam held something at the last look
+  isGrabSpent: false,      // something left the beam while the button was down: the button takes nothing again until it has come up
+  lettingGoBy: 'key',      // which press is letting go or winding up a throw: 'key' (E, or USE on a phone) or 'button' (the right mouse button, set to "click")
   holdTargetX: 0, holdTargetY: 0, holdTargetZ: 0,
   holdBreakTimer: 0,       // how long the carried object has been too far from where the beam wants it
   heldLoad: 0,             // kilograms of other loose things lying in or on what you carry, as it weighs on the beam right now ("What rides in what you carry")
@@ -554,6 +558,7 @@ function clearLooseObjects() {
   looseState.holdBreakTimer = 0;
   looseState.isLettingGo = false;
   looseState.lettingGoSeconds = 0;
+  looseState.wasCarrying = false; looseState.isGrabSpent = false; looseState.lettingGoBy = 'key';
   looseState.hollowWasActive = false;
   looseState.playerWasThere = false; looseState.playerVelocityX = 0; looseState.playerVelocityZ = 0;
 }
@@ -1997,7 +2002,8 @@ function pickUpLooseObjectNow(object, isByButton) {
     looseState.hasShownCarryHint = true;
     showMessage(input.isTouchDevice
       ? 'USE again lets go of it. Hold USE and let go to throw it.'
-      : (isByButton ? 'It stays in the beam while you hold the button. Swing it and let go to throw it.' : 'E again lets go of it. Hold E and let go to throw it.'), 7, 'info');
+      : (isByButton ? 'It stays in the beam while you hold the button. Let go to drop it. Hold E and let go of E to throw it.'
+        : (settings.carryButton === 'toggle' ? 'E or a right click lets go of it. Hold either and let go to throw it.' : 'E again lets go of it. Hold E and let go to throw it.')), 7, 'info');
   }
   return true;
 }
@@ -2028,13 +2034,14 @@ function releaseHeldLooseObject(throwStrength) {
   return object;
 }
 
-// E was pressed with something in the beam and nothing in front of you to use (09-player.js calls this).
-// What that press does is decided when the key comes up again: let go at once and it only lets go of the
-// object; held, it winds up a throw.
-function beginLettingGo() {
+// E was pressed with something in the beam and nothing in front of you to use (09-player.js calls this), or the
+// right mouse button was, where it is set to "click" (`isByButton`). What that press does is decided when it
+// comes up again: let go at once and it only lets go of the object; held, it winds up a throw.
+function beginLettingGo(isByButton) {
   if (!looseState.held) return;
   looseState.isLettingGo = true;
   looseState.lettingGoSeconds = 0;
+  looseState.lettingGoBy = isByButton ? 'button' : 'key';
 }
 
 function updateLooseCarryInput(dt) {
@@ -2044,16 +2051,54 @@ function updateLooseCarryInput(dt) {
     const carried = looseState.held;
     if (carried && carried.kind.use && !carried.isSpent && carried.armedTime < 0 && (!carried.kind.use.canUse || carried.kind.use.canUse(carried))) askToAct({ what: 'setOff', id: carried.id });
   }
-  // The right mouse button: down on something in reach takes it into the beam, up lets it go as it is moving.
-  if (input.isGrabHeld && !looseState.held && player.focusedLooseObject && !player.focusedLooseObject.isRemoved) {
-    pickUpLooseObject(player.focusedLooseObject, true);
-  } else if (looseState.held && looseState.isHeldByButton && !input.isGrabHeld) {
+  updateCarryButton();
+  // (Noted here, between the two: what E lets go of or throws just below is gone from the beam by the next
+  // look at the button, and that is how the button knows.)
+  looseState.wasCarrying = looseState.held !== null;
+  updateLettingGo(dt);
+}
+
+// The right mouse button. There are two ways of holding a thing, and they work together:
+//   - E takes it and it stays until E again (a tap lets go, held and let go throws);
+//   - the right mouse button, which by the setting "Right mouse button" (settings.carryButton) either
+//       'hold'    carries for as long as it is down: down on something in reach takes it, up lets it go as it
+//                 is moving (swing it and let go, and it flies); or
+//       'toggle'  does what E does for a thing in the beam: a click takes, a click lets go, held and let go throws.
+// Between the two, with the button set to 'hold':
+//   - a thing the button holds is let go of or thrown by E as well (tap, or hold and let go);
+//   - a thing E took is the button's from the moment the button goes down: letting the button go lets go of it;
+//   - whatever leaves the beam while the button is still down (thrown or let go with E, put in a pocket, pulled
+//     out of your grip, taken by the lift terminal), the button takes nothing again until it has come up. Without
+//     this a thing thrown with E was taken straight back the frame after, still in front of you, and went nowhere.
+function updateCarryButton() {
+  const isDown = input.isGrabHeld, wentDown = isDown && !looseState.wasGrabDown;
+  looseState.wasGrabDown = isDown;
+  if (!isDown) looseState.isGrabSpent = false;
+  else if (looseState.wasCarrying && !looseState.held) looseState.isGrabSpent = true;
+  const focused = player.focusedLooseObject && !player.focusedLooseObject.isRemoved ? player.focusedLooseObject : null;
+  if (settings.carryButton === 'toggle') {
+    if (looseState.held) looseState.isHeldByButton = false; // (the setting was changed with something in the beam: it stays there)
+    if (!wentDown) return;
+    if (looseState.held) beginLettingGo(true);
+    else if (focused) pickUpLooseObject(focused, false);
+    return;
+  }
+  if (isDown && !looseState.held && !looseState.isGrabSpent && focused) {
+    pickUpLooseObject(focused, true);
+  } else if (wentDown && looseState.held && !looseState.isHeldByButton) {
+    looseState.isHeldByButton = true; // taken with E, and the button's from now
+    looseState.isLettingGo = false; looseState.lettingGoSeconds = 0;
+  } else if (looseState.held && looseState.isHeldByButton && !isDown) {
     releaseHeldLooseObject(0);
   }
+}
+
+// A press that lets go of what you carry, or winds up a throw (beginLettingGo), for as long as it is down.
+function updateLettingGo(dt) {
   if (!looseState.held || !looseState.isLettingGo) { looseState.isLettingGo = false; looseState.lettingGoSeconds = 0; return; }
-  const isDown = input.keysDown.has('KeyE') || input.touchUseHeld;
+  const isDown = looseState.lettingGoBy === 'button' ? input.isGrabHeld : (input.keysDown.has('KeyE') || input.touchUseHeld);
   if (isDown) { looseState.lettingGoSeconds += dt; return; }
-  // The key is up. (A tap shorter than one frame arrives here with no time counted at all: that is a tap.)
+  // It is up. (A tap shorter than one frame arrives here with no time counted at all: that is a tap.)
   const held = looseState.lettingGoSeconds;
   if (held < TUNING.looseThrowTapSeconds) releaseHeldLooseObject(0);
   else releaseHeldLooseObject(clampNumber(held / TUNING.looseThrowChargeSeconds, 0.25, 1));

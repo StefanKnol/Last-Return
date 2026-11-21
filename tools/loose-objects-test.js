@@ -2515,6 +2515,115 @@ function installLab() {
   }, spot);
   check('swung round and let go, it keeps the speed of the swing', flung.wasCarrying && !flung.carrying && flung.speed > 2.5, flung);
 
+  // The two ways of holding a thing, E and the right mouse button, together.
+  const together = await inGame((spot) => {
+    const d = window.lastReturnDebug, lab = window.looseLab, p = d.player, result = {};
+    // A thing on the floor in front of you, looked at, with nothing pressed.
+    const begin = function () {
+      d.input.isGrabHeld = false; d.input.keysDown.clear(); d.input.wantsInteract = false; d.input.lookDeltaX = 0; d.input.lookDeltaY = 0;
+      d.clearLooseObjects();
+      lab.stand(spot.x, spot.z, Math.PI / 2);
+      const object = d.createLooseObject('testTin', spot.x + 1.6, 0.3, spot.z, 0);
+      for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+      p.yaw = Math.atan2(object.x - p.x, -(object.z - p.z));
+      p.pitch = Math.atan2(object.y - d.getPlayerEyeY(), Math.hypot(object.x - p.x, object.z - p.z));
+      d.simulate(0.1);
+      return object;
+    };
+    const metresFromYou = (object) => lab.round(Math.hypot(object.x - p.x, object.z - p.z));
+    const pressE = function (seconds) {
+      d.input.keysDown.add('KeyE'); d.input.wantsInteract = true;
+      d.simulate(Math.max(seconds, 1 / 30));
+      d.input.keysDown.delete('KeyE');
+      d.simulate(1 / 30);
+    };
+    d.settings.carryButton = 'hold';
+
+    // Held by the button, thrown with E, the button still down: it flies, and is not taken back.
+    let object = begin();
+    d.input.isGrabHeld = true; d.simulate(1);
+    result.thrown = { carriedByButton: d.getHeldLooseObject() === object && d.looseState.isHeldByButton };
+    p.pitch = 0.2; d.simulate(0.3);
+    pressE(0.7);
+    result.thrown.letGo = d.getHeldLooseObject() === null;
+    result.thrown.speed = lab.round(Math.hypot(object.velocityX, object.velocityY, object.velocityZ));
+    let everTakenBack = false;
+    for (let step = 0; step < 45; step++) { d.simulate(1 / 30); if (d.getHeldLooseObject()) everTakenBack = true; }
+    result.thrown.takenBack = everTakenBack; result.thrown.metresFromYou = metresFromYou(object); result.thrown.buttonStillDown = d.input.isGrabHeld;
+
+    // Held by the button, a tap of E: it drops, and the button that is still down does not take it back,
+    // though it lies where you are looking. Up and down again, and it does.
+    object = begin();
+    d.input.isGrabHeld = true; d.simulate(1);
+    const carried = d.getHeldLooseObject() === object;
+    pressE(0);
+    let takenBack = false;
+    for (let step = 0; step < 30; step++) {
+      d.simulate(1 / 30);
+      p.yaw = Math.atan2(object.x - p.x, -(object.z - p.z)); p.pitch = Math.atan2(object.y - d.getPlayerEyeY(), Math.hypot(object.x - p.x, object.z - p.z));
+      if (d.getHeldLooseObject()) takenBack = true;
+    }
+    result.tapped = { carried: carried, takenBack: takenBack, inReach: d.player.focusedLooseObject === object, metresFromYou: metresFromYou(object) };
+    d.input.isGrabHeld = false; d.simulate(0.1);
+    d.input.isGrabHeld = true; d.simulate(0.5);
+    result.tapped.takenAtTheNextPress = d.getHeldLooseObject() === object;
+    d.input.isGrabHeld = false; d.simulate(0.2);
+
+    // Taken with E, and then the button goes down: it is the button's, and letting the button go lets go of it.
+    object = begin();
+    pressE(0);
+    result.handedOver = { takenWithE: d.getHeldLooseObject() === object && !d.looseState.isHeldByButton };
+    d.simulate(0.5);
+    d.input.isGrabHeld = true; d.simulate(0.3);
+    result.handedOver.stillCarried = d.getHeldLooseObject() === object; result.handedOver.byButton = d.looseState.isHeldByButton;
+    d.input.isGrabHeld = false; d.simulate(0.1);
+    result.handedOver.letGo = d.getHeldLooseObject() === null;
+
+    // The button set to "click": it does for a thing what E does.
+    d.settings.carryButton = 'toggle';
+    object = begin();
+    d.input.isGrabHeld = true; d.simulate(0.1);
+    result.click = { taken: d.getHeldLooseObject() === object, byButton: d.looseState.isHeldByButton };
+    d.simulate(0.8); // (kept down for a while after taking it: that winds up nothing)
+    d.input.isGrabHeld = false; d.simulate(0.5);
+    result.click.staysAfterTheButtonIsUp = d.getHeldLooseObject() === object;
+    d.input.isGrabHeld = true; d.simulate(1 / 30); d.input.isGrabHeld = false; d.simulate(1 / 30);
+    result.click.clickLetsGo = d.getHeldLooseObject() === null; result.click.dropSpeed = lab.round(Math.hypot(object.velocityX, object.velocityZ));
+    // Taken again, and then held and let go: thrown.
+    for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    p.yaw = Math.atan2(object.x - p.x, -(object.z - p.z)); p.pitch = Math.atan2(object.y - d.getPlayerEyeY(), Math.hypot(object.x - p.x, object.z - p.z));
+    d.simulate(0.1);
+    d.input.isGrabHeld = true; d.simulate(1 / 30); d.input.isGrabHeld = false; d.simulate(0.5);
+    result.click.takenAgain = d.getHeldLooseObject() === object;
+    p.pitch = 0.2; d.simulate(0.3);
+    d.input.isGrabHeld = true; d.simulate(0.7);
+    result.click.windUp = lab.round(d.getThrowWindUp());
+    d.input.isGrabHeld = false; d.simulate(1 / 30);
+    result.click.thrown = d.getHeldLooseObject() === null; result.click.throwSpeed = lab.round(Math.hypot(object.velocityX, object.velocityY, object.velocityZ));
+    d.simulate(1.5);
+    result.click.metresFromYou = metresFromYou(object);
+    // E still does the same there.
+    object = begin();
+    pressE(0);
+    result.click.eTakes = d.getHeldLooseObject() === object;
+    pressE(0);
+    result.click.eLetsGo = d.getHeldLooseObject() === null;
+    d.settings.carryButton = 'hold';
+    d.input.isGrabHeld = false; d.clearLooseObjects(); d.simulate(0.1);
+    result.menus = Array.from(document.querySelectorAll('[data-setting="carryButton"]')).map((control) => Array.from(control.options).map((option) => option.value).join());
+    return result;
+  }, spot);
+  check('held with the right mouse button and thrown with E while the button is still down, a thing flies and is not taken straight back',
+    together.thrown.carriedByButton && together.thrown.letGo && together.thrown.speed > 3 && !together.thrown.takenBack && together.thrown.buttonStillDown && together.thrown.metresFromYou > 3, together.thrown);
+  check('a tap of E drops what the button holds, and the button that is still down does not take it back though it lies in reach; let go of and pressed again, it does',
+    together.tapped.carried && !together.tapped.takenBack && together.tapped.inReach && together.tapped.takenAtTheNextPress, together.tapped);
+  check('a thing taken with E is the button\'s once the button goes down: letting the button go lets go of it',
+    together.handedOver.takenWithE && together.handedOver.stillCarried && together.handedOver.byButton && together.handedOver.letGo, together.handedOver);
+  check('with the right mouse button set to "click" it takes a thing and keeps it after the button is up; a click lets go, and held and let go it throws; E does as it always did',
+    together.click.taken && !together.click.byButton && together.click.staysAfterTheButtonIsUp && together.click.clickLetsGo && together.click.dropSpeed < 0.6 && together.click.takenAgain &&
+    together.click.windUp > 0.25 && together.click.thrown && together.click.throwSpeed > 3 && together.click.metresFromYou > 3 && together.click.eTakes && together.click.eLetsGo, together.click);
+  check('the title screen and the pause screen both have the setting, with both choices', together.menus.length === 2 && together.menus.every((values) => values === 'hold,toggle'), together.menus);
+
   await inGame(() => { const d = window.lastReturnDebug; d.clearLooseObjects(); d.player.heat = 0; d.simulate(0.2); });
   await page.mouse.down({ button: 'right' });
   const rightAlone = await inGame(() => { const d = window.lastReturnDebug; d.simulate(0.1); return d.player.sweepTimeRemaining > 0; });
