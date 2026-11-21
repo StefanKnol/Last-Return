@@ -198,13 +198,15 @@ const labSource = String(function () {
     d.spawnHollow(ahead[0], ahead[1]); d.hollow.graceTimer = 99;
     standAt(-1, 0);
     const hitsBefore = d.hollow.figure.totalHits;
-    seen.onACreature = cone(seen.half, 1200);
+    // (Enough of them that what falls on it is well over the twenty asked for however wide tripodConeDegrees
+    // opens its light: at 1200 and 86 degrees it was 20 to 33 of them, and 20 is not over twenty.)
+    seen.onACreature = cone(seen.half, 4000);
     seen.creature = { hits: d.hollow.figure.totalHits - hitsBefore, lightCameFrom: lab.round(Math.hypot(d.hollow.figure.beamSourceX - lens.x, d.hollow.figure.beamSourceZ - lens.z)),
       metresFromYou: lab.round(Math.hypot(p.x - lens.x, p.z - lens.z)) };
     const back = lab.pointAt(-1, 0);
     d.hollow.figure.x = back[0]; d.hollow.figure.z = back[1]; d.simulate(0.05);
     const hitsThen = d.hollow.figure.totalHits;
-    seen.onOneBehindIt = cone(seen.half, 1200).onCreatures + (d.hollow.figure.totalHits - hitsThen);
+    seen.onOneBehindIt = cone(seen.half, 4000).onCreatures + (d.hollow.figure.totalHits - hitsThen);
     d.hollow.isActive = false;
     return seen;
   });
