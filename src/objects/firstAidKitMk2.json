@@ -1,0 +1,25 @@
+{
+  "label": "first aid kit mkII",
+  "mass": 1.5,
+  "value": 45,
+  "fragile": 0.3,
+  "shattersAt": 0,
+  "material": "case",
+  "loud": 0.8,
+  "lies": "onItsSide",
+  "bulky": false,
+  "bounce": 0.15,
+  "grip": 0.6,
+  "asLitter": 0,
+  "onTheFloor": 0,
+  "onASurface": 0,
+  "parts": [
+    { "shape": "box", "center": [0,0,0], "half": [0.15,0.1,0.055] },
+    { "shape": "capsule", "from": [-0.04,0.11,0], "to": [0.04,0.11,0], "radius": 0.012 },
+    { "shape": "box", "center": [0,0,0.065], "half": [0.05,0.015,0.01] },
+    { "shape": "box", "center": [0,0,0.065], "half": [0.015,0.05,0.01] }
+  ],
+  "worksLike": "firstAidKit",
+  "mark": 2,
+  "numbers": { "firstAidHeals": 25 }
+}

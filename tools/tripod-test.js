@@ -422,6 +422,28 @@ const labSource = String(function () {
   check('a scan grenade is worth a little to Salvage unused, much less than a tripod, and next to nothing once it has gone off',
     worth.unused.grenade > 0 && worth.unused.grenade < worth.unused.tripod / 2 && worth.grenadeGoneOff.isSpent && worth.grenadeGoneOff.worth <= 2 && worth.grenadeGoneOff.worth < worth.unused.grenade, worth);
 
+  // --- a scan grenade of a better mark: whatever its file says it does more of. One that scans more than once
+  //     goes off, goes dark, and goes off again, and is only spent after the last ---
+  const marked = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, seen = [];
+    for (const entry of d.looseObjectMarks.scanGrenade || []) {
+      lab.station();
+      d.clearLooseObjects();
+      const at = lab.pointAt(1, 0);
+      const grenade = d.createLooseObject(entry[0], at[0], lab.place.floorY + 0.2, at[1], 0);
+      d.simulate(1);
+      const bursts = d.getLooseNumber(grenade, 'scanGrenadeBursts'), burstSeconds = d.getLooseNumber(grenade, 'scanGrenadeBurstSeconds');
+      d.askToAct({ what: 'setOff', id: grenade.id });
+      d.simulate(d.getLooseNumber(grenade, 'scanGrenadeFuseSeconds') + burstSeconds + 0.3);
+      const afterTheFirst = { done: grenade.burstsDone, isSpent: grenade.isSpent };
+      d.simulate((bursts - 1) * (d.tuning.scanGrenadeBurstGapSeconds + burstSeconds) + 0.5);
+      seen.push({ key: entry[0], bursts: bursts, afterTheFirst: afterTheFirst, atTheEnd: { done: grenade.burstsDone, isSpent: grenade.isSpent }, canBeArmed: Boolean(grenade.kind.use) });
+    }
+    return seen;
+  });
+  check('a scan grenade of a better mark goes off as often as it says: after the first scan one that scans again is not spent yet, after the last it is',
+    marked.every((grenade) => grenade.canBeArmed && grenade.afterTheFirst.done === 1 && grenade.afterTheFirst.isSpent === (grenade.bursts === 1) && grenade.atTheEnd.done === grenade.bursts && grenade.atTheEnd.isSpent), marked);
+
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();
 

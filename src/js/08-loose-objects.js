@@ -51,6 +51,9 @@
 //              { prompt: 'Arm the scan grenade', button: 'ARM', activate: function (object) { ... } }
 //              (`button` is what the phone's button for it says)
 //              What it then does over time is `update(object, dt)`, called every frame for every object of the kind.
+//   markNumbers  for an object that comes in marks (mk II, mk III: see "Marks" below): which of the numbers in
+//              TUNING (00-config.js) a mark may have its own way, each with what the workshop calls it and the
+//              least, the most and the step it may be set to: { firstAidHeals: ['What it gives back', 1, 100, 1] }
 // Where it hangs is the same for all of them: straight out from the scanner's lens, `looseHoldDistance` (in
 // 00-config.js) beyond its own size. How much of the beam it takes follows from how big it is.
 const FUEL_CAN_PARTS = [
@@ -85,7 +88,14 @@ const LOOSE_OBJECT_KINDS = {
       { shape: 'box', center: [0.05, 0.02, 0], half: [0.02, 0.05, 0.02] }
     ],
     use: { prompt: 'Arm the scan grenade', button: 'ARM', activate: armScanGrenade },
-    update: updateScanGrenade
+    update: updateScanGrenade,
+    markNumbers: {
+      scanGrenadeBursts: ['How many times it scans', 1, 4, 1],
+      scanGrenadeSweeps: ['How much light each scan has (in sweeps of the scanner)', 0.5, 6, 0.1],
+      scanGrenadeBurstSeconds: ['How long each scan lasts (seconds)', 0.4, 4, 0.1],
+      scanGrenadeStunSeconds: ['How long it stuns the Hollow (seconds)', 0, 12, 0.5],
+      scanGrenadeFuseSeconds: ['Its fuse, if it lands nowhere (seconds)', 2, 15, 0.5]
+    }
   },
   // A scanner tripod: a scanner on three legs. Q with it in the beam switches it on or off; on, it scans what
   // is in front of it, a pulse of light every second and a half, from wherever it is and whichever way it has
@@ -164,7 +174,8 @@ const LOOSE_OBJECT_KINDS = {
   firstAidKit: {
     label: 'first aid kit', mass: 1.2, value: 20, fragile: 0.3, material: 'case', loud: 0.8, lies: 'onItsSide', bulky: false, bounce: 0.15, grip: 0.6, pocket: true,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.13, 0.09, 0.045] }, { shape: 'capsule', from: [-0.04, 0.1, 0], to: [0.04, 0.1, 0], radius: 0.012 }],
-    use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit }
+    use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit },
+    markNumbers: { firstAidHeals: ['What it gives back (of 100)', 1, 100, 1] }
   },
   // ... and what is left when it has run out: the same can, a sixth of the weight, and as loud as an empty can
   // is. Nothing needs it any more. It is worth a little to Salvage, and it is something to throw.
@@ -514,6 +525,42 @@ function updateLooseObjectMatrix(object) {
   matrix[0] = 1 - 2 * (y * y + z * z); matrix[1] = 2 * (x * y - w * z); matrix[2] = 2 * (x * z + w * y);
   matrix[3] = 2 * (x * y + w * z); matrix[4] = 1 - 2 * (x * x + z * z); matrix[5] = 2 * (y * z - w * x);
   matrix[6] = 2 * (x * z - w * y); matrix[7] = 2 * (y * z + w * x); matrix[8] = 1 - 2 * (x * x + y * y);
+}
+
+// ---------------------------------------------------------------------------
+// Marks
+//
+// A thing that does something can come in better makes. A mark is a kind of its own, made in the workshop (a
+// file in src/objects/, so it has its own shape, name, weight and worth), that says which kind it works like:
+// it then does what that kind does (`use`, `update`), goes where that kind goes (a pocket), and has the numbers
+// of that kind its own way where its file says so. So nothing here knows about marks but two things:
+//   getLooseNumber   whatever a thing does, it reads its numbers through this, and not from TUNING itself
+//   chooseMarkedKind  wherever a station puts out a thing that comes in marks, this says which mark it is
+// To let another kind come in marks: give it `markNumbers`, and have its code read those through getLooseNumber.
+// ---------------------------------------------------------------------------
+
+// The marks there are of each kind that has any, by the key of the kind they work like: [[kindKey, mark], ...].
+// (Filled in from the object files: 08-workshop-objects.js.)
+const LOOSE_OBJECT_MARKS = {};
+
+// A number of TUNING as this thing has it: its mark's own, if its mark says so.
+function getLooseNumber(object, key) {
+  const own = object.kind.numbers;
+  return own && own[key] !== undefined ? own[key] : TUNING[key];
+}
+
+// Which kind a station puts out where it puts out a `baseKey`: that kind itself, or one of its marks, by the
+// weights in TUNING.itemMarkWeights. `random` is only asked for a number if there is a mark to choose: so a
+// station that has none (one built from the code alone) is not changed by this at all.
+function chooseMarkedKind(baseKey, random) {
+  const marks = (LOOSE_OBJECT_MARKS[baseKey] || []).filter(function (entry) { return isLooseKindInStations(entry[0]) && (TUNING.itemMarkWeights[entry[1]] || 0) > 0; });
+  if (marks.length === 0) return baseKey;
+  let total = TUNING.itemMarkWeights[1];
+  for (const entry of marks) total += TUNING.itemMarkWeights[entry[1]];
+  let draw = random() * total - TUNING.itemMarkWeights[1];
+  if (draw < 0) return baseKey;
+  for (const entry of marks) { draw -= TUNING.itemMarkWeights[entry[1]]; if (draw < 0) return entry[0]; }
+  return baseKey;
 }
 
 function createLooseObject(kindKey, x, y, z, yaw) {
@@ -2639,12 +2686,14 @@ function planStationLooseObjects() {
   // First aid kits: a few to a station, on bare floor that is in nobody's way. They have numbers of their own,
   // so that nothing else here is moved by how many of them there are.
   const kitRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0xa1d417);
+  // (Which mark each thing below is has numbers of its own as well: where it lies does not hang on what it is.)
+  const markRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0x3a21c7);
   const kitsWanted = Math.max(1, Math.round(rooms * TUNING.firstAidKitsPerRoom));
   let kits = 0;
   for (; kits < kitsWanted && nextTile < tiles.length; nextTile++) {
     if (tiles[nextTile][2] !== 1) continue;
     const index = tiles[nextTile][1];
-    addStationLooseObject('firstAidKit', index % GRID_WIDTH + 0.3 + kitRandom() * 0.4, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.3 + kitRandom() * 0.4,
+    addStationLooseObject(chooseMarkedKind('firstAidKit', markRandom), index % GRID_WIDTH + 0.3 + kitRandom() * 0.4, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.3 + kitRandom() * 0.4,
       kitRandom() * TWO_PI, true, false, 'floor');
     kits++;
   }
@@ -2668,7 +2717,7 @@ function planStationLooseObjects() {
   for (; grenades < grenadesWanted && nextTile < tiles.length; nextTile++) {
     if (tiles[nextTile][2] !== 1) continue;
     const index = tiles[nextTile][1];
-    addStationLooseObject('scanGrenade', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, grenadeRandom() * TWO_PI, false, false, 'floor');
+    addStationLooseObject(chooseMarkedKind('scanGrenade', markRandom), index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, grenadeRandom() * TWO_PI, false, false, 'floor');
     grenades++;
   }
   level.scanGrenadeCount = grenades;
@@ -3393,8 +3442,9 @@ function showLooseScannerLights() {
 // go of it, or when its fuse runs out, wherever it is by then.
 function armScanGrenade(object) {
   object.armedTime = game.time;
-  object.goesOffTime = game.time + TUNING.scanGrenadeFuseSeconds;
+  object.goesOffTime = game.time + getLooseNumber(object, 'scanGrenadeFuseSeconds');
   object.hasLanded = false;
+  object.burstsDone = 0;
   playScanGrenadeSound('arm', object.x, object.y, object.z);
   showMessage('Armed. It goes off where it lands. Throw it.', 4, 'warning');
 }
@@ -3415,8 +3465,9 @@ function updateScanGrenade(object, dt) {
     object.burstHitsOnHollow = 0;
   }
   // Its light: pulses in every direction from where it is, a share of them each frame, for as long as it lasts.
-  const pulsesInAll = QUALITY_PRESETS[settings.quality].sweepRays * TUNING.scanGrenadeSweeps;
-  object.burstBudget += pulsesInAll * Math.min(dt, TUNING.scanGrenadeBurstSeconds - object.burstSeconds) / TUNING.scanGrenadeBurstSeconds;
+  const burstSeconds = getLooseNumber(object, 'scanGrenadeBurstSeconds');
+  const pulsesInAll = QUALITY_PRESETS[settings.quality].sweepRays * getLooseNumber(object, 'scanGrenadeSweeps');
+  object.burstBudget += pulsesInAll * Math.min(dt, burstSeconds - object.burstSeconds) / burstSeconds;
   const pulses = Math.min(4000, Math.floor(object.burstBudget));
   object.burstBudget -= pulses;
   looseRaySkipped = object; // its own light does not stop on its own case
@@ -3436,9 +3487,16 @@ function updateScanGrenade(object, dt) {
     }
   }
   looseRaySkipped = null;
-  if (object.burstHitsOnHollow >= TUNING.scanGrenadeStunHits && !object.hasStunned) object.hasStunned = stunHollow(TUNING.scanGrenadeStunSeconds);
+  if (object.burstHitsOnHollow >= TUNING.scanGrenadeStunHits && !object.hasStunned) object.hasStunned = stunHollow(getLooseNumber(object, 'scanGrenadeStunSeconds'));
   object.burstSeconds += dt;
-  if (object.burstSeconds >= TUNING.scanGrenadeBurstSeconds) {
+  if (object.burstSeconds >= burstSeconds) {
+    // One that scans more than once goes dark for a moment and then goes off again, where it lies by then.
+    object.burstsDone = (object.burstsDone || 0) + 1;
+    if (object.burstsDone < getLooseNumber(object, 'scanGrenadeBursts')) {
+      object.burstSeconds = 0; object.burstBudget = 0;
+      object.goesOffTime = game.time + TUNING.scanGrenadeBurstGapSeconds;
+      return;
+    }
     object.isSpent = true;
     object.worth = Math.min(object.worth, 2); // (gone off, it is scrap)
     looseState.statistics.grenadesSpent++;

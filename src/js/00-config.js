@@ -224,6 +224,11 @@ const TUNING = {
   stillAfterHitSeconds: 5,          // a Still that has struck does not move, or strike, again for this long
   playerRetryHealth: 25,            // back from a checkpoint, or on your feet again where the others restarted your scanner: at least this much
   firstAidHeals: 10,                // what a first aid kit gives back
+  // Marks. A thing that does something (a scan grenade, a first aid kit) can come in better makes: mk II, mk III.
+  // Each is an object made in the workshop that "works like" the plain one and has some of its numbers its own
+  // way (08-workshop-objects.js). Where a station puts out one of a kind, this is how likely each mark is, by its
+  // number: the plain one (mark 1) counts for 1, and the others for these. A mark nothing is made for is not there.
+  itemMarkWeights: [0, 1, 0.3, 0.1, 0.04, 0.02],
   firstAidKitsPerRoom: 0.12,        // how many of them a station has, for each of its rooms (never fewer than one)
   healthCriticalShare: 0.3,         // at or below this share of your health the bar on the HUD goes red
   noiseRadiusDropLanding: 18,   // landing at the foot of a drop in a vent (per metre fallen it is no louder: it is the sheet metal that rings)
@@ -297,6 +302,8 @@ const TUNING = {
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
+  scanGrenadeBursts: 1,             // how many times it scans, one after the other (a mark II: twice)
+  scanGrenadeBurstGapSeconds: 1.5,  // ... and how long it is dark between two of them
   scanGrenadeSweeps: 1.7,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000). This was 2.5 while a third of them went into the floor under it; 1.6 puts as many on the room as 2.5 did then.
   scanGrenadePatchMetres: 0.25,     // it wastes no light on anything it is up against: a pulse that would land on floor, wall or ceiling nearer than this is aimed somewhere else instead. (Lying on the floor, 35 of every 100 pulses of an all-round burst landed within a hand of it.)
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned

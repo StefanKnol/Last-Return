@@ -95,7 +95,7 @@ function useFirstAidKit(object) {
   object.isSpent = true;
   object.worth = Math.min(object.worth, 2);
   if (looseState.held !== object) return;
-  healPlayer(TUNING.firstAidHeals);
+  healPlayer(getLooseNumber(object, 'firstAidHeals')); // (a better mark of kit gives back more: "Marks", 08-loose-objects.js)
   playFirstAid();
-  showMessage('First aid kit used.', 4, 'info');
+  showMessage(object.kind.label.charAt(0).toUpperCase() + object.kind.label.slice(1) + ' used.', 4, 'info');
 }
