@@ -89,11 +89,12 @@ function initializeInterface() {
     else if (game.mode === 'intro' && input.isPointerLocked) finishIntro();
   });
 
-  // Where an uncharted station may be: one choice for every location there is (03-locations.js).
-  for (const locationKey in LOCATIONS) {
+  // Where an uncharted station may be: anywhere (the seed says where), or one choice for every location there
+  // is (03-locations.js).
+  for (const choice of [[ANY_LOCATION_KEY, 'Anywhere']].concat(Object.keys(LOCATIONS).map(function (locationKey) { return [locationKey, LOCATIONS[locationKey].label]; }))) {
     const option = document.createElement('option');
-    option.value = locationKey;
-    option.textContent = LOCATIONS[locationKey].label;
+    option.value = choice[0];
+    option.textContent = choice[1];
     elements['title-station-location'].appendChild(option);
   }
 
@@ -183,9 +184,11 @@ function initializeInterface() {
       const allowed = getAllowedWorkOrders();
       description += ' A descent has one work order' + (allowed.length === 1 ? ': ' + findWorkOrder(allowed[0]).label + '. ' + findWorkOrder(allowed[0]).blurb : ', one of those ticked.');
     }
-    if (isGenerated && level.kind === 'generated') description += ' Last descent: seed ' + level.seed + ' (' + (findWorkOrder(level.workOrder) || WORK_ORDERS[0]).label + ').';
+    if (isGenerated && settings.stationLocation === ANY_LOCATION_KEY) description += ' Where it is goes with the seed too: ' + Object.keys(LOCATIONS).map(function (locationKey) { return LOCATIONS[locationKey].label.toLowerCase(); }).join(', ') + '.';
+    if (isGenerated && level.kind === 'generated') description += ' Last descent: seed ' + level.seed + ' (' + (findWorkOrder(level.workOrder) || WORK_ORDERS[0]).label + ', ' + getLocation(level.locationKey).label.toLowerCase() + ').';
     elements['station-description'].textContent = description;
   };
+  elements['title-station-location'].addEventListener('input', function () { refreshStationControls(); });
   for (const radio of stationInputs) {
     radio.addEventListener('change', function () {
       if (radio.checked) { settings.station = radio.value; saveSettings(); refreshStationControls(); }

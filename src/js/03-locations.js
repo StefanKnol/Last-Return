@@ -30,7 +30,15 @@
 // keycard and has a place to leave a card (`itemSpot`), or a station with two or three cards cannot be planned.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_LOCATION_KEY = 'annex'; // TODO randomize by default
+// The place a station is in where nothing says which: Kessel-9, a room file from before there were places, a
+// station a test asks for by its seed alone, a descent somebody shares without saying where. It is not what
+// the title screen starts on: that is ANY_LOCATION_KEY, below.
+const DEFAULT_LOCATION_KEY = 'annex';
+
+// What "Place" on the title screen can be besides one of the places: any of them. Which one a descent is in is
+// then drawn from its seed, as everything else about it is: an empty seed box is somewhere else every time, and
+// a seed that is typed in is the same station in the same place whenever it is typed.
+const ANY_LOCATION_KEY = 'random';
 
 const LOCATIONS = {
   annex: {
@@ -73,6 +81,20 @@ const LOCATIONS = {
 
 function getLocation(locationKey) {
   return Object.prototype.hasOwnProperty.call(LOCATIONS, locationKey) ? LOCATIONS[locationKey] : LOCATIONS[DEFAULT_LOCATION_KEY];
+}
+
+// The place the title screen is set to, as it is kept: one of the places, or any of them. Anything else (nothing
+// kept yet, or a place this game no longer has) is any of them.
+function resolvePlaceSetting(value) {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(LOCATIONS, value) ? value : ANY_LOCATION_KEY;
+}
+
+// Which place a seed is in, when the title screen leaves that to the seed.
+function chooseLocationForSeed(seed) {
+  const keys = Object.keys(LOCATIONS);
+  const draw = createSeededRandomGenerator((Math.imul(seed | 0, 2246822519) ^ 0x51ed270b) >>> 0);
+  draw(); // (the first number of two seeds that are next to each other is too much alike)
+  return keys[Math.floor(draw() * keys.length)];
 }
 
 // The key of a location this game has: the one given, or the annex.

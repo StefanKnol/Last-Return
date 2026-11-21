@@ -233,10 +233,12 @@ function chooseSeedFromText(text) {
 // What a descent is of: which station, and at what threat level. This is what is chosen on the title screen,
 // with the seed settled. Players who descend together all go down with the host's (11-together.js).
 function describeChosenDescent() {
+  const seed = chooseSeedFromText(settings.seedText);
   return {
     kind: settings.station === 'generated' ? 'generated' : 'classic',
-    seed: chooseSeedFromText(settings.seedText), sizeKey: settings.stationSize, layoutKey: settings.stationLayout, levelsKey: settings.stationLevels,
-    locationKey: resolveLocationKey(settings.stationLocation),
+    seed: seed, sizeKey: settings.stationSize, layoutKey: settings.stationLayout, levelsKey: settings.stationLevels,
+    // Where it is: the place that is chosen, or, left to the seed, the place that seed is in (03-locations.js).
+    locationKey: settings.stationLocation === ANY_LOCATION_KEY ? chooseLocationForSeed(seed) : resolveLocationKey(settings.stationLocation),
     workOrders: getAllowedWorkOrders(),
     difficultyKey: settings.difficulty, customDifficulty: settings.customDifficulty
   };

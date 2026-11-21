@@ -111,7 +111,7 @@ function installLetTheBrowserCatchUp() {
 const gamePagePath = path.join(__dirname, '..', 'index.html');
 const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 
-// Runs in the page before any of its own script, and settles three things about the stations the checks build.
+// Runs in the page before any of its own script, and settles four things about the stations the checks build.
 // The game is told as soon as it puts out its test hook, so that both hold after a reload too.
 //
 // From the code alone. The checks are made on stations that are built without the rooms in src/rooms/ and the
@@ -129,6 +129,12 @@ const devPagePath = path.join(__dirname, '..', 'build', 'workshop.html');
 // A check that passes as usual and fails like this was written against one station, not against a rule. (Only
 // the stations a check builds through the test hook are other ones. A seed typed into the menu is taken as it is.)
 //
+// In the annex. The title screen leaves where a station is to its seed, unless a place is chosen there
+// (src/js/03-locations.js). A check that looks a station up through the test hook, which builds the pumping
+// annex unless it is told another place, and then goes down into that seed from the title screen, has to find
+// the station it looked up: so in these pages "Place" is set to the annex, unless the suite opens its page with
+// `anyPlace: true` (generated-station-test.js, for the checks that are about exactly this).
+//
 // Nothing arrives by itself. In a generated station the Hollow comes in its own time: after some minutes drawn
 // by chance, sooner for every noise (src/js/08-arrivals.js). A check about doors or fuel that plays a few
 // minutes of a descent would be walked in on, now and then, and fail for it. So in these pages it only comes
@@ -144,6 +150,11 @@ function installTestStations(testStations) {
       if (!value) return;
       if (testStations.areFromCodeAlone && value.setWorkshopContentUsed) value.setWorkshopContentUsed(false);
       if (testStations.areArrivalsHeld && value.debugState) value.debugState.areArrivalsHeld = true;
+      if (testStations.isInTheAnnex && value.settings) {
+        value.settings.stationLocation = 'annex';
+        const control = document.getElementById('title-station-location');
+        if (control) control.value = 'annex';
+      }
       if (!testStations.hasLooters && value.setLootersWanted) value.setLootersWanted(false);
       if (testStations.otherStations && value.loadStation) {
         const loadStationAsAsked = value.loadStation;
@@ -166,10 +177,13 @@ function readOtherStations() {
 
 // `workshopContent: true` leaves the stations as the game builds them, with what the workshop made.
 // `arrivals: true` lets the Hollow come by itself, as it does in the game.
+// `anyPlace: true` leaves "Place" on the title screen as the game has it: anywhere, the seed says where. Without
+// it a descent begun from the title screen is in the pumping annex, where the stations a check has looked up by
+// their seed are (the test hook builds the annex unless it is told another place).
 // `looters: true` leaves the looters in the stations (src/js/08-looter.js). Without it a station has none: what a
 // looter carries off is chance, and the checks that are about something else are not to have their things taken.
 async function openGame(options) {
-  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false, arrivals: false, looters: false }, options || {});
+  const settings = Object.assign({ width: 1280, height: 720, deviceScaleFactor: 1, isPhone: false, dev: false, address: '', workshopContent: false, arrivals: false, looters: false, anyPlace: false }, options || {});
   const browser = await launchBrowser();
   const context = await browser.newContext({
     viewport: { width: settings.width, height: settings.height },
@@ -184,7 +198,8 @@ async function openGame(options) {
   });
   page.on('pageerror', (error) => problems.push('page error: ' + error.message));
   await page.addInitScript(installLetTheBrowserCatchUp);
-  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations(), areArrivalsHeld: !settings.arrivals, hasLooters: settings.looters });
+  await page.addInitScript(installTestStations, { areFromCodeAlone: !settings.workshopContent, otherStations: readOtherStations(), areArrivalsHeld: !settings.arrivals, hasLooters: settings.looters,
+    isInTheAnnex: !settings.anyPlace });
   // `address` opens the game where a server has it (together-test.js); otherwise it is opened from its file.
   await page.goto(settings.address || 'file://' + (settings.dev ? devPagePath : gamePagePath));
   await page.waitForFunction((needsDebugMode) => Boolean(window.lastReturnDebug && (!needsDebugMode || window.lastReturnDebug.setDebugOption)), settings.dev);

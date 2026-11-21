@@ -253,6 +253,37 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('the place chosen on the title screen is part of the descent, reaches whoever goes down with you, and a place this game does not have is refused',
     carried.said === otherPlaces[0] && carried.heard === otherPlaces[0] && carried.fromBefore === 'annex' && carried.nowhere === null, carried);
 
+  // Left alone, the title screen leaves the place to the seed. On a page of its own, as the game comes up (the
+  // page the other checks use has "Place" set to the annex: browser-harness.js).
+  const untouched = await openGame({ anyPlace: true });
+  const anywhere = await untouched.page.evaluate(() => {
+    const debug = window.lastReturnDebug, control = document.getElementById('title-station-location');
+    const asItComesUp = { setting: debug.settings.stationLocation, shown: control.value, choices: Array.from(control.options).map((option) => option.value) };
+    debug.settings.station = 'generated';
+    // What each of a run of seeds is in, asked twice; and what a seed is in once a place is chosen.
+    const places = {}, changed = [];
+    for (let seed = 1; seed <= 120; seed++) {
+      debug.settings.seedText = String(seed);
+      const first = debug.describeChosenDescent().locationKey, second = debug.describeChosenDescent().locationKey;
+      places[first] = (places[first] || 0) + 1;
+      if (first !== second) changed.push(seed);
+    }
+    const chosen = Object.keys(debug.locations).map((place) => { debug.settings.stationLocation = place; return debug.describeChosenDescent().locationKey; });
+    debug.settings.stationLocation = asItComesUp.setting; debug.settings.seedText = '41';
+    return { asItComesUp: asItComesUp, places: places, changed: changed, chosen: chosen, all: Object.keys(debug.locations), promised: debug.describeChosenDescent().locationKey };
+  });
+  check('left alone, "Place" is anywhere: the seed says where, every place turns up, none of them most of the time, and a seed is in the same place every time; a place that is chosen is the place',
+    anywhere.asItComesUp.setting === 'random' && anywhere.asItComesUp.shown === 'random' && anywhere.asItComesUp.choices.join() === ['random'].concat(anywhere.all).join() &&
+    anywhere.all.every((place) => anywhere.places[place] >= 120 / anywhere.all.length / 2) && anywhere.changed.length === 0 && anywhere.chosen.join() === anywhere.all.join(), anywhere);
+  await untouched.page.click('#station-generated');
+  await untouched.page.fill('#title-seed', '41');
+  await untouched.page.click('#button-begin');
+  await untouched.page.waitForFunction(() => window.lastReturnDebug.game.mode !== 'title');
+  const wentDown = await untouched.page.evaluate(() => ({ place: window.lastReturnDebug.level.locationKey, seed: window.lastReturnDebug.level.seed, firstLine: window.lastReturnDebug.getIntroLines()[0] }));
+  check('and "Begin descent" goes down into that seed in that place', wentDown.seed === 41 && wentDown.place === anywhere.promised, { wentDown: wentDown, promised: anywhere.promised });
+  check('no script errors on that page', untouched.problems.length === 0, untouched.problems);
+  await untouched.browser.close();
+
   // --- a seed is a promise: the same seed must give the same station, a different seed a different one ---
   const repeat = await inGame(() => {
     const debug = window.lastReturnDebug;

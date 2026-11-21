@@ -280,7 +280,7 @@ function hearLobbyChoices(data) {
   if (has(GENERATED_SIZE_PRESETS, data.stationSize)) settings.stationSize = data.stationSize;
   if (has(GENERATED_LAYOUT_PRESETS, data.stationLayout)) settings.stationLayout = data.stationLayout;
   if (has(GENERATED_LEVEL_PRESETS, data.stationLevels)) settings.stationLevels = data.stationLevels;
-  if (has(LOCATIONS, data.stationLocation)) settings.stationLocation = data.stationLocation;
+  if (has(LOCATIONS, data.stationLocation) || data.stationLocation === ANY_LOCATION_KEY) settings.stationLocation = data.stationLocation;
   if (typeof data.seedText === 'string') settings.seedText = data.seedText.slice(0, 24);
   if (Array.isArray(data.workOrders)) {
     settings.workOrders = {};
