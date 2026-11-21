@@ -695,6 +695,9 @@ function wrapForTogether() {
   playLooterChitter = shareWorldSound('playLooterChitter', playLooterChitter);
   playLooterChirp = shareWorldSound('playLooterChirp', playLooterChirp);
   playLooterSqueal = shareWorldSound('playLooterSqueal', playLooterSqueal);
+  // The Surveyor (08-surveyor.js): its voice. (Its ticking and its feet each game sounds for itself, as it shows its light for itself.)
+  playSurveyorChirp = shareWorldSound('playSurveyorChirp', playSurveyorChirp);
+  playSurveyorWhine = shareWorldSound('playSurveyorWhine', playSurveyorWhine);
   // The Hollow treading on glass, cans or a loose plate, and flinging a thing: your warning, and so the others' too.
   // (Shared only while the host's creatures are being run, like the rest: your own step on glass is your own.)
   playNoisyFloorSound = shareWorldSound('playNoisyFloorSound', playNoisyFloorSound);
@@ -896,6 +899,7 @@ function sendCreaturesAwayAfterCatch(kind) {
   if (!isWorldYoursToShare()) return;
   if (kind === 'hollow') relocateHollowAwayFromPlayer(12);
   else if (kind === 'still' && stillsAreHunting) resetStillsToHomePositions();
+  // (The Surveyor has run off already: that is what it does after a hit.)
 }
 
 // ---- What is done to the station, in one order ----
@@ -1320,8 +1324,8 @@ function hearOfTheStation(id, data) {
     const action = readAction(data.a);
     if (action && Number.isInteger(data.p)) performActionFor(data.p, action);
   } else if (data.k === 'caught' && data.p === together.myId) {
-    const kind = data.kind === 'still' ? 'still' : (data.kind === 'looter' ? 'looter' : 'hollow');
-    const figure = kind === 'still' ? (stills[data.s] ? stills[data.s].figure : null) : (kind === 'looter' ? (looters[data.s] ? looters[data.s].figure : null) : hollow.figure);
+    const kind = data.kind === 'still' ? 'still' : (data.kind === 'looter' ? 'looter' : (data.kind === 'surveyor' ? 'surveyor' : 'hollow'));
+    const figure = kind === 'still' ? (stills[data.s] ? stills[data.s].figure : null) : (kind === 'looter' ? (looters[data.s] ? looters[data.s].figure : null) : (kind === 'surveyor' ? surveyor.figure : hollow.figure));
     // What the hit does to you is your own game's to say (09-health.js). Unless it kills you, the host is
     // told you are still on your feet.
     if (!figure || hitPlayer(kind, figure) !== 'dead') sayToOthers({ k: 'back' });

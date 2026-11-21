@@ -70,6 +70,7 @@ const SURFACE_DOOR_KEYCARD_2 = 14; // a door that needs keycard 2
 const SURFACE_DOOR_KEYCARD_3 = 15; // a door that needs keycard 3
 const SURFACE_PLAYER = 16;          // somebody who is down here with you (11-together.js)
 const SURFACE_SCANNER_LIGHT = 17;   // the light on top of their scanner: not something scanned, it is simply lit
+const SURFACE_SURVEYOR_LIGHT = 18;  // a point left by the Surveyor's own light (08-surveyor.js): not yours, in a colour of its own, and it does not last
 
 const WALL_NORTH = 0;
 const WALL_EAST = 1;

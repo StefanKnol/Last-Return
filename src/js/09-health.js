@@ -31,13 +31,15 @@ function resetPlayerHealth() {
 function getHitDamage(kind) {
   if (kind === 'hollow') return TUNING.hollowHitDamage;
   if (kind === 'still') return TUNING.stillHitDamage;
+  if (kind === 'surveyor') return TUNING.surveyorHitDamage;
   return TUNING.looterBiteDamage;
 }
 
 const HURT_TEXT = {
   hollow: 'It has hit you. Get away from it while it stands there.',
   still: 'One of them has hit you. Keep them in the scan.',
-  looter: 'It has bitten you. Get out of its vents.'
+  looter: 'It has bitten you. Get out of its vents.',
+  surveyor: 'It has struck you, and it is off. Stay out of its light.'
 };
 
 // Something has hit you: `kind` says what ('hollow', 'still', 'looter'), `figure` is its body. Returns what

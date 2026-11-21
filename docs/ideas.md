@@ -55,7 +55,8 @@
 - more monsters to vary threat or increase it
   - what they share is in place (08-creatures.js: ways of getting around, walking, hearing, the list of kinds); each is its own file of behaviour
   - a few of the harmless ones from the start of a descent, how many by threat level (left alone by the crew, in lore)
-  - lidar monster produces dots around it on everything, but can see the player
+  - ~~lidar monster produces dots around it on everything, but can see the player~~ (in: the Surveyor, 08-surveyor.js. Deaf, sees by its own light, strikes once and runs, dazzled by light in its eye)
+  - ~~not all of them from the start: one first, either one, and more as time goes~~ (in: 08-arrivals.js, an order drawn for every descent)
     - nearly 2 m: no vents, but the ceiling hatches. A cone of pulses from its face, more of them while it hunts
     - hits once and runs off (wants the health system)
   - ~~small monster (the looter)~~ (in: 08-looter.js. Still open below: summoning others, throwing things, being thrown)

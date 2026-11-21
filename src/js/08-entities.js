@@ -49,6 +49,7 @@ const hollow = Object.assign(createCreatureLegs(HOLLOW_WAY), {
   stingerCooldown: 0,
   armRaise: 0,
   climbIntoHatch: beginHollowCrawl,           // under a hatch that is its shortest way on (moveCreatureToward)
+  crawling: HOLLOW_CRAWLING,                  // what is its own about a trip through the crawlspace (08-crawlspace.js)
   waitsBeforeHatch: chooseDoorBeforeCrawling, // ... unless there is a door it would rather go at first
   crawlspace: null,           // while it is going through the crawlspace: where from, where to, how far along (08-crawlspace.js)
   doorBang: null,             // while it is going at a door: which door, which side it stands on, how far along

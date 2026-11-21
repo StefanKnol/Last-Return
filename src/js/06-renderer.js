@@ -161,6 +161,8 @@ void main() {
   else if (surfaceClass == 12) color = vec3(0.85, 0.66, 0.1);
   else if (surfaceClass == 16) color = vec3(0.5, 1.0, 0.92);
   else if (surfaceClass == 17) color = vec3(1.9, 1.0, 0.2);
+  // TWEAK: the colour of the points the Surveyor's own light leaves. A cold violet: nothing else down there is that colour.
+  else if (surfaceClass == 18) color = vec3(0.92, 0.38, 1.3);
   // TWEAK: 0.03 is how quickly points dim with distance. 0 = no dimming, 0.1 = far rooms nearly black.
   float brightness = (0.22 + 0.78 * intensity) / (1.0 + distanceToCamera * 0.03) * (0.72 + 0.28 * smoothstep(0.4, 4.0, distanceToCamera));
   // TWEAK: fresh points flash white. 2.6 is how fast the flash dies (higher = shorter flash).
