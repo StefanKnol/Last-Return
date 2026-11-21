@@ -44,8 +44,7 @@
 //   placeLast      true: its things are put out after every other quest's, so that giving a station more
 //                  of them moves nothing else
 //   progress       instead of the count the quest keeps: a function returning { done, total }
-//   taken          for 'collect': function (instance, object, interactable) run in place of the usual
-//                  "take it and count it", for a thing that does more when taken
+//   share          instead of done / total, for how far along the quest is as the Hollow's director counts it: a function returning 0 to 1
 //   count          how many things: a number, or [fewest, most] to let the seed decide
 //   countFromSize  instead of count: the name of a [fewest, most] pair in GENERATED_SIZE_PRESETS (03-levelgen.js)
 //   fewest         if fewer than this many find a place, the quest is taken out again
@@ -141,7 +140,7 @@ function countQuestThings(key) {
 function describeUploadManifest() {
   const order = findWorkOrder(level.workOrder) || WORK_ORDERS[0];
   let text = order.manifest();
-  const held = game.flags.spoolsCollected;
+  const held = game.flags.spoolsLoaded; // (the ones that were brought to the terminal: what lies about down there stays down there)
   if (!areSpoolsOnTheOrder() && held > 0) text += '. Not on the work order: ' + held + (held === 1 ? ' survey spool' : ' survey spools');
   return text;
 }
@@ -159,19 +158,26 @@ const QUESTS = [
   // ---- the survey spools: what every descent is for ----
   // Three of them are part of every station and lie where their rooms put them (`fixedObjectIds`): the first
   // where you can reach it without power, the second in the calibration store, the third at Shaft 9. A bigger
-  // station may have more (`countFromSize`), left on crates in ordinary rooms. Taking one does more than
-  // count it (`taken`): it is read, and Dispatch may speak.
+  // station may have more (`countFromSize`), left on crates in ordinary rooms.
+  // A spool is not a thing to press: it is a loose thing (LOOSE_OBJECT_KINDS.spool, 08-loose-objects.js) that
+  // is carried, in the beam or in a pocket, and brought to the lift terminal, which takes it. So it has two
+  // counts. How many have been FOUND (game.flags.spoolsCollected: one of you has had it in the beam, and so read
+  // it) is what Dispatch counts and what presses the Hollow on (`share`). How many have been LOADED at the
+  // terminal (game.flags.spoolsLoaded) is what the upload waits for (`progress`).
   {
     key: 'spools', kind: 'collect', blocks: 'upload', always: true, placeLast: true,
     fixedObjectIds: STORY_SPOOL_IDS,
     countFromSize: 'extraSpools', most: MAXIMUM_EXTRA_SPOOLS, firstObjectId: OBJECT_EXTRA_SPOOL_FIRST,
     tiers: [0, 'beforeLast'],
     build: function (objectId, x, z) { addLooseSpool(objectId, x, z); },
-    // How many you hold is game.flags.spoolsCollected, as it always was: the Hollow's pacing reads it, and so do the tests.
-    progress: function () { return { done: game.flags.spoolsCollected, total: level.spoolCount }; },
-    taken: function (instance, object, interactable) { collectSpool(interactable); },
+    progress: function () { return { done: game.flags.spoolsLoaded, total: level.spoolCount }; },
+    share: function () { return level.spoolCount > 0 ? game.flags.spoolsCollected / level.spoolCount : 0; },
     text: {
-      objective: function () { return level.spoolCount === 3 ? OBJECTIVE_TEXT.collectSpools : OBJECTIVE_TEXT.collectSpoolsOfMany; },
+      // Until every one has been found: go and find them. After that: bring them to the terminal.
+      objective: function () {
+        if (game.flags.spoolsCollected >= level.spoolCount) return OBJECTIVE_TEXT.returnToLift;
+        return level.spoolCount === 3 ? OBJECTIVE_TEXT.collectSpools : OBJECTIVE_TEXT.collectSpoolsOfMany;
+      },
       chip: '', // the spools have a place of their own on screen, beside the mains and the keycards
       refused: 'LIFT CONTROL: upload locked. Survey spools loaded: {done} of {total}.'
     }
@@ -435,7 +441,7 @@ function findQuest(key) {
 function createQuestInstanceWithFixedThings(definition) {
   const instance = createQuestInstance(definition);
   for (const objectId of definition.fixedObjectIds || []) {
-    const interactable = findInteractableByObjectId(objectId);
+    const interactable = findInteractableByObjectId(objectId) || findLooseThingPutOut(objectId); // (a thing to press, or a loose thing: a spool)
     if (!interactable) continue;
     instance.objects.push({ objectId: objectId, index: instance.objects.length, name: '', x: interactable.x, z: interactable.z,
       needsItem: false, itemObjectId: 0, isSupplied: false, isDone: false, isFixed: true });
@@ -600,7 +606,8 @@ function placeQuests(plan, seed, size, allowedOrders) {
           }
           // (What it needed is a loose thing, not something to press: that is taken back out of what the station puts out.)
           for (let index = questLooseObjects.length - 1; index >= 0; index--) {
-            if (object.itemObjectId > 0 && questLooseObjects[index].questObjectId === object.itemObjectId) questLooseObjects.splice(index, 1);
+            const number = questLooseObjects[index].questObjectId;
+            if ((object.itemObjectId > 0 && number === object.itemObjectId) || (object.objectId > 0 && number === object.objectId)) questLooseObjects.splice(index, 1);
           }
         }
         return false;
@@ -735,7 +742,8 @@ function getWorkOrderProgressShare() {
     if (instance.isOptional || !order || order.quests.indexOf(instance.key) < 0) continue;
     const progress = getQuestProgress(instance);
     if (progress.total <= 0) continue;
-    share += clampNumber(progress.done / progress.total, 0, 1);
+    // (A quest may have a measure of its own for this: the spools press it on as they are found, not as they are loaded.)
+    share += clampNumber(instance.definition.share ? instance.definition.share() : progress.done / progress.total, 0, 1);
     count++;
   }
   return count > 0 ? share / count : 0;
@@ -809,7 +817,7 @@ function findFuelTankAt(x, y, z) {
 // One splash from a can into a tank ('pour': done in every browser down there, in the host's order).
 function pourFuelIntoTank(can, tankIndex) {
   const tank = level.fuelTanks[tankIndex];
-  if (!tank || !isLooseObjectStillNeeded(can) || tank.object.isSupplied) return;
+  if (!tank || can.kindKey !== 'fuelCan' || !isLooseObjectStillNeeded(can) || tank.object.isSupplied) return;
   const instance = tank.instance, object = tank.object;
   const amount = Math.min(TUNING.fuelPourStepSeconds / TUNING.fuelPourSeconds, can.fuel, 1 - object.fuel);
   can.fuel -= amount; object.fuel += amount;
@@ -904,11 +912,6 @@ function useQuestObject(interactable) {
   const instance = entry.instance, definition = instance.definition, object = entry.object, flags = game.flags;
   if (definition.kind === 'haul') { makeQuestKnown(instance); useHaulBay(object.index); return true; }
 
-  if (definition.kind === 'collect' && definition.taken) {
-    object.isDone = true;
-    definition.taken(instance, object, interactable);
-    return true;
-  }
   if (definition.kind === 'collect') {
     removeInteractableFromWorld(interactable);
     object.isDone = true;
@@ -1045,6 +1048,15 @@ function getQuestItemKeyOfLooseObject(object) {
   if (!object.isKnownOnMap || object.isRemoved || !isLooseObjectStillNeeded(object)) return '';
   for (const itemKey in QUEST_ITEMS) if (QUEST_ITEMS[itemKey].looseKind === object.kindKey) return itemKey;
   return '';
+}
+
+// For the map: what this loose thing is marked as, if you know where it is and it still matters to a quest:
+// { label, isWanted }, or null. A fuel can with fuel in it, and a survey spool.
+function getLooseObjectMapMark(object) {
+  if (!object.isKnownOnMap || object.isRemoved) return null;
+  if (object.kindKey === 'spool') return { label: 'SPOOL', isWanted: areSpoolsOnTheOrder() };
+  const itemKey = getQuestItemKeyOfLooseObject(object);
+  return itemKey ? { label: QUEST_ITEMS[itemKey].mapLabel, isWanted: isQuestItemWantedNow(itemKey) } : null;
 }
 
 // Whether a machine somewhere could take one of these items right now.

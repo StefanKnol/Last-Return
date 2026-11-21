@@ -13,7 +13,8 @@ const game = {
     powerOn: false,
     hasKeycard: false,   // holds at least keycard 1
     keycardLevel: 0,     // the number of the best keycard held: 0 none, then 1, 2, 3
-    spoolsCollected: 0,
+    spoolsCollected: 0,  // survey spools FOUND: one of you has had it in the beam (what Dispatch counts, and what presses the Hollow on)
+    spoolsLoaded: 0,     // ... and LOADED at the lift terminal, which is what the upload waits for (09-quests.js, 'spools')
     uploadStarted: false,
     liftArrived: false,
     spoolsUploaded: false    // the upload is in, but the lift has not been called because a quest holds it (the winch breaker)
@@ -40,6 +41,7 @@ const game = {
   isLeftBehind: false,           // down there with others: the car has gone up with those on their feet, and you were not one of them
   isCarStaying: false,           // this descent's car stays at your level, with a door that opens and shuts by its buttons ("The car that stays")
   isLiftDoorWantedOpen: true,    // ... and how that door was last asked to stand
+  spoolIdsFromTheHost: null,     // down there with others, while the lift terminal is being used: the spools the host's game says it takes
   actor: null,                   // somebody else whose action is being carried out here right now, or null: getActingPlayer
   hasShownNoisyFloorHint: false, // the first time something loose underfoot gives you away, you are told what it was
   attract: { yaw: -0.9, pitch: 0, timer: 0, sweepTimer: 4, sweepProgress: -1, rayBudget: 0, centerRange: -1 }
@@ -148,7 +150,7 @@ function refreshObjective() {
 function resetWorldState() {
   const flags = game.flags;
   flags.hasLeftLift = false; flags.powerOn = false; setKeycardLevel(0);
-  flags.spoolsCollected = 0; flags.uploadStarted = false; flags.liftArrived = false;
+  flags.spoolsCollected = 0; flags.spoolsLoaded = 0; flags.uploadStarted = false; flags.liftArrived = false;
   flags.hasHeardOfBrokenDoor = false;
   flags.spoolsUploaded = false;
   game.placesEntered = {};
@@ -416,11 +418,14 @@ function getSpoolLog(objectId) {
   return LOG_ENTRIES.spoolBlank;
 }
 
-// Taking a survey spool. The spools are a quest like the others (09-quests.js, 'spools'); this is what taking
-// one of them does beyond being counted: it is read, and Dispatch may have something to say.
-function collectSpool(interactable) {
-  const objectId = interactable.objectId, log = getSpoolLog(objectId);
-  removeInteractableFromWorld(interactable);
+// A survey spool has been found: one of you has taken it into the beam for the first time (11-together.js,
+// 'take'). The spools are a quest like the others (09-quests.js, 'spools'); this is what finding one does
+// beyond being counted: it is read, and Dispatch may have something to say.
+// (Only a spool the station put out. One made in debug mode is a reel and nothing more.)
+function noteSpoolFound(object) {
+  if (object.wasFound || !object.questObjectId) return;
+  object.wasFound = true;
+  const objectId = object.questObjectId, log = getSpoolLog(objectId);
   game.flags.spoolsCollected++;
   playPickupSound();
   emitNoise(getActingPlayer().x, getActingPlayer().z, TUNING.noiseRadiusPickup);
@@ -439,11 +444,47 @@ function collectSpool(interactable) {
   if (objectId === OBJECT_SPOOL_2) scheduleEvent(1.0, function () { awakenStills(); playStinger('still'); fireGameEvent('stillsWake'); });
 }
 
+// The spools the lift terminal would take if this one of you pressed it now, by their numbers: the ones in
+// their pockets, the one in their beam, and any that lie within TUNING.terminalTakesSpoolsWithinMetres of the
+// terminal (dropped off there, by whoever). `actorId` is their number in the lobby; 0 when you are alone.
+function listSpoolsAtTheTerminal(actorId) {
+  const ids = [], terminal = findInteractableByObjectId(OBJECT_LIFT_TERMINAL);
+  for (const object of getPocketsOf(actorId)) if (object && object.kindKey === 'spool' && object.questObjectId) ids.push(object.id);
+  for (const object of looseObjects) {
+    if (object.kindKey !== 'spool' || !object.questObjectId || object.looterIndex >= 0) continue;
+    const isInTheirBeam = isWorldShared() ? object.heldById === actorId : object.isHeld;
+    const liesAtTheTerminal = !object.isHeld && !object.heldById && terminal !== null &&
+      distanceBetweenPoints(object.x, object.z, terminal.x, terminal.z) <= TUNING.terminalTakesSpoolsWithinMetres;
+    if (isInTheirBeam || liesAtTheTerminal) ids.push(object.id);
+  }
+  return ids;
+}
+
+// The terminal takes these spools: they are loaded, and are no longer things in the station. Returns how many.
+function loadSpoolsAtTheTerminal(ids) {
+  let count = 0;
+  for (const id of ids) {
+    const pocketed = findPocketedObject(id), object = pocketed ? pocketed.object : findLooseObjectById(id);
+    if (!object || object.kindKey !== 'spool' || !object.questObjectId) continue;
+    if (pocketed) getPocketsOf(pocketed.playerId)[pocketed.slot] = null;
+    else removeLooseObject(object);
+    // (One that got here without anybody having had it in the beam counts as found too, unread.)
+    if (!object.wasFound) { object.wasFound = true; game.flags.spoolsCollected++; }
+    game.flags.spoolsLoaded++;
+    count++;
+  }
+  if (count > 0) { playPickupSound(); saveCheckpoint(); refreshObjective(); }
+  return count;
+}
+
 function useInteractable(interactable) {
   const flags = game.flags;
   if (useQuestObject(interactable)) return; // a thing that belongs to a quest: 09-quests.js knows what it does
   switch (interactable.objectId) {
     case OBJECT_LIFT_TERMINAL:
+      // With the mains on it takes the survey spools that have been brought to it, before anything else: what
+      // follows goes by how many it has. (Down there with others the host's game has said which: 11-together.js.)
+      if (flags.powerOn && !flags.uploadStarted) loadSpoolsAtTheTerminal(game.spoolIdsFromTheHost || listSpoolsAtTheTerminal(getPocketActor().id));
       if (!flags.powerOn) {
         playDeniedSound();
         showMessage('LIFT CONTROL: no mains power. Generator 2 is in Pump Hall B.', 5, 'warning');
@@ -1165,7 +1206,18 @@ function startApplication() {
       for (const interactable of interactables) parts.push(interactable.objectId + ':' + interactable.x.toFixed(2) + ':' + interactable.z.toFixed(2));
       return parts.join(',');
     },
-    findInteractable: findInteractableByObjectId,
+    // (For the tests: a survey spool is not a thing to press any more, but it is still asked after by its object
+    // number. It answers as one would: where it is, and whether it is still there to be taken.)
+    findInteractable: function (objectId) {
+      const interactable = findInteractableByObjectId(objectId);
+      if (interactable) return interactable;
+      const entry = findLooseThingPutOut(objectId), object = looseObjects.filter(function (candidate) { return candidate.questObjectId === objectId; })[0];
+      if (!entry || entry.kindKey !== 'spool') return null;
+      return { objectId: objectId, x: object ? object.x : entry.x, y: object ? object.y : entry.y, z: object ? object.z : entry.z, isLoose: true, mapLabel: entry.kindKey === 'spool' ? 'SPOOL' : '',
+        isAvailable: Boolean(object) && !object.wasFound, isDiscovered: Boolean(object) && object.isKnownOnMap };
+    },
+    findSpool: function (objectId) { return looseObjects.filter(function (candidate) { return candidate.kindKey === 'spool' && candidate.questObjectId === objectId; })[0] || null; },
+    noteSpoolFound: noteSpoolFound, listSpoolsAtTheTerminal: listSpoolsAtTheTerminal, loadSpoolsAtTheTerminal: loadSpoolsAtTheTerminal, getLooseObjectMapMark: getLooseObjectMapMark,
     lift: LIFT_POSITION, generator: GENERATOR_POSITION, shaft: SHAFT_POSITION, playerStart: PLAYER_START,
     getZoneAt: getZoneAtPosition,
     findWalkableSpotNear: function (x, z) {
@@ -1189,18 +1241,21 @@ function startApplication() {
       const instance = findQuest(key);
       if (!instance) return false;
       if (instance.definition.kind === 'haul') fillHaulBays();
+      // (The spools are loose things, not things to press: found and loaded, every one.)
+      if (instance.key === 'spools') { window.lastReturnDebug.grantSpools(); return isQuestDone(instance); }
       for (const object of instance.objects) {
         // What it needs is poured into it, from the can that was put out for it if that still has fuel, or else from any that has.
         if (object.needsItem && !object.isSupplied) {
           const tank = level.fuelTanks.filter(function (candidate) { return candidate.object === object; })[0];
           for (let splash = 0; tank && splash < 1000 && !object.isSupplied; splash++) {
-            const cans = looseObjects.filter(isLooseObjectStillNeeded);
+            const cans = looseObjects.filter(function (candidate) { return candidate.kindKey === 'fuelCan' && isLooseObjectStillNeeded(candidate); });
             const can = cans.filter(function (candidate) { return candidate.questObjectId === object.itemObjectId; })[0] || cans[0];
             if (!can) break;
             pourFuelIntoTank(can, tank.index);
           }
         }
-        if (object.objectId > 0 && !object.isDone) useInteractable(findInteractableByObjectId(object.objectId));
+        const thing = object.objectId > 0 && !object.isDone ? findInteractableByObjectId(object.objectId) : null;
+        if (thing) useInteractable(thing);
       }
       return isQuestDone(instance);
     },
@@ -1252,7 +1307,16 @@ function startApplication() {
     isFuelWantedNow: function () { return isQuestItemWantedNow('fuel'); }, isInteractableWantedNow: isInteractableWantedNow,
     startExtraGeneratorSound: startExtraGeneratorSound, stopExtraGeneratorSounds: stopExtraGeneratorSounds,
     sizePresets: GENERATED_SIZE_PRESETS,
-    grantSpools: function () { game.flags.spoolsCollected = level.spoolCount; refreshObjective(); },
+    // Every spool found and loaded at the terminal, without the walking.
+    grantSpools: function () {
+      for (const object of looseObjects.concat(listPocketedObjects()).filter(function (candidate) { return candidate.kindKey === 'spool' && candidate.questObjectId; })) {
+        object.wasFound = true;
+        const pocketed = findPocketedObject(object.id);
+        if (pocketed) getPocketsOf(pocketed.playerId)[pocketed.slot] = null; else removeLooseObject(object);
+      }
+      game.flags.spoolsCollected = level.spoolCount; game.flags.spoolsLoaded = level.spoolCount;
+      refreshObjective();
+    },
     spawnHollow: function (x, z) { activateHollow(x, z, 2); },
     // Arrivals (08-arrivals.js): how each wait stands, what can arrive, and the questions the game asks of them.
     arrivals: arrivals, creatureArrivals: CREATURE_ARRIVALS, getSecondsUntilArrival: getSecondsUntilArrival, resetArrivals: resetArrivals,
@@ -1299,7 +1363,20 @@ function startApplication() {
     summonPhantom: summonPhantom, getPhantomHoldReason: getPhantomHoldReason, isRealThreatNearPlayer: isRealThreatNearPlayer,
     canPlayerSeePoint: canPlayerSeePoint, getAngleFromPlayerView: getAngleFromPlayerView, getScannedHalfAngle: getScannedHalfAngle,
     canPhantomStandOnTile: canPhantomStandOnTile, playPhantomBreath: playPhantomBreath,
-    use: function (objectId) { useInteractable(findInteractableByObjectId(objectId)); },
+    // Uses a thing by its object number. For a survey spool, which is carried now and not pressed, this is the
+    // short way round that most checks want: it is found as if you had taken it into the beam (its log opens,
+    // Dispatch speaks, the Stills wake), and it is loaded as if you had carried it to the terminal. What
+    // carrying one is really like is checked where that is the point (tools/spools-test.js).
+    use: function (objectId) {
+      const interactable = findInteractableByObjectId(objectId);
+      if (interactable) { useInteractable(interactable); return; }
+      const spool = looseObjects.filter(function (candidate) { return candidate.kindKey === 'spool' && candidate.questObjectId === objectId; })[0];
+      if (!spool) return;
+      noteSpoolFound(spool);
+      game.flags.spoolsLoaded++;
+      removeLooseObject(spool);
+      refreshObjective();
+    },
     sweep: function () { input.wantsSweep = true; },
     simulate: function (seconds) {
       const step = 1 / 30;
@@ -1315,7 +1392,7 @@ function startApplication() {
     isSpaceOpenAt: function (x, y, z) { return isLooseSpaceOpenAt(Math.floor(x), Math.floor(z), y); },
     worldProps: worldProps, getTileFlagsAt: getTileFlagsAtPosition, tileFlagPit: TILE_FLAG_PIT, getPlayerEyeY: getPlayerEyeY,
     createLooseObject: createLooseObject, removeLooseObject: removeLooseObject, clearLooseObjects: clearLooseObjects,
-    stationLooseObjects: stationLooseObjects, questLooseObjects: questLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
+    stationLooseObjects: stationLooseObjects, roomLooseObjects: roomLooseObjects, questLooseObjects: questLooseObjects, noisyFloorCanHeaps: noisyFloorCanHeaps, auditStationLooseObjects: auditStationLooseObjects,
     spawnStationLooseObjects: spawnStationLooseObjects, findStationSurfaces: findStationSurfaces,
     // The Hollow and a vent's cover: which way it would throw one (and how much room that way has), and the throw itself.
     chooseVentCoverThrow: chooseVentCoverThrow, throwVentCoverFromHollow: throwVentCoverFromHollow, measureRoomForLooseObject: measureRoomForLooseObject,

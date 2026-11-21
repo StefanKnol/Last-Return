@@ -333,7 +333,7 @@ function check(description, condition, detail) {
   await inGame(() => {
     const d = window.lastReturnDebug;
     d.hollow.isActive = false;
-    d.game.flags.powerOn = true; d.game.flags.spoolsCollected = 3;
+    d.game.flags.powerOn = true; d.grantSpools(); // (every spool found and loaded at the terminal, without the walking)
     d.teleport(10.2, 55.3, -Math.PI / 2); d.use(1);
     d.hollow.isActive = false;
     d.simulate(d.tuning.liftArrivalSeconds + 1);

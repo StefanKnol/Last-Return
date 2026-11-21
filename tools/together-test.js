@@ -983,6 +983,64 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     pocketSpilled.other.grenade.ownerId === ids.host, pocketSpilled);
   for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } }, pocketIds[0]);
 
+  // ---- Survey spools: found by whoever takes one, carried in their pocket, and loaded by the host's say ----
+  const spoolsIn = (page) => page.evaluate((otherId) => {
+    const d = window.lastReturnDebug, first = d.findSpool(3), second = d.findSpool(4);
+    const all = d.looseObjects.concat(d.listPocketedObjects()).filter((object) => object.kindKey === 'spool');
+    const firstAnywhere = all.filter((object) => object.questObjectId === 3)[0] || null, pocketed = firstAnywhere ? d.findPocketedObject(firstAnywhere.id) : null;
+    return { found: d.game.flags.spoolsCollected, loaded: d.game.flags.spoolsLoaded, uploadStarted: d.game.flags.uploadStarted, mode: d.game.mode, count: all.length,
+      firstId: firstAnywhere ? firstAnywhere.id : 0, firstWasFound: firstAnywhere ? firstAnywhere.wasFound : null, firstHeldById: first ? first.heldById : -1, firstPocketedBy: pocketed ? pocketed.playerId : 0,
+      secondId: second ? second.id : 0, secondIsThere: second !== null, secondWasFound: second ? second.wasFound : null, theirPockets: d.getPocketsOf(otherId).filter((object) => object !== null).length };
+  }, ids.other);
+  const closeReaders = async () => { for (const page of [a, b]) await page.evaluate(() => { const d = window.lastReturnDebug; if (d.game.mode === 'reading') d.closeReader(); }); };
+  // (The terminal takes spools only with the mains on. It is put back as it was afterwards: what follows is before the mains.)
+  const hadPowerBeforeSpools = await a.evaluate(() => window.lastReturnDebug.game.flags.powerOn);
+  for (const page of [a, b]) await page.evaluate(() => { const d = window.lastReturnDebug; d.grantPower(); d.clearMessages(); });
+  const spoolsAtFirst = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  // The other goes to the first spool and takes it into their beam.
+  await b.evaluate(() => {
+    const d = window.lastReturnDebug, spool = d.findSpool(3), spot = d.findWalkableSpotNear(spool.x, spool.z);
+    d.input.keysDown.clear(); d.teleport(spot.x, spot.z, Math.atan2(spool.x - spot.x, -(spool.z - spot.z))); d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1);
+    d.pickUpLooseObject(spool, false);
+  });
+  for (let turn = 0; turn < 25 && !((await spoolsIn(a)).found === 1 && (await spoolsIn(b)).found === 1); turn++) await fine(0.2);
+  const spoolTaken = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  await closeReaders();
+  await fine(0.5);
+  // Into their pocket.
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
+  for (let turn = 0; turn < 25 && (await spoolsIn(a)).firstPocketedBy !== ids.other; turn++) await fine(0.2);
+  const spoolPocketed = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  // The host presses the lift terminal: there is no spool on the host, and none lies by it. Nothing is loaded.
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.clearMessages(); d.askToAct({ what: 'use', objectId: 1 }); });
+  await fine(1);
+  const spoolHostPressed = { host: await spoolsIn(a), other: await spoolsIn(b), hostRead: await a.evaluate(() => Array.from(document.querySelectorAll('#hud-messages .hud-message')).map((element) => element.textContent).join(' | ')) };
+  // The other presses it, and says with it that the second spool is theirs to load as well, though it lies
+  // in its room: which spools a terminal takes is the host's game's to say, and it says the one in their pocket.
+  await b.evaluate((secondId) => { window.lastReturnDebug.askToAct({ what: 'use', objectId: 1, spools: [secondId] }); }, spoolsAtFirst.other.secondId);
+  for (let turn = 0; turn < 25 && !((await spoolsIn(a)).loaded === 1 && (await spoolsIn(b)).loaded === 1); turn++) await fine(0.2);
+  await fine(0.5);
+  const spoolLoaded = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  check('down there with others the spools are the same things in both games, found by nobody at the start',
+    spoolsAtFirst.host.count === 3 && spoolsAtFirst.other.count === 3 && spoolsAtFirst.host.firstId > 0 && spoolsAtFirst.host.firstId === spoolsAtFirst.other.firstId && spoolsAtFirst.host.secondId === spoolsAtFirst.other.secondId &&
+    spoolsAtFirst.host.found === 0 && spoolsAtFirst.other.found === 0, spoolsAtFirst);
+  check('the other takes a spool into their beam: it is found in both games, once, and is theirs to carry',
+    spoolTaken.host.found === 1 && spoolTaken.other.found === 1 && spoolTaken.host.firstWasFound === true && spoolTaken.other.firstWasFound === true && spoolTaken.host.firstHeldById === ids.other &&
+    spoolTaken.host.loaded === 0 && spoolTaken.other.loaded === 0, spoolTaken);
+  check('in their pocket it is in their pocket in both games, still found and not loaded',
+    spoolPocketed.host.firstPocketedBy === ids.other && spoolPocketed.other.firstPocketedBy === ids.other && spoolPocketed.host.theirPockets === 1 && spoolPocketed.host.found === 1 && spoolPocketed.other.found === 1 &&
+    spoolPocketed.host.loaded === 0, spoolPocketed);
+  check('the host pressing the lift terminal loads nothing: what is in the other\'s pocket is not the host\'s to hand in',
+    spoolHostPressed.host.loaded === 0 && spoolHostPressed.other.loaded === 0 && spoolHostPressed.host.firstPocketedBy === ids.other && /LIFT CONTROL/.test(spoolHostPressed.hostRead), spoolHostPressed);
+  check('the other pressing it loads the spool from their pocket in both games, and no spool they only claim to have: that one still lies in its room, found by nobody',
+    spoolLoaded.host.loaded === 1 && spoolLoaded.other.loaded === 1 && spoolLoaded.host.firstId === 0 && spoolLoaded.other.firstId === 0 && spoolLoaded.host.theirPockets === 0 && spoolLoaded.other.theirPockets === 0 &&
+    spoolLoaded.host.secondIsThere && spoolLoaded.other.secondIsThere && spoolLoaded.host.secondWasFound === false && spoolLoaded.other.secondWasFound === false && spoolLoaded.host.found === 1 && spoolLoaded.other.found === 1 &&
+    spoolLoaded.host.count === 2 && spoolLoaded.other.count === 2 && !spoolLoaded.host.uploadStarted && !spoolLoaded.other.uploadStarted, spoolLoaded);
+  await closeReaders();
+  if (lane) await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+  for (const page of [a, b]) await page.evaluate((hadPower) => { const d = window.lastReturnDebug; d.game.flags.powerOn = hadPower; d.clearMessages(); }, hadPowerBeforeSpools);
+  await fine(0.5);
+
   // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
   // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.
   // For this check the host's game is given its say back, with half a minute of its wait left.)

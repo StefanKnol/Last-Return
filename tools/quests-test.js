@@ -62,8 +62,9 @@ function check(description, condition, detail) {
       if (quest.requires && !d.questItems[quest.requires.item]) say('needs an item that does not exist: ' + quest.requires.item);
       if (quest.kind !== 'supply' && quest.kind !== 'haul' && typeof quest.build !== 'function') say('has nothing to build its things with');
       if (quest.kind === 'haul' && !(typeof quest.progress === 'function' && quest.text.refused && quest.text.objective && quest.text.chip)) say('a haul quest needs a way to say how far along it is, and the sentences refused, objective and chip');
-      // (A quest that does something of its own when a thing is taken has no sentence for that, and the spools have their own place on screen.)
-      if (quest.kind === 'collect' && !(quest.text.refused && quest.text.objective && (quest.text.taken || typeof quest.taken === 'function') && (quest.text.chip || quest.always))) say('a collect quest needs the sentences taken, refused, objective and chip');
+      // (The spools are carried and not pressed, so there is no sentence for taking one; they count twice over, with a measure of
+      // their own for how far along they are (`share`), and they have their own place on screen.)
+      if (quest.kind === 'collect' && !(quest.text.refused && quest.text.objective && (quest.text.taken || typeof quest.share === 'function') && (quest.text.chip || quest.always))) say('a collect quest needs the sentences taken, refused, objective and chip');
       if (quest.kind === 'activate' && !(quest.text.activated && quest.text.objective && (quest.text.refused || quest.text.holding))) say('an activate quest needs the sentences activated, objective and refused (or holding)');
       if (quest.kind === 'activate' && quest.needsPower && !quest.text.noPower) say('needs the mains but has no sentence for when it is off');
       if (quest.kind === 'activate' && quest.requires && !quest.text.noItem) say('may need an item but has no sentence for when you have none');
@@ -494,7 +495,7 @@ function check(description, condition, detail) {
     result.accepted = d.game.flags.uploadStarted === true;
     // A new descent: every bay shut and empty again, and everything back where it lay.
     lab.fresh('generated', result.seed, 'medium', 'mixed', 'one', 'salvage');
-    result.newDescent = { states: state.bays.map((each) => each.state).join(','), taken: state.taken, progress: d.getHaulProgress(), things: d.looseObjects.length === d.stationLooseObjects.length,
+    result.newDescent = { states: state.bays.map((each) => each.state).join(','), taken: state.taken, progress: d.getHaulProgress(), things: d.looseObjects.length === d.stationLooseObjects.length + d.roomLooseObjects.length + d.questLooseObjects.length,
       doorsShut: state.bays.every((each) => each.door.openFraction === 0), panelsBack: state.bays.every((each) => each.interactable.isAvailable) };
     // If so much is lost that what is left is worth less than was asked, what is left is all that is asked.
     // (What is lost is everything but six things at most, together worth less than was asked: the dearest that

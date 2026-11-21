@@ -1660,7 +1660,7 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
     placeRoom(room);
     const definition = ROOM_CATALOGUE[room.key];
     definition.furnish(random, room.name);
-    if (room === spoolHost) addSurveySpool(OBJECT_SPOOL_1, definition.itemSpot[0], definition.itemSpot[1], definition.itemSpot[2], 'SPOOL');
+    if (room === spoolHost) addSurveySpool(OBJECT_SPOOL_1, definition.itemSpot[0], definition.itemSpot[1], definition.itemSpot[2]);
     if (room === keycardHost) addKeycard(definition.itemSpot[0], definition.itemSpot[1] + 0.005, definition.itemSpot[2], 1);
     // Card 2 is left in the ring that card 1 opens (tier 2), card 3 in the ring that card 2 opens.
     if (room.tier >= 2 && plan.cardHosts[room.tier] === room) addKeycard(definition.itemSpot[0], definition.itemSpot[1] + 0.005, definition.itemSpot[2], room.tier);
@@ -1847,7 +1847,7 @@ function computeMapFingerprint(parts) {
   for (const patch of noisyFloorPatches) { if (!patch.isFromPlay) { add(patch.x); add(patch.z); addText(patch.kind); } }
   for (const heap of noisyFloorCanHeaps) { add(heap.x); add(heap.z); }
   done('the floor that is loud to walk on');
-  for (const thing of stationLooseObjects) { addText(thing.kindKey); add(thing.x); add(thing.y); add(thing.z); for (const part of thing.orientation) add(part); }
+  for (const thing of stationLooseObjects.concat(roomLooseObjects)) { addText(thing.kindKey); add(thing.x); add(thing.y); add(thing.z); for (const part of thing.orientation) add(part); }
   done('the things that lie loose');
   for (const waypoint of roamingWaypoints) { add(waypoint[0]); add(waypoint[1]); }
   for (const phantom of phantomDefinitions) { add(phantom.x); add(phantom.z); add(phantom.triggerZone); }
@@ -2007,14 +2007,20 @@ function auditLevelProgression() {
     const index = findNearestWalkableTileIndex(x, z);
     return index >= 0 && field[index] < NAVIGATION_UNREACHABLE;
   };
+  // Where a thing with an object number is: a thing to press, or a loose thing put out with that number (a survey spool).
+  const findPlaceOf = function (objectId) { return findInteractableByObjectId(objectId) || findLooseThingPutOut(objectId); };
+  const countOf = function (objectId) {
+    return interactables.filter(function (interactable) { return interactable.objectId === objectId; }).length +
+      roomLooseObjects.concat(questLooseObjects).filter(function (entry) { return entry.questObjectId === objectId; }).length;
+  };
   const canReach = function (objectId) {
-    const interactable = findInteractableByObjectId(objectId);
-    return interactable !== null && interactable !== undefined && canReachSpot(interactable.x, interactable.z);
+    const place = findPlaceOf(objectId);
+    return place !== null && place !== undefined && canReachSpot(place.x, place.z);
   };
   const cardIds = KEYCARD_OBJECT_IDS.slice(1, level.keycardCount + 1);
   const mustExistOnce = [OBJECT_LIFT_TERMINAL, OBJECT_GENERATOR, OBJECT_SPOOL_1, OBJECT_SPOOL_2, OBJECT_SPOOL_3].concat(cardIds);
   for (const objectId of mustExistOnce) {
-    if (interactables.filter(function (interactable) { return interactable.objectId === objectId; }).length !== 1) problems.push('object ' + objectId + ' does not exist exactly once');
+    if (countOf(objectId) !== 1) problems.push('object ' + objectId + ' does not exist exactly once');
   }
   // No power: every powered and keycard door is shut.
   reach(function (door) { return door.kind === DOOR_KIND_POWERED || door.kind === DOOR_KIND_KEYCARD; });
@@ -2039,7 +2045,7 @@ function auditLevelProgression() {
   if (!level.storeZone) problems.push('there is no calibration store');
   // Everything you must use has to be within arm's reach of somewhere you can stand.
   for (const objectId of mustExistOnce) {
-    const interactable = findInteractableByObjectId(objectId);
+    const interactable = findPlaceOf(objectId);
     if (!interactable) continue;
     const index = findNearestWalkableTileIndex(interactable.x, interactable.z);
     const distance = index < 0 ? Infinity : distanceBetweenPoints(interactable.x, interactable.z, index % GRID_WIDTH + 0.5, Math.floor(index / GRID_WIDTH) + 0.5);

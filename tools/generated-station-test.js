@@ -242,8 +242,9 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
 
   // --- vents: you only fit crouched, it is loud in there, and the Hollow crawls through ---
   // (These checks are about the duct itself. A vent's cover may stand in front of its mouth, and you do not get
-  // past one without taking it off: the covers have their own checks, with the loose objects. So here they are cleared away.)
-  await inGame(() => window.lastReturnDebug.clearLooseObjects());
+  // past one without taking it off: the covers have their own checks, with the loose objects. So here they are cleared away.
+  // Only the covers: the survey spools are loose things too, and the walk further down is for them.)
+  await inGame(() => { const d = window.lastReturnDebug; for (const cover of d.looseObjects.filter((object) => object.kindKey === 'ventCover')) d.removeLooseObject(cover); });
   const vent = await inGame(([describeSource]) => (0, eval)('(' + describeSource + ')')(), [String(describeFirstVent)]);
   check('a vent is crawl height and opens into a room at each end', vent.mouths.length === 2 && Math.abs(vent.headroom - vent.ventHeight) < 0.01 && vent.tileCount >= 3, vent);
   const enterVent = async (holdCrouch) => {
@@ -342,7 +343,8 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
 
   const reachToSpool = await standNear(3);
   await inGame(() => window.lastReturnDebug.use(3));
-  check('the first spool is within reach of the floor and opens its log', reachToSpool < 2 && (await inGame(() => window.lastReturnDebug.game.mode)) === 'reading', reachToSpool);
+  check('the first spool is within reach of the floor and opens its log', reachToSpool < 2 && (await inGame(() => window.lastReturnDebug.game.mode)) === 'reading',
+    [reachToSpool, await inGame(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, found: d.game.flags.spoolsCollected, loaded: d.game.flags.spoolsLoaded, spools: d.looseObjects.filter((object) => object.kindKey === 'spool').map((object) => [object.questObjectId, object.wasFound, object.looterIndex]) }; })]);
   await page.keyboard.press('KeyE');
 
   // This station's extra jobs, whatever the seed gave it. The run below does each one where it belongs.

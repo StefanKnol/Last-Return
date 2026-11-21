@@ -7,7 +7,8 @@
 // as well. Few of them (TUNING.pocketCount), and only for the few kinds of thing that say they go in one.
 //
 // What fits: a kind of loose object with `pocket: true` (LOOSE_OBJECT_KINDS, 08-loose-objects.js). Today that
-// is the scan grenade and the first aid kit. Everything else is carried in the beam, a sample jar included:
+// is the scan grenade, the first aid kit and the survey spool (which the lift terminal takes out of your
+// pockets: loadSpoolsAtTheTerminal, 11-game.js). Everything else is carried in the beam, a sample jar included:
 // what is worth something to Salvage is not got to a bay by the pocketful.
 // Nor does a thing fit while it is doing something: a grenade that has been armed.
 //

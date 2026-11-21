@@ -141,6 +141,11 @@ function rateNoisyFloorTile(index) {
   for (const interactable of interactables) {
     if (distanceBetweenPoints(interactable.x, interactable.z, tileX + 0.5, tileZ + 0.5) < 1.6) return 0; // not under your feet at something you have to use
   }
+  // Nor where a survey spool lies: it is a loose thing these days and no longer one of the things to use, and
+  // the floor round it is left as it always was.
+  for (const entry of roomLooseObjects) {
+    if (distanceBetweenPoints(entry.x, entry.z, tileX + 0.5, tileZ + 0.5) < 1.6) return 0;
+  }
   return isNearDoor || zoneName.indexOf('CORRIDOR') >= 0 ? 2 : 1;
 }
 
