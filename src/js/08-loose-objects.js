@@ -81,6 +81,7 @@ const LOOSE_OBJECT_KINDS = {
   },
   // A scan grenade: arm it (Q), throw it, and where it lands it scans the room for you, all round. The light
   // stuns the Hollow if enough of it lands on it, and the noise brings it to where the grenade went off.
+  // (A better make of it may jump before each scan and scan from the air: the bouncing betty, src/objects/bouncingBetty.json.)
   scanGrenade: {
     label: 'scan grenade', mass: 0.6, value: 15, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.3, grip: 0.6, pocket: true,
     parts: [
@@ -90,11 +91,13 @@ const LOOSE_OBJECT_KINDS = {
     use: { prompt: 'Arm the scan grenade', button: 'ARM', activate: armScanGrenade },
     update: updateScanGrenade,
     markNumbers: {
-      scanGrenadeBursts: ['How many times it scans', 1, 4, 1],
+      scanGrenadeBursts: ['How many times it scans', 1, 6, 1],
       scanGrenadeSweeps: ['How much light each scan has (in sweeps of the scanner)', 0.5, 6, 0.1],
       scanGrenadeBurstSeconds: ['How long each scan lasts (seconds)', 0.4, 4, 0.1],
       scanGrenadeStunSeconds: ['How long it stuns the Hollow (seconds)', 0, 12, 0.5],
-      scanGrenadeFuseSeconds: ['Its fuse, if it lands nowhere (seconds)', 2, 15, 0.5]
+      scanGrenadeFuseSeconds: ['Its fuse, if it lands nowhere (seconds)', 2, 15, 0.5],
+      scanGrenadeBurstGapSeconds: ['How long it is dark between two scans (seconds)', 0.5, 5, 0.1],
+      scanGrenadeHopMetres: ['How high it jumps before each scan (metres; 0: it lies where it landed)', 0, 2.5, 0.1]
     }
   },
   // A scanner tripod: a scanner on three legs. Q with it in the beam switches it on or off; on, it scans what
@@ -599,6 +602,8 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     stationTouchTime: -10, heldLinkTime: -10, heldLinkId: 0, // when it last touched the station itself; when a thing in a beam last bore it, and which thing (isLooseObjectRiding)
     // For a kind that does something (`use`): when it was set off, when it starts doing it, and whether it is used up.
     armedTime: -1, goesOffTime: -1, burstSeconds: 0, burstBudget: 0, burstHitsOnHollow: 0, isSpent: false,
+    burstsDone: 0, burstsCalled: 0,     // a scan grenade: how many of its scans are over, and how many have been set off (by this browser if it moves the thing, and otherwise by the one that does: updateScanGrenade)
+    hasHopped: false,                   // a grenade that jumps before it scans has made its jump for the scan that is coming (hopScanGrenade)
     kickedByHollowTime: -100, chasedSince: -100, // when the Hollow last kicked it, and when it last started going after it
     worth: kind.value,                  // what it is worth now: less than kind.value once it has been knocked about
     scanHits: 0, isAppraised: false,    // how many pulses have landed on it, and whether that was enough for the scanner to read what it is worth
@@ -3505,28 +3510,77 @@ function armScanGrenade(object) {
   object.armedTime = game.time;
   object.goesOffTime = game.time + getLooseNumber(object, 'scanGrenadeFuseSeconds');
   object.hasLanded = false;
-  object.burstsDone = 0;
+  object.burstsDone = 0; object.burstsCalled = 0;
+  object.hasHopped = false;
   playScanGrenadeSound('arm', object.x, object.y, object.z);
   showMessage('Armed. It goes off where it lands. Throw it.', 4, 'warning');
 }
 
+// A grenade that jumps before it scans (TUNING.scanGrenadeHopMetres, which only a better make has above 0: the
+// bouncing betty) is about to scan: it throws itself up off whatever it lies on, and a little to one side.
+// Returns how many seconds from now its light should come on, so that the scan is made round the top of the
+// jump and all of it from the air; 0 if it does not jump (it is not a kind that does, it is in somebody's beam
+// or a looter's arms, or there is no room above it: then it scans where it is, as the plain one does); and -1
+// if it would but is in mid-air, with nothing to jump off.
+// Only the browser that moves the thing makes it jump (see "Things that lie loose" in 11-together.js). The others
+// are told where it is like anything else that moves, and when it jumps and when its light comes on ('grenade').
+function hopScanGrenade(object) {
+  let metres = getLooseNumber(object, 'scanGrenadeHopMetres');
+  if (!(metres > 0) || object.isHeld || object.heldById || object.looterIndex >= 0) return 0;
+  if (!object.isAsleep && !object.touchedThisStep && !object.wasTouching) return -1;
+  // Under a low ceiling, in a vent or under a table it jumps as high as there is room for.
+  if (castRayAgainstWorld(object.x, object.y, object.z, 0, 1, 0, metres + TUNING.scanGrenadeHopClearance + object.prepared.boundsRadius)) {
+    metres = Math.min(metres, rayHit.distance - TUNING.scanGrenadeHopClearance - object.prepared.boundsRadius);
+  }
+  if (metres < 0.15) return 0;
+  // (Which way it goes aside is drawn from the station's seed, the thing and which scan this is, like where a can
+  // the Hollow throws back comes down: the same grenade armed in the same place does the same.)
+  const speed = Math.sqrt(2 * TUNING.looseGravity * metres), turn = createNamedRandomGenerator(level.seed, 'jump ' + object.id + ' scan ' + object.burstsDone)() * TWO_PI;
+  wakeLooseObject(object);
+  wakeLooseObjectsTouching(object);
+  object.velocityY = speed;
+  object.velocityX += Math.cos(turn) * TUNING.scanGrenadeHopSideSpeed; object.velocityZ += Math.sin(turn) * TUNING.scanGrenadeHopSideSpeed;
+  object.restSeconds = 0; object.settleSeconds = 0;
+  playScanGrenadeSound('hop', object.x, object.y, object.z);
+  tellOthersOfScanGrenade(object, 0); // (they hear it jump)
+  return Math.max(0.05, speed / TUNING.looseGravity - getLooseNumber(object, 'scanGrenadeBurstSeconds') / 2);
+}
+
 function updateScanGrenade(object, dt) {
   if (object.isSpent || object.armedTime < 0) return;
-  // Thrown, and it has just hit something for the first time: that is where it goes off.
-  if (!object.isHeld && !object.hasLanded && object.knockSpeed > TUNING.looseKnockFaintestSpeed) {
-    object.hasLanded = true;
-    object.goesOffTime = Math.min(object.goesOffTime, game.time + TUNING.scanGrenadeLandingSeconds);
+  // When a scan begins is for one browser to say: the one that moves the thing, which is the only one that knows
+  // when it landed. It tells the others ('grenade', 11-together.js), and they count what they are told in
+  // `burstsCalled`: a scan that has been called begins here and now, wherever the thing is, without a jump.
+  // (Each browser sends out the light for itself, as it does a tripod's.)
+  if (object.burstSeconds === 0 && object.burstsCalled <= object.burstsDone) {
+    if (isLooseObjectAnothers(object)) return;
+    // Thrown, and it has just hit something for the first time: that is where it goes off.
+    if (!object.isHeld && !object.hasLanded && object.knockSpeed > TUNING.looseKnockFaintestSpeed) {
+      object.hasLanded = true;
+      object.goesOffTime = Math.min(object.goesOffTime, game.time + TUNING.scanGrenadeLandingSeconds);
+    }
+    if (game.time < object.goesOffTime) return;
+    // One that jumps first (a bouncing betty) jumps now, and its light comes on when it is nearly at the top.
+    // (Still in the air from the jump before, it waits to come down, but not for long. One whose fuse ran out
+    // before it ever landed goes off where it is.)
+    if (!object.hasHopped) {
+      const secondsToItsLight = hopScanGrenade(object);
+      if (secondsToItsLight < 0 && object.hasLanded && game.time < object.goesOffTime + 1) return;
+      object.hasHopped = true;
+      if (secondsToItsLight > 0) { object.goesOffTime = game.time + secondsToItsLight; return; }
+    }
+    object.burstsCalled = object.burstsDone + 1;
+    tellOthersOfScanGrenade(object, object.burstsCalled);
   }
-  if (game.time < object.goesOffTime) return;
+  const burstSeconds = getLooseNumber(object, 'scanGrenadeBurstSeconds');
   if (object.burstSeconds === 0) {
     // It goes off.
-    playScanGrenadeSound('burst', object.x, object.y, object.z);
+    playScanGrenadeSound('burst', object.x, object.y, object.z, burstSeconds);
     showCaption('scanGrenade', { x: object.x, z: object.z });
     emitNoise(object.x, object.z, TUNING.noiseRadiusScanGrenade);
     object.burstHitsOnHollow = 0;
   }
   // Its light: pulses in every direction from where it is, a share of them each frame, for as long as it lasts.
-  const burstSeconds = getLooseNumber(object, 'scanGrenadeBurstSeconds');
   const pulsesInAll = QUALITY_PRESETS[settings.quality].sweepRays * getLooseNumber(object, 'scanGrenadeSweeps');
   object.burstBudget += pulsesInAll * Math.min(dt, burstSeconds - object.burstSeconds) / burstSeconds;
   const pulses = Math.min(4000, Math.floor(object.burstBudget));
@@ -3552,10 +3606,10 @@ function updateScanGrenade(object, dt) {
   object.burstSeconds += dt;
   if (object.burstSeconds >= burstSeconds) {
     // One that scans more than once goes dark for a moment and then goes off again, where it lies by then.
-    object.burstsDone = (object.burstsDone || 0) + 1;
+    object.burstsDone++;
     if (object.burstsDone < getLooseNumber(object, 'scanGrenadeBursts')) {
-      object.burstSeconds = 0; object.burstBudget = 0;
-      object.goesOffTime = game.time + TUNING.scanGrenadeBurstGapSeconds;
+      object.burstSeconds = 0; object.burstBudget = 0; object.hasHopped = false;
+      object.goesOffTime = game.time + getLooseNumber(object, 'scanGrenadeBurstGapSeconds');
       return;
     }
     object.isSpent = true;

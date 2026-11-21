@@ -493,6 +493,7 @@ function hearOtherPlayer(id, data) {
   if (!together.isInDescent) return;
   if (data.k === 'loose') { hearWhereLooseThingsAre(id, data); return; }
   if (data.k === 'knock') { hearKnock(data); return; }
+  if (data.k === 'grenade') { hearOfScanGrenade(id, data); return; }
   if (data.k !== 'at') { hearOfTheStation(id, data); return; }
   const other = findOtherPlayer(id);
   if (!other) return;
@@ -1176,6 +1177,23 @@ function tellOthersOfKnock(material, volume, weight, x, y, z, loudness) {
   if (!isWorldShared()) return;
   const round = function (value) { return Math.round(value * 100) / 100; };
   sayToOthers({ k: 'knock', m: material, v: round(volume), w: round(weight), x: round(x), y: round(y), z: round(z), l: round(loudness) });
+}
+
+// A scan grenade this browser moves is doing something the others cannot work out for themselves, because only
+// the browser that moves a thing knows when it landed: one of its scans begins (`scan` is which, from 1), or it
+// jumps before one (0: a bouncing betty). See updateScanGrenade and hopScanGrenade, 08-loose-objects.js.
+function tellOthersOfScanGrenade(object, scan) {
+  if (!isWorldShared()) return;
+  sayToOthers({ k: 'grenade', i: object.id, n: scan });
+}
+
+function hearOfScanGrenade(id, data) {
+  if (!Number.isFinite(data.i) || !Number.isFinite(data.n)) return;
+  const object = findLooseObjectById(data.i);
+  // Only from the browser that moves it, and only of a grenade that has been armed and has scans left in it.
+  if (!object || object.kind.update !== updateScanGrenade || object.isSpent || object.armedTime < 0 || (object.ownerId || together.hostId) !== id) return;
+  if (data.n === 0) playScanGrenadeSound('hop', object.x, object.y, object.z);
+  else object.burstsCalled = Math.max(object.burstsCalled, Math.min(Math.round(data.n), object.burstsDone + 2, getLooseNumber(object, 'scanGrenadeBursts')));
 }
 
 function hearKnock(data) {

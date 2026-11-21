@@ -902,6 +902,12 @@ function updateHud(realDt) {
       if (chip) { chip.textContent = (input.isTouchDevice ? '' : '[' + (slot + 4) + '] ') + name; chip.classList.toggle('is-on', inPocket !== null); }
       if (button) { button.textContent = name; button.classList.toggle('is-full', inPocket !== null); }
     }
+    // The screen has room for four. With fewer pockets than that (TUNING.pocketCount) the places left over are not shown.
+    for (let slot = 0; document.getElementById('pocket-' + slot) || document.getElementById('touch-pocket-' + slot); slot++) {
+      const chip = document.getElementById('pocket-' + slot), button = document.getElementById('touch-pocket-' + slot);
+      if (chip) chip.hidden = slot >= pocketSlots.length;
+      if (button) button.hidden = slot >= pocketSlots.length;
+    }
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];

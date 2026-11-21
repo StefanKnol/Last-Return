@@ -131,7 +131,7 @@ const TUNING = {
   playerAcceleration: 16,       // how quickly you reach full speed. Low feels like ice, high feels snappy.
   staminaSeconds: 6.5,          // how long you can sprint on a full bar
   staminaRecoverySeconds: 10,   // how long an empty bar takes to refill
-  interactionReach: 1.4,        // how close you must be to use a terminal, note or pickup
+  interactionReach: 1.2,        // how close you must be to use a terminal, note or pickup
 
   // ---- The scanner ---------------------------------------------------------
   scannerMaximumRange: 50,      // pulses that travel further than this report NO RETURN
@@ -296,7 +296,7 @@ const TUNING = {
   looseHoldBreakDistance: 0.9,      // caught on something and further than this from where the beam wants it ...
   looseHoldBreakSeconds: 0.25,      // ... for this long, and the beam loses it. (Not caught on anything, it has to be two and a half times as far.)
   terminalTakesWithinMetres: 3,     // the lift terminal takes the spools and core samples you have on you, and any that lie this near to it
-  pocketCount: 4,                   // how many pockets you have: one thing to a pocket, and only the kinds marked `pocket` (08-pockets.js)
+  pocketCount: 2,                   // how many pockets you have: one thing to a pocket, and only the kinds marked `pocket` (08-pockets.js)
   carrySlowdownPerKilogram: 0.03,   // how much each kilogram slows your walk: 12 kg makes you 0.73 times as fast
   // The scan grenade (a loose object that does something: see `use` in LOOSE_OBJECT_KINDS).
   // The scanner tripod (08-loose-objects.js): switched on with Q, it scans what is in front of it in pulses.
@@ -316,6 +316,9 @@ const TUNING = {
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
   scanGrenadeBursts: 1,             // how many times it scans, one after the other (a mark II: twice)
   scanGrenadeBurstGapSeconds: 1.5,  // ... and how long it is dark between two of them
+  scanGrenadeHopMetres: 0,          // how high it jumps before each scan, off whatever it lies on: 0 is not at all (the plain one lies where it landed). A bouncing betty: 1.3. Its light comes on round the top of the jump, so that each scan is made from the air.
+  scanGrenadeHopSideSpeed: 0.8,     // ... and how fast it goes sideways with each jump (m/s), any way: it does not come down quite where it went up
+  scanGrenadeHopClearance: 0.25,    // ... and how far short of a ceiling (or the underside of a table) the top of a jump stays, where there is not the room for all of it
   scanGrenadeSweeps: 1.7,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000). This was 2.5 while a third of them went into the floor under it; 1.6 puts as many on the room as 2.5 did then.
   scanGrenadePatchMetres: 0.25,     // it wastes no light on anything it is up against: a pulse that would land on floor, wall or ceiling nearer than this is aimed somewhere else instead. (Lying on the floor, 35 of every 100 pulses of an all-round burst landed within a hand of it.)
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned

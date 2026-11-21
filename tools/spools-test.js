@@ -21,8 +21,6 @@ function check(description, condition, detail) {
   if (!condition) failures.push(description);
 }
 
-const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_SPOOL_3 = 5;
-
 (async () => {
   const { browser, page, problems } = await openGame({ dev: true });
   const inGame = (callback, argument) => page.evaluate(callback, argument);
@@ -35,6 +33,7 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
     lab.settle = function () {
       d.game.flags.hasLeftLift = true;
       d.hollow.isActive = false;
+      d.tuning.pocketCount = 4
       d.setDebugOption('freezeCreatures', true); d.setDebugOption('invulnerable', false);
       d.clearMessages();
       d.teleport(d.playerStart.x, d.playerStart.z, 0);
