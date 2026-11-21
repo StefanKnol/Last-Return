@@ -1550,6 +1550,15 @@ function playSurveyorChirp(x, z, isRising) {
   playTone({ waveform: 'square', frequency: second, frequencyEnd: second * (isRising ? 1.08 : 0.9), duration: 0.16, gain: 0.18 * SOUND_LEVELS.surveyorVoice, attack: 0.004, delay: 0.1, destination: panner });
 }
 
+// It has noticed light somewhere and turns to go and look: the one note twice, level, and quieter than its
+// two-note voice. (Not the rising pair: that one means it has seen somebody.)
+function playSurveyorQuery(x, z) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 1.8, z);
+  if (!panner) return;
+  playTone({ waveform: 'square', frequency: 1800, duration: 0.06, gain: 0.11 * SOUND_LEVELS.surveyorVoice, attack: 0.004, destination: panner });
+  playTone({ waveform: 'square', frequency: 1800, duration: 0.06, gain: 0.11 * SOUND_LEVELS.surveyorVoice, attack: 0.004, delay: 0.14, destination: panner });
+}
+
 // Light in its eye: a whine that climbs and breaks off.
 function playSurveyorWhine(x, z) {
   const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 1.8, z);

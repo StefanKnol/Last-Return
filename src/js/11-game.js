@@ -801,10 +801,8 @@ function retryFromCheckpoint() {
   releaseHeldLooseObject(0); // whatever you were carrying lies where you fell
   game.interference = 0; game.danger = 0; game.fade = 0;
   game.deathSequence = null;
-  if (hollow.isActive) {
-    hollow.knowsPlayerPositionAlways = false;
-    relocateHollowAwayFromPlayer(12);
-  }
+  if (hollow.isActive) hollow.knowsPlayerPositionAlways = false;
+  sendDirectedCreaturesAway(12); // the Hollow, the Surveyor: nothing is left standing over where you come back, and a breather follows
   if (stillsAreHunting) resetStillsToHomePositions();
   if (game.flags.uploadStarted && !game.flags.liftArrived && !isWorldShared()) { // (down there with others the car does not start over for one of you)
     game.liftCountdown = TUNING.liftArrivalSeconds;
@@ -1400,6 +1398,12 @@ function startApplication() {
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
     hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getNearestEyeDistanceTo: getNearestEyeDistanceTo, describeIfOutOfReach: describeIfOutOfReach, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
     hasClearWalkingLine: hasClearWalkingLine,
+    // The director (08-director.js) and the map of light ("Light", 08-creatures.js).
+    directedCreatures: DIRECTED_CREATURES, findDirectedCreature: findDirectedCreature, updateDirector: updateDirector, resetDirector: resetDirector, beginDirectorBreather: beginDirectorBreather,
+    isDirectorInBreather: isDirectorInBreather, getDirectorPressure: getDirectorPressure, pickDirectedWaypoint: pickDirectedWaypoint, sendDirectedCreaturesAway: sendDirectedCreaturesAway,
+    armScanGrenade: armScanGrenade,
+    lightHeat: lightHeat, lightState: lightState, lightCellMetres: LIGHT_CELL_METRES, noteScanLightAt: noteScanLightAt, getLightHeatAt: getLightHeatAt, clearLightHeat: clearLightHeat,
+    findBrightestLightNear: findBrightestLightNear, coolLightAround: coolLightAround, updateLightHeat: updateLightHeat, getSurveyorLightRange: getSurveyorLightRange, chooseSurveyorRound: chooseSurveyorRound,
     clearAllPoints: clearAllPoints, castRayAgainstWorld: castRayAgainstWorld, getMapImageData: function () { return interfaceState.mapImageData; },
     surveyor: surveyor, surveyorStates: SURVEYOR_STATE_NAMES, activateSurveyor: activateSurveyor, removeSurveyor: removeSurveyor, dazzleSurveyor: dazzleSurveyor,
     getSurveyorLens: getSurveyorLens, isCreatureInCrawlspace: isCreatureInCrawlspace, beginCreatureCrawl: beginCreatureCrawl, surfaceSurveyorLight: SURFACE_SURVEYOR_LIGHT,

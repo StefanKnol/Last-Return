@@ -422,3 +422,96 @@ function hearNoise(x, z, radius, space) {
   const madeIn = space === undefined ? SPACE_STATION : space;
   for (const kind of CREATURE_KINDS) if (kind.hear) kind.hear(x, z, radius, madeIn);
 }
+
+// ---------------------------------------------------------------------------
+// Light: where scanning has been landing lately
+//
+// Noise is told to the creatures as it is made. Light is not an event like that: a scanner is thousands of
+// pulses a second. So it is kept as a map: the station in squares of LIGHT_CELL_METRES, and for each how many
+// pulses have landed in it lately. Every pulse that lands adds one where it lands (recordScanHit, 09-player.js):
+// yours, another player's, a scanner tripod's, a scan grenade's. Not a creature's own light. It fades by half
+// every TUNING.lightHeatHalfLifeSeconds.
+//
+// What that is for: a creature that cannot hear can go by this instead (the Surveyor, 08-surveyor.js). Note
+// what it knows from it: where light has been LANDING, which is what you were looking at, not where you stood.
+//
+// Kept in the game that runs the station. (Down there with others that game shows everybody's scanning for
+// itself, so everybody's light is in its map without anything more being sent.)
+// ---------------------------------------------------------------------------
+
+const LIGHT_CELL_METRES = 4;
+const LIGHT_CELLS_WIDE = Math.ceil(GRID_WIDTH / LIGHT_CELL_METRES), LIGHT_CELLS_DEEP = Math.ceil(GRID_DEPTH / LIGHT_CELL_METRES);
+const lightHeat = new Float32Array(LIGHT_CELLS_WIDE * LIGHT_CELLS_DEEP);
+const lightState = { fadeTimer: 0, total: 0 }; // `total`: every pulse counted in this descent, for the tests and debug mode
+
+function getLightCellIndex(x, z) {
+  const cellX = Math.floor(x / LIGHT_CELL_METRES), cellZ = Math.floor(z / LIGHT_CELL_METRES);
+  if (cellX < 0 || cellZ < 0 || cellX >= LIGHT_CELLS_WIDE || cellZ >= LIGHT_CELLS_DEEP) return -1;
+  return cellZ * LIGHT_CELLS_WIDE + cellX;
+}
+
+// One pulse of somebody's light has landed here.
+function noteScanLightAt(x, z) {
+  if (isWorldTheHosts()) return; // (the station is run in somebody else's game: the map is kept there)
+  const index = getLightCellIndex(x, z);
+  if (index < 0) return;
+  lightHeat[index] += 1;
+  lightState.total++;
+}
+
+// How many pulses have landed lately in the square this place is in.
+function getLightHeatAt(x, z) {
+  const index = getLightCellIndex(x, z);
+  return index < 0 ? 0 : lightHeat[index];
+}
+
+// Every frame, in the game that runs the station: the light of a while ago counts for less.
+function updateLightHeat(dt) {
+  lightState.fadeTimer += dt;
+  if (lightState.fadeTimer < 0.25) return;
+  const keep = Math.pow(0.5, lightState.fadeTimer / Math.max(0.5, TUNING.lightHeatHalfLifeSeconds));
+  lightState.fadeTimer = 0;
+  for (let index = 0; index < lightHeat.length; index++) {
+    if (lightHeat[index] === 0) continue;
+    lightHeat[index] *= keep;
+    if (lightHeat[index] < 0.5) lightHeat[index] = 0;
+  }
+}
+
+function clearLightHeat() {
+  lightHeat.fill(0);
+  lightState.fadeTimer = 0; lightState.total = 0;
+}
+
+// The square and the eight round it count for this share of what they did: something has been there and looked.
+function coolLightAround(x, z, share) {
+  const cellX = Math.floor(x / LIGHT_CELL_METRES), cellZ = Math.floor(z / LIGHT_CELL_METRES);
+  for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+    for (let offsetX = -1; offsetX <= 1; offsetX++) {
+      const index = getLightCellIndex((cellX + offsetX + 0.5) * LIGHT_CELL_METRES, (cellZ + offsetZ + 0.5) * LIGHT_CELL_METRES);
+      if (index >= 0) lightHeat[index] *= share;
+    }
+  }
+}
+
+// The most lit square within `withinMetres` of a place, among those with `atLeast` pulses in them or more: the
+// one that is brightest for how far off it is (a square twice as far has to be about twice as lit to win).
+// Returns { x, z, heat } with the middle of the square, or null.
+const brightestLight = { x: 0, z: 0, heat: 0 };
+function findBrightestLightNear(x, z, withinMetres, atLeast) {
+  const firstX = Math.max(0, Math.floor((x - withinMetres) / LIGHT_CELL_METRES)), lastX = Math.min(LIGHT_CELLS_WIDE - 1, Math.floor((x + withinMetres) / LIGHT_CELL_METRES));
+  const firstZ = Math.max(0, Math.floor((z - withinMetres) / LIGHT_CELL_METRES)), lastZ = Math.min(LIGHT_CELLS_DEEP - 1, Math.floor((z + withinMetres) / LIGHT_CELL_METRES));
+  let bestScore = 0, found = false;
+  for (let cellZ = firstZ; cellZ <= lastZ; cellZ++) {
+    for (let cellX = firstX; cellX <= lastX; cellX++) {
+      const heat = lightHeat[cellZ * LIGHT_CELLS_WIDE + cellX];
+      if (heat < atLeast) continue;
+      const middleX = (cellX + 0.5) * LIGHT_CELL_METRES, middleZ = (cellZ + 0.5) * LIGHT_CELL_METRES;
+      const metres = distanceBetweenPoints(x, z, middleX, middleZ);
+      if (metres > withinMetres) continue;
+      const score = heat / (10 + metres);
+      if (score > bestScore) { bestScore = score; brightestLight.x = middleX; brightestLight.z = middleZ; brightestLight.heat = heat; found = true; }
+    }
+  }
+  return found ? brightestLight : null;
+}

@@ -317,6 +317,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   });
   check('and no longer when they stop', after === 0, after);
 
+  // The map of light ("Light", 08-creatures.js: what the Surveyor goes by) is kept in the host's game, and the
+  // other's scanning is in it without anything more being sent: the host's game shows their light for itself.
+  await a.evaluate(() => { window.lastReturnDebug.clearLightHeat(); });
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.setScanHeld(true); d.simulate(0.3); for (let count = 0; count < 4; count++) d.updateTogether(0.1); });
+  await a.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees > 0);
+  const lightOfTheOther = {
+    inTheHostsMap: await a.evaluate(() => { const d = window.lastReturnDebug; for (let count = 0; count < 5; count++) d.updateTogether(0.1); return { counted: d.lightState.total, hostIsScanning: d.input.isScanHeld === true }; }),
+    inTheirOwn: await b.evaluate(() => { const d = window.lastReturnDebug; return { counted: d.lightState.total, pointsOfTheirOwn: d.pointCloud.totalReturns > 0 }; })
+  };
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.setScanHeld(false); d.simulate(0.2); for (let count = 0; count < 4; count++) d.updateTogether(0.1); });
+  await a.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees === 0);
+  check('the other\'s scanning is on the host\'s map of light, though the host is not scanning; the other\'s own game keeps no such map',
+    lightOfTheOther.inTheHostsMap.counted > 100 && !lightOfTheOther.inTheHostsMap.hostIsScanning && lightOfTheOther.inTheirOwn.counted === 0 && lightOfTheOther.inTheirOwn.pointsOfTheirOwn, lightOfTheOther);
+
   // Your own body is in the way of the others' scanners, though you never see it. The host scans the other from
   // a metre and a half, with a narrow beam: on the other's screen none of that light gets past them, and none
   // is drawn on them. And the light on the host's scanner is simply there, scanning or not.

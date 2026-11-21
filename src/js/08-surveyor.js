@@ -18,6 +18,11 @@
 //   - It is nearly two metres tall: it does not fit a vent, and it uses the ceiling hatches as the Hollow does.
 //     The doors that open for the Hollow open for it. Above the ceiling its light is out.
 //   - The Hollow pays its light no heed.
+//   - On its rounds it goes by light: it is told nothing of where anybody is, but it knows where scanning has
+//     been landing lately ("Light", 08-creatures.js), anybody's but its own, and goes to the brightest of it
+//     for how far off that is. A scanner tripod or a scan grenade draws it as your beam does.
+//   - The director paces it along with the Hollow (08-director.js), in its own way: closing in, it notices
+//     lit places from further and further off; in a breather it turns its back on them and goes far away.
 //
 // It is one of the things that arrive (08-arrivals.js), in a generated station, on a threat level that has it
 // (`surveyorEnabled`). Which of them comes first is drawn for every descent; the others come later.
@@ -98,9 +103,12 @@ const surveyor = Object.assign(createCreatureLegs(SURVEYOR_WAY), {
   blindSeconds: 0,                  // it makes nobody out for this long (running off, just landed)
   dazzle: 0,                        // how long light has been in its eye
   dazzleImmuneSeconds: 0,           // it cannot be dazzled again for this long
+  isDrawnByLight: false,            // on its rounds, it is on its way to a lit place (and not to a room it was given)
+  lightX: 0, lightZ: 0,             // ... the middle of the square that was lit
+  lightCheckTimer: 0,               // seconds until it next looks for a brighter place
   walkPhase: 0, lastStepSign: 1, currentSpeed: 0, tickTimer: 0,
   fromX: 0, fromZ: 0, fromYaw: 0, fromLightYaw: 0, said: null, // (in a game that only shows it: where it was at the host's last telling)
-  statistics: { litFrames: 0, pulses: 0, strikes: 0, timesDazzled: 0, timesSeen: 0 } // for the tests and the debug readout
+  statistics: { litFrames: 0, pulses: 0, strikes: 0, timesDazzled: 0, timesSeen: 0, timesDrawn: 0 } // for the tests and the debug readout
 });
 
 function isSurveyorInTheStation() {
@@ -120,6 +128,8 @@ function activateSurveyor(x, z, graceSeconds) {
   surveyor.seenSeconds = 0; surveyor.sinceSeen = 99; surveyor.quarry = null;
   surveyor.blindSeconds = graceSeconds || 0; surveyor.dazzle = 0; surveyor.dazzleImmuneSeconds = 0;
   surveyor.fieldTargetIndex = -1; surveyor.currentSpeed = 0;
+  surveyor.isDrawnByLight = false; surveyor.lightCheckTimer = 0;
+  if (!isAnotherDirectedCreatureAbout(findDirectedCreature('surveyor'))) resetDirector(false); // (with another about already, the descent's rhythm goes on as it was)
   figure.hitsThisFrame = 0;
   poseSurveyor(0, 0);
   setFigureRaycastable(figure, true);
@@ -131,7 +141,7 @@ function removeSurveyor() {
   cancelCreatureCrawl(surveyor);
   surveyor.isLit = false; surveyor.quarry = null; surveyor.seenSeconds = 0;
   const statistics = surveyor.statistics;
-  statistics.litFrames = 0; statistics.pulses = 0; statistics.strikes = 0; statistics.timesDazzled = 0; statistics.timesSeen = 0;
+  statistics.litFrames = 0; statistics.pulses = 0; statistics.strikes = 0; statistics.timesDazzled = 0; statistics.timesSeen = 0; statistics.timesDrawn = 0;
   setFigureRaycastable(surveyor.figure, false);
 }
 
@@ -201,20 +211,62 @@ function aimSurveyorLight(dt) {
 // What it does
 // ---------------------------------------------------------------------------
 
-// The next place on its rounds: of a few of the station's waypoints, the one nearest to any of you that is not
-// where it stands. So it drifts towards where people are without being sent to them.
-function chooseSurveyorRound() {
-  const figure = surveyor.figure;
-  let best = null, bestMetres = Infinity;
-  for (let tries = 0; tries < 4 && roamingWaypoints.length > 0; tries++) {
-    const waypoint = roamingWaypoints[Math.floor(Math.random() * roamingWaypoints.length)];
-    if (distanceBetweenPoints(waypoint[0], waypoint[1], figure.x, figure.z) < 6) continue;
-    const nearest = findNearestPlayer(waypoint[0], waypoint[1]);
-    const metres = distanceBetweenPoints(waypoint[0], waypoint[1], nearest.x, nearest.z);
-    if (metres < bestMetres) { bestMetres = metres; best = waypoint; }
-  }
-  if (best) { surveyor.goalX = best[0]; surveyor.goalZ = best[1]; }
+// How far afield it notices a lit place just now: the director sets that. Just after a breather only near
+// itself; the further the closing in has come, the further off (08-director.js).
+function getSurveyorLightRange() {
+  return interpolateLinear(TUNING.surveyorLightNoticeNearMetres, TUNING.surveyorLightNoticeFarMetres, getDirectorPressure());
+}
+
+// The lit place most worth a look from where it stands, or null: none in a breather (it has turned its back on
+// all that), and none while it is not allowed to make anybody out.
+function findLightForSurveyor(atLeast) {
+  if (isDirectorInBreather() || debugState.options.creaturesIgnorePlayer) return null;
+  return findBrightestLightNear(surveyor.figure.x, surveyor.figure.z, getSurveyorLightRange(), Math.max(TUNING.surveyorLightInterestPulses, atLeast || 0));
+}
+
+// Sets it walking to a lit place: the floor nearest to the middle of that square.
+function goToLight(light) {
+  const index = findNearestWalkableTileIndex(light.x, light.z);
+  if (index < 0) return false;
+  surveyor.goalX = index % GRID_WIDTH + 0.5; surveyor.goalZ = Math.floor(index / GRID_WIDTH) + 0.5;
+  surveyor.lightX = light.x; surveyor.lightZ = light.z;
   surveyor.state = SURVEYOR_STATE_ROAM;
+  surveyor.isDrawnByLight = true;
+  surveyor.statistics.timesDrawn++;
+  return true;
+}
+
+// The next place on its rounds. It is told nothing of where anybody is. It goes by light: to the place where
+// the most scanning has been landing lately, for how far off that is. In a breather it turns its back on that
+// and goes where the director sends it, far from everybody. And with nothing lit anywhere it notices, it is
+// given a room from the director's band, as the Hollow is, so that it is not lost to the far end of a station.
+function chooseSurveyorRound() {
+  surveyor.state = SURVEYOR_STATE_ROAM;
+  surveyor.isDrawnByLight = false;
+  surveyor.isTargetOutOfReach = false;
+  const light = findLightForSurveyor(0);
+  if (light && goToLight(light)) return;
+  if (roamingWaypoints.length === 0) return;
+  const waypoint = pickDirectedWaypoint(surveyor.figure);
+  surveyor.goalX = waypoint[0]; surveyor.goalZ = waypoint[1];
+}
+
+// On its way somewhere, every so often: has somewhere become a good deal brighter than where it is going? Then
+// it turns aside for that, and you are told, if you are near: scanning draws it. (Not while it stands looking
+// round: it finishes that first.)
+function lookForBrighterLight(dt) {
+  surveyor.lightCheckTimer -= dt;
+  if (surveyor.lightCheckTimer > 0) return;
+  surveyor.lightCheckTimer = TUNING.surveyorLightCheckSeconds;
+  const goingTo = surveyor.isDrawnByLight ? getLightHeatAt(surveyor.lightX, surveyor.lightZ) : 0;
+  const light = findLightForSurveyor(goingTo * TUNING.surveyorLightBrighterFactor);
+  if (!light) return;
+  if (surveyor.isDrawnByLight && getLightCellIndex(light.x, light.z) === getLightCellIndex(surveyor.lightX, surveyor.lightZ)) return; // (it is on its way there already)
+  // Where it stands and has just looked is no news to it.
+  if (distanceBetweenPoints(light.x, light.z, surveyor.figure.x, surveyor.figure.z) < LIGHT_CELL_METRES) return;
+  if (!goToLight(light)) return;
+  playSurveyorQuery(surveyor.figure.x, surveyor.figure.z);
+  showCaption('surveyorDrawn', surveyor.figure);
 }
 
 // Where it runs off to after it has struck: of a few waypoints, the one furthest from whoever it struck.
@@ -329,16 +381,19 @@ function updateSurveyor(dt) {
     else isTurningOnTheSpot = true;
     if (surveyor.timer <= 0) chooseSurveyorRound();
   } else if (surveyor.state === SURVEYOR_STATE_ROAM) {
-    speed = TUNING.surveyorRoamSpeed;
+    speed = surveyor.isDrawnByLight ? TUNING.surveyorDrawnSpeed : TUNING.surveyorRoamSpeed;
     if (distanceBetweenPoints(figure.x, figure.z, surveyor.goalX, surveyor.goalZ) < 0.9 || surveyor.isTargetOutOfReach) {
+      // There: it looks all round. A lit place it has been to and looked at counts for little from now.
+      if (surveyor.isDrawnByLight) coolLightAround(surveyor.lightX, surveyor.lightZ, TUNING.surveyorLightCoolsTo);
+      surveyor.isDrawnByLight = false;
       surveyor.state = SURVEYOR_STATE_LOOK;
       surveyor.timer = randomBetween(TUNING.surveyorLookSeconds[0], TUNING.surveyorLookSeconds[1]);
       surveyor.isTargetOutOfReach = false;
       speed = 0;
-    }
+    } else lookForBrighterLight(dt);
   } else if (surveyor.state === SURVEYOR_STATE_LOOK) {
     isTurningOnTheSpot = true;
-    if (surveyor.timer <= 0) chooseSurveyorRound();
+    if (surveyor.timer <= 0) chooseSurveyorRound(); // (it finishes looking round before it goes anywhere: that is when it sees you, or does not)
   } else if (surveyor.state === SURVEYOR_STATE_FLEE) {
     speed = TUNING.surveyorFleeSpeed;
     if (surveyor.timer <= 0 || distanceBetweenPoints(figure.x, figure.z, surveyor.goalX, surveyor.goalZ) < 0.9 || surveyor.isTargetOutOfReach) {
@@ -426,6 +481,43 @@ function followHostSurveyor(numbers, blend, dt) {
   if (surveyor.isLit) { shineSurveyorLight(dt); soundSurveyorLight(dt); }
 }
 
+// How the director paces it (08-director.js). Not as it paces the Hollow: this one is told nothing of where
+// anybody is. What the rhythm does to it is in chooseSurveyorRound and getSurveyorLightRange: closing in, it
+// notices lit places from further and further off; in a breather it turns its back on them and goes far away.
+addDirectedCreature({
+  key: 'surveyor',
+  figure: surveyor.figure,
+  isAbout: function () { return surveyor.isActive; },
+  isIdle: function () { return surveyor.state === SURVEYOR_STATE_ROAM || surveyor.state === SURVEYOR_STATE_LOOK; },
+  // After somebody fills menace fastest, searching where it lost them slower, on its rounds near you slowest;
+  // running off, or dazzled, it fills nothing.
+  menaceRise: function (closeness) {
+    if (surveyor.state === SURVEYOR_STATE_CHASE) return 1 / TUNING.directorPeakAfterHuntSeconds;
+    if (surveyor.state === SURVEYOR_STATE_SEARCH) return closeness / TUNING.directorPeakAfterSearchSeconds;
+    if (surveyor.state === SURVEYOR_STATE_FLEE || surveyor.state === SURVEYOR_STATE_DAZZLED || isCreatureInCrawlspace(surveyor)) return 0;
+    return closeness * closeness / TUNING.directorPeakAfterLoomSeconds;
+  },
+  takeUpRounds: chooseSurveyorRound,
+  beginBreather: function () {
+    chooseSurveyorRound();
+    showCaption('surveyorMovingOff', surveyor.figure);
+  },
+  // Put far from everybody at once, seeing nobody for a while.
+  sendAway: function (graceSeconds) {
+    if (!surveyor.isActive || isWorldTheHosts()) return;
+    const waypoint = pickFarthestWaypoint(surveyor.figure);
+    cancelCreatureCrawl(surveyor);
+    setFigureRaycastable(surveyor.figure, true);
+    surveyor.figure.x = waypoint[0]; surveyor.figure.z = waypoint[1];
+    surveyor.state = SURVEYOR_STATE_LOOK; surveyor.timer = 2;
+    surveyor.quarry = null; surveyor.seenSeconds = 0; surveyor.sinceSeen = 99; surveyor.isDrawnByLight = false;
+    surveyor.blindSeconds = Math.max(surveyor.blindSeconds, graceSeconds || 0);
+    surveyor.fieldTargetIndex = -1;
+    poseSurveyor(0, 0);
+    beginBreatherAfterSendingAway();
+  }
+});
+
 addCreatureKind({
   key: 'surveyor',
   update: updateSurveyor,
@@ -447,5 +539,10 @@ addCreatureKind({
       distanceBetweenPoints(surveyor.figure.x, surveyor.figure.z, player.x, player.z).toFixed(1) + ' m from you   seen for ' + surveyor.seenSeconds.toFixed(2) + ' of ' +
       TUNING.surveyorNoticeSeconds + ' s' + (surveyor.blindSeconds > 0 ? '   BLIND ' + surveyor.blindSeconds.toFixed(1) + ' s' : '') +
       (surveyor.dazzleImmuneSeconds > 0 ? '   cannot be dazzled for ' + surveyor.dazzleImmuneSeconds.toFixed(1) + ' s' : ''));
+    const light = findLightForSurveyor(0);
+    lines.push('  light     ' + (isDirectorInBreather() ? 'a breather: it has turned its back on it' : 'notices it within ' + getSurveyorLightRange().toFixed(0) + ' m') +
+      (surveyor.isDrawnByLight ? '; ON ITS WAY to a lit place ' + distanceBetweenPoints(surveyor.lightX, surveyor.lightZ, surveyor.figure.x, surveyor.figure.z).toFixed(0) + ' m off (' + getLightHeatAt(surveyor.lightX, surveyor.lightZ).toFixed(0) + ' pulses lately)' :
+        (light ? '; the brightest is ' + distanceBetweenPoints(light.x, light.z, surveyor.figure.x, surveyor.figure.z).toFixed(0) + ' m off (' + light.heat.toFixed(0) + ')' : '; nothing lit that it notices')) +
+      '   where you stand: ' + getLightHeatAt(player.x, player.z).toFixed(0));
   }
 });
