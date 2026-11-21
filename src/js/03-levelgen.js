@@ -11,6 +11,9 @@
 //            attached to their own tier or a lower one, so the station can always be finished.
 //   3. BUILD The plan is carved, doors are hung, rooms are furnished, corridors are dressed and
 //            every door gets the name of the room behind it.
+//
+// Where the station is (a pumping annex, a mine: 03-locations.js) changes none of that. It says which extra
+// rooms there are to choose from, what rooms are called and made of, and what the corridors have in them.
 // ---------------------------------------------------------------------------
 
 const ZONE_GENERATED_ROOM = 250; // stand-in zone for rooms that only exist in generated stations
@@ -495,28 +498,32 @@ function tryPlanRoomAtSocket(plan, roomKey, socket, tier, onlyOwnSocketIndex) {
   return null;
 }
 
-// Tries to run a two-tile-wide corridor outward from a socket. Returns the corridor (a kind of room) or null.
+// Tries to run a corridor outward from a socket: two tiles wide, or as wide as the place the station is in has
+// them (plan.corridorWidth). Returns the corridor (a kind of room) or null.
 function tryPlanCorridorAtSocket(plan, socket, length, tier) {
   const direction = WALL_DIRECTIONS[socket.wall];
   const sideways = [-direction[1], direction[0]];
-  const side = plan.random() < 0.5 ? 0 : -1; // which side of the door the second lane goes
+  const width = plan.corridorWidth;
+  // Which of its lanes the door opens onto: the lanes go from `side` to `side + width - 1`, the door is lane 0.
+  const side = width === 2 ? (plan.random() < 0.5 ? 0 : -1) : -Math.floor(plan.random() * width);
   const firstX = socket.tileX + direction[0], firstZ = socket.tileZ + direction[1];
   const lastX = firstX + direction[0] * (length - 1), lastZ = firstZ + direction[1] * (length - 1);
   const laneAX = firstX + sideways[0] * side, laneAZ = firstZ + sideways[1] * side;
-  const laneBX = lastX + sideways[0] * (side + 1), laneBZ = lastZ + sideways[1] * (side + 1);
+  const laneBX = lastX + sideways[0] * (side + width - 1), laneBZ = lastZ + sideways[1] * (side + width - 1);
   const corridor = {
     key: 'corridor', name: 'CORRIDOR', tier: tier, isCorridor: true, runsAlongX: direction[0] !== 0,
     startX: Math.min(laneAX, laneBX), startZ: Math.min(laneAZ, laneBZ),
     endX: Math.max(laneAX, laneBX) + 1, endZ: Math.max(laneAZ, laneBZ) + 1,
     floorY: socket.floorY, ceiling: tier >= 2 ? 2.5 : 2.8, zone: 0, isFlooded: tier >= 2 && plan.random() < 0.45
   };
+  if (plan.hasWindingCorridors) corridor.isWinding = true; // (not carved as the rectangle it is planned as: 04-caverns.js)
   if (!isPlanRectangleFree(plan, corridor)) return null;
   plan.rooms.push(corridor);
   socket.isUsed = true;
   plan.doors.push({ tileX: socket.tileX, tileZ: socket.tileZ, kind: doorKindForTier(tier > socket.owner.tier ? tier : 0),
     cardLevel: cardLevelForTier(tier > socket.owner.tier ? tier : 0), roomA: socket.owner, roomB: corridor });
   // Sockets: one at the far end, and one on each side every three tiles.
-  const endLane = plan.random() < 0.5 ? 0 : 1;
+  const endLane = width === 2 ? (plan.random() < 0.5 ? 0 : 1) : Math.floor(plan.random() * width);
   plan.sockets.push({
     tileX: lastX + direction[0] + sideways[0] * (side + endLane), tileZ: lastZ + direction[1] + sideways[1] * (side + endLane),
     wall: socket.wall, owner: corridor, isUsed: false, isCorridorEnd: true, floorY: socket.floorY
@@ -524,7 +531,7 @@ function tryPlanCorridorAtSocket(plan, socket, length, tier) {
   for (let along = 1; along < length - 1; along += 3) {
     const baseX = firstX + direction[0] * along, baseZ = firstZ + direction[1] * along;
     plan.sockets.push({ tileX: baseX + sideways[0] * (side - 1), tileZ: baseZ + sideways[1] * (side - 1), wall: (socket.wall + 3) % 4, owner: corridor, isUsed: false, floorY: socket.floorY });
-    plan.sockets.push({ tileX: baseX + sideways[0] * (side + 2), tileZ: baseZ + sideways[1] * (side + 2), wall: (socket.wall + 1) % 4, owner: corridor, isUsed: false, floorY: socket.floorY });
+    plan.sockets.push({ tileX: baseX + sideways[0] * (side + width), tileZ: baseZ + sideways[1] * (side + width), wall: (socket.wall + 1) % 4, owner: corridor, isUsed: false, floorY: socket.floorY });
   }
   return corridor;
 }
@@ -1076,6 +1083,7 @@ function digHaulBay(bay, number) {
   clearPlacement();
   placement.isGenerating = true;
   placement.zone = bay.zone;
+  placement.look = getLocationRoomLook(level.locationKey, 'bay');
   placement.offsetY = bay.floorY;
   for (const index of bay.route) {
     const tileX = index % GRID_WIDTH, tileZ = (index - tileX) / GRID_WIDTH;
@@ -1166,9 +1174,12 @@ function planSecondStair(plan) {
 // it another station. (What the workshop makes has checks of its own, on stations built with all of it.)
 let isWorkshopContentUsed = true;
 
-function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
+function planStation(seed, sizeKey, layoutKey, levelsKey, attempt, locationKey) {
   const size = GENERATED_SIZE_PRESETS[sizeKey] || GENERATED_SIZE_PRESETS.medium;
   const plan = createLevelPlan();
+  plan.locationKey = resolveLocationKey(locationKey);
+  plan.corridorWidth = getLocation(plan.locationKey).corridorWidth || 2;
+  plan.hasWindingCorridors = getLocation(plan.locationKey).corridorStyle === 'passage';
   plan.layout = GENERATED_LAYOUT_PRESETS[layoutKey] || GENERATED_LAYOUT_PRESETS.mixed;
   const hasLowerLevel = (GENERATED_LEVEL_PRESETS[levelsKey] || GENERATED_LEVEL_PRESETS.two).hasLowerLevel;
   chooseStairShape(seed);
@@ -1207,7 +1218,9 @@ function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
   if (!plan.spine) return null;
 
   // Which rooms, in which tier. Every station has the same thirteen; the extra rooms vary.
-  const fillerKeys = Object.keys(ROOM_CATALOGUE).filter(function (key) { return ROOM_CATALOGUE[key].isFiller && (isWorkshopContentUsed || !ROOM_CATALOGUE[key].isDesigned); });
+  const fillerKeys = Object.keys(ROOM_CATALOGUE).filter(function (key) {
+    return ROOM_CATALOGUE[key].isFiller && (isWorkshopContentUsed || !ROOM_CATALOGUE[key].isDesigned) && isRoomOfLocation(key, plan.locationKey);
+  });
   const timesFillerUsed = {};
   const pickFillers = function (tier, count, mustHaveItemSpot) {
     // No extra room appears more than twice in one station.
@@ -1217,7 +1230,7 @@ function planStation(seed, sizeKey, layoutKey, levelsKey, attempt) {
     const allowed = fillerKeys.filter(function (key) { return ROOM_CATALOGUE[key].tiers.indexOf(catalogueTier) >= 0 && (!mustHaveItemSpot || ROOM_CATALOGUE[key].itemSpot); });
     for (let guard = 0; allowed.length > 0 && picked.length < count && guard < 60; guard++) {
       const key = allowed[Math.floor(random() * allowed.length)];
-      if ((timesFillerUsed[key] || 0) >= 2) continue;
+      if ((timesFillerUsed[key] || 0) >= (ROOM_CATALOGUE[key].mostInAStation || 2)) continue; // (a room that is grown afresh every time may come more often)
       timesFillerUsed[key] = (timesFillerUsed[key] || 0) + 1;
       picked.push(key);
     }
@@ -1441,7 +1454,54 @@ function addCorridorDirectionSigns(plan) {
   }
 }
 
-function furnishGeneratedCorridor(corridor, random) {
+// A drift: what a corridor is in a mine. Timber sets every few metres, a length of narrow track along one side
+// of it, a dead lamp on its cable now and then.
+function furnishDriftCorridor(corridor, random, location) {
+  const startX = corridor.startX, startZ = corridor.startZ, endX = corridor.endX, endZ = corridor.endZ;
+  const ceiling = corridor.ceiling, runsAlongX = corridor.runsAlongX;
+  const length = runsAlongX ? endX - startX : endZ - startZ;
+  // The timber: a cap under the roof and a post at each wall. A post is left out where the wall has an opening
+  // behind it, and none of it is in anybody's way.
+  for (let along = 1.5; along < length - 0.4; along += 3) {
+    if (runsAlongX) {
+      const x = startX + along;
+      addBoxBetween(x - 0.11, ceiling - 0.22, startZ, x + 0.11, ceiling, endZ, CLUTTER);
+      if (!isTileOpenAt(Math.floor(x), startZ - 1)) addBoxBetween(x - 0.1, 0, startZ, x + 0.1, ceiling - 0.22, startZ + 0.2, CLUTTER);
+      if (!isTileOpenAt(Math.floor(x), endZ)) addBoxBetween(x - 0.1, 0, endZ - 0.2, x + 0.1, ceiling - 0.22, endZ, CLUTTER);
+    } else {
+      const z = startZ + along;
+      addBoxBetween(startX, ceiling - 0.22, z - 0.11, endX, ceiling, z + 0.11, CLUTTER);
+      if (!isTileOpenAt(startX - 1, Math.floor(z))) addBoxBetween(startX, 0, z - 0.1, startX + 0.2, ceiling - 0.22, z + 0.1, CLUTTER);
+      if (!isTileOpenAt(endX, Math.floor(z))) addBoxBetween(endX - 0.2, 0, z - 0.1, endX, ceiling - 0.22, z + 0.1, CLUTTER);
+    }
+  }
+  // The track keeps to one lane of the two, so that the other is bare floor for whatever is put down in a drift.
+  const hasTrack = !corridor.isFlooded && random() < 0.7;
+  const trackLane = random() < 0.5 ? 0.5 : 1.5;
+  if (hasTrack) {
+    if (runsAlongX) addRailTrack((startX + endX) / 2, startZ + trackLane, Math.PI / 2, length - 0.4);
+    else addRailTrack(startX + trackLane, (startZ + endZ) / 2, 0, length - 0.4);
+  }
+  for (let along = 3; along < length - 1; along += 6) {
+    if (runsAlongX) addHangingLamp(startX + along, (startZ + endZ) / 2, ceiling - 0.22, 0.3);
+    else addHangingLamp((startX + endX) / 2, startZ + along, ceiling - 0.22, 0.3);
+  }
+  // Litter, as in any corridor: only what can be walked through.
+  const litterCount = Math.floor(random() * 3);
+  for (let item = 0; item < litterCount; item++) {
+    const litterX = startX + 0.4 + random() * (endX - startX - 0.8), litterZ = startZ + 0.4 + random() * (endZ - startZ - 0.8);
+    addBoxProp(litterX, 0.1, litterZ, 0.2 + random() * 0.15, 0.1, 0.14 + random() * 0.1, { yaw: random() * 3, blocksMovement: false });
+  }
+  if (random() < 0.4) {
+    const text = location.scrawls[Math.floor(random() * location.scrawls.length)];
+    const wall = runsAlongX ? WALL_NORTH : WALL_WEST;
+    const firstTile = findBlankCorridorWall(corridor, wall, 5);
+    if (firstTile >= 0) addCorridorWallSign(corridor, wall, firstTile, 5, text, { width: 4.4, height: 0.5, centerY: 1.45, isScrawled: true });
+  }
+}
+
+// `location` is where the station is (03-locations.js): it says what a corridor has in it.
+function furnishGeneratedCorridor(corridor, random, location) {
   const startX = corridor.startX, startZ = corridor.startZ, endX = corridor.endX, endZ = corridor.endZ;
   const ceiling = corridor.ceiling;
   if (corridor.isFlooded) setTileFlagInRectangle(startX, startZ, endX, endZ, TILE_FLAG_WATER);
@@ -1476,6 +1536,7 @@ function furnishGeneratedCorridor(corridor, random) {
     }
     return;
   }
+  if (corridor.isDuct && location.corridorStyle === 'passage') return; // (a squeeze through the rock: nobody ran a pipe through it)
   if (corridor.isDuct) {
     // A service duct: low, one tile wide, with a fat pipe overhead along every straight stretch.
     const route = corridor.route;
@@ -1497,6 +1558,8 @@ function furnishGeneratedCorridor(corridor, random) {
     }
     return;
   }
+  if (location.corridorStyle === 'drift') { furnishDriftCorridor(corridor, random, location); return; }
+  if (location.corridorStyle === 'passage') { furnishWindingPassage(corridor, random, location); return; }
   addPortalFrames(startX, startZ, endX, endZ, ceiling, 4, corridor.runsAlongX);
   if (corridor.runsAlongX) {
     addPipeAlongX(startX, endX, ceiling - 0.25, startZ + 0.22, 0.09);
@@ -1535,14 +1598,16 @@ function addBeamsToLargeRoom(room) {
 // and which ring each is in, its doorways).
 let generatedStationPlan = null;
 
-function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
+function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey, locationKey) {
   if (!GENERATED_SIZE_PRESETS[sizeKey]) sizeKey = 'medium';
   if (!GENERATED_LAYOUT_PRESETS[layoutKey]) layoutKey = 'mixed';
   if (!GENERATED_LEVEL_PRESETS[levelsKey]) levelsKey = 'two';
+  locationKey = resolveLocationKey(locationKey);
+  const location = getLocation(locationKey);
   let plan = null;
   // A short stair leaves the lower level little room beside the upper one, so Shaft 9 can take many tries to fit:
   // large stations with a one-step stair have needed over 50. Most stations are planned within ten.
-  for (let attempt = 0; attempt < 200 && !plan; attempt++) plan = planStation(seed, sizeKey, layoutKey, levelsKey, attempt);
+  for (let attempt = 0; attempt < 200 && !plan; attempt++) plan = planStation(seed, sizeKey, layoutKey, levelsKey, attempt, locationKey);
   clearPlacement();
   if (!plan) return false;
   const random = plan.random;
@@ -1552,8 +1617,10 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   level.sizeKey = sizeKey;
   level.layoutKey = layoutKey;
   level.levelsKey = levelsKey;
+  level.locationKey = locationKey;
+  level.signTexts = location.signTexts;
   level.stairCount = plan.stairCount;
-  level.description = 'Generated · ' + GENERATED_SIZE_PRESETS[sizeKey].label.toLowerCase() + ', ' +
+  level.description = 'Generated · ' + (locationKey === DEFAULT_LOCATION_KEY ? '' : location.label.toLowerCase() + ', ') + GENERATED_SIZE_PRESETS[sizeKey].label.toLowerCase() + ', ' +
     GENERATED_LAYOUT_PRESETS[layoutKey].label.toLowerCase() + ', ' + GENERATED_LEVEL_PRESETS[levelsKey].label.toLowerCase() + ' · seed ' + seed;
   level.storeZone = 0;
   level.stillZones.length = 0;
@@ -1567,8 +1634,10 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   let corridorLetter = 0, liftCarZone = 0;
   for (const room of plan.rooms) {
     room.zone = ZONE_NAMES.length;
-    let name = room.name;
-    if (room.key === 'corridor') name = 'CORRIDOR ' + String.fromCharCode(65 + (corridorLetter++ % 26)) + (corridorLetter > 26 ? '2' : '');
+    // (What a room is called is the location's to say; what it is made of, too.)
+    let name = getLocationRoomName(locationKey, room.key, room.name);
+    room.look = getLocationRoomLook(locationKey, room.key);
+    if (room.key === 'corridor') name = location.corridorName + ' ' + String.fromCharCode(65 + (corridorLetter++ % 26)) + (corridorLetter > 26 ? '2' : '');
     else {
       // A second room of a kind is numbered: WORKSHOP, WORKSHOP 2. One that already ends in a number counts on: SUMP 3, SUMP 4.
       nameCounts[name] = (nameCounts[name] || 0) + 1;
@@ -1599,6 +1668,7 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
     placement.turns = room.turns; placement.offsetX = room.offsetX; placement.offsetZ = room.offsetZ;
     placement.offsetY = room.floorY;
     placement.zone = room.zone;
+    placement.look = room.look;
     placement.zoneMap = room.key === 'liftLobby' ? { [ZONE_LIFT_CAR]: liftCarZone } : null;
   };
 
@@ -1606,13 +1676,14 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   for (const room of plan.rooms) {
     if (room.isCorridor) continue;
     placeRoom(room);
-    ROOM_CATALOGUE[room.key].carve();
+    ROOM_CATALOGUE[room.key].carve(room, plan); // (which room of the plan it is: only a room that is grown afresh for every station asks)
     if (ROOM_CATALOGUE[room.key].isFlooded) setTileFlagInRectangle(ROOM_CATALOGUE[room.key].rect[0], ROOM_CATALOGUE[room.key].rect[1], ROOM_CATALOGUE[room.key].rect[2], ROOM_CATALOGUE[room.key].rect[3], TILE_FLAG_WATER);
   }
   clearPlacement();
   for (const room of plan.rooms) {
-    if (!room.isCorridor) continue;
+    if (!room.isCorridor || room.isWinding) continue;
     placement.zone = room.zone;
+    placement.look = room.look;
     placement.offsetY = room.floorY;
     if (room.route) {
       for (let step = 0; step < room.route.length; step++) {
@@ -1629,6 +1700,16 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
       }
       placement.offsetY = room.floorY;
     } else carveRoom(room.startX, room.startZ, room.endX, room.endZ, room.ceiling, ZONE_GENERATED_ROOM);
+  }
+
+  // The passages that wind: last of all, because where one has to be open is wherever something else opens onto it.
+  for (const room of plan.rooms) {
+    if (!room.isWinding) continue;
+    clearPlacement();
+    placement.zone = room.zone;
+    placement.look = room.look;
+    placement.offsetY = room.floorY;
+    carveWindingPassage(room, plan);
   }
 
   // Hang the doors.
@@ -1654,12 +1735,12 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
       clearPlacement();
       placement.zone = room.zone;
       placement.offsetY = room.floorY;
-      furnishGeneratedCorridor(room, random);
+      furnishGeneratedCorridor(room, random, location);
       continue;
     }
     placeRoom(room);
     const definition = ROOM_CATALOGUE[room.key];
-    definition.furnish(random, room.name);
+    definition.furnish(random, room.name, room);
     if (room === spoolHost) addSurveySpool(OBJECT_SPOOL_1, definition.itemSpot[0], definition.itemSpot[1], definition.itemSpot[2]);
     if (room === keycardHost) addKeycard(definition.itemSpot[0], definition.itemSpot[1] + 0.005, definition.itemSpot[2], 1);
     // Card 2 is left in the ring that card 1 opens (tier 2), card 3 in the ring that card 2 opens.
@@ -1672,7 +1753,7 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
 
   // Beams in the larger rooms. (Not in a room with a shape of its own: its ceiling is not one flat rectangle.)
   for (const room of plan.rooms) {
-    if (room.isCorridor || room.key === 'liftLobby' || ROOM_CATALOGUE[room.key].shape) continue;
+    if (room.isCorridor || room.key === 'liftLobby' || ROOM_CATALOGUE[room.key].shape || ROOM_CATALOGUE[room.key].isGrown) continue;
     placement.offsetY = room.floorY;
     addBeamsToLargeRoom(room);
   }
@@ -1691,12 +1772,25 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   // An apparition at the end of the main corridor furthest from the lift, looking back toward the lift.
   const spine = plan.spine;
   const spineMiddleX = (spine.startX + spine.endX) / 2, spineMiddleZ = (spine.startZ + spine.endZ) / 2;
+  // (In a passage that winds, the middle of its far end may be rock: then it stands on the floor nearest to that.)
+  const pushSpinePhantom = function (x, z, yaw) {
+    if (spine.isWinding && !isTileOpenAt(Math.floor(x), Math.floor(z))) {
+      let best = null;
+      for (let tileZ = spine.startZ; tileZ < spine.endZ; tileZ++) for (let tileX = spine.startX; tileX < spine.endX; tileX++) {
+        if (!isTileOpenAt(tileX, tileZ)) continue;
+        const distance = distanceBetweenPoints(x, z, tileX + 0.5, tileZ + 0.5);
+        if (best === null || distance < best[0]) best = [distance, tileX + 0.5, tileZ + 0.5];
+      }
+      if (best) { x = best[1]; z = best[2]; }
+    }
+    pushPhantom(x, z, yaw, spine.zone, false);
+  };
   if (spine.runsAlongX) {
     const isLiftAtWestEnd = Math.abs(plan.centerX - spine.startX) < Math.abs(plan.centerX - spine.endX);
-    pushPhantom(isLiftAtWestEnd ? spine.endX - 1.5 : spine.startX + 1.5, spineMiddleZ, isLiftAtWestEnd ? -Math.PI / 2 : Math.PI / 2, spine.zone, false);
+    pushSpinePhantom(isLiftAtWestEnd ? spine.endX - 1.5 : spine.startX + 1.5, spineMiddleZ, isLiftAtWestEnd ? -Math.PI / 2 : Math.PI / 2);
   } else {
     const isLiftAtNorthEnd = Math.abs(plan.centerZ - spine.startZ) < Math.abs(plan.centerZ - spine.endZ);
-    pushPhantom(spineMiddleX, isLiftAtNorthEnd ? spine.endZ - 1.5 : spine.startZ + 1.5, isLiftAtNorthEnd ? 0 : Math.PI, spine.zone, false);
+    pushSpinePhantom(spineMiddleX, isLiftAtNorthEnd ? spine.endZ - 1.5 : spine.startZ + 1.5, isLiftAtNorthEnd ? 0 : Math.PI);
   }
 
   placement.isGenerating = false;
@@ -1767,9 +1861,9 @@ function pushPhantom(x, z, yaw, triggerZone, onlyBeforePower) {
 //   their salvage bays into rock behind doorways it left unused. They move nothing and remove nothing.
 // So the same seed gives the same map whatever quests it has, and a quest that is added or changed later
 // alters no map. recordMapAsBuilt and auditMapApartFromQuests below are how that is checked.
-function buildStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders) {
+function buildStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey) {
   generatedStationPlan = null;
-  const wasBuiltAsAsked = buildStationRooms(kind, seed, sizeKey, layoutKey, levelsKey);
+  const wasBuiltAsAsked = buildStationRooms(kind, seed, sizeKey, layoutKey, levelsKey, locationKey);
   releaseDuctRouteScratch(); // the megabytes the ducts were routed with are not needed again until the next station
   // The ceiling hatches of the Hollow's crawlspace: they depend on where the locked doors ended up.
   placeHollowHatches();
@@ -1826,6 +1920,8 @@ function computeMapFingerprint(parts) {
       // A tile a quest has dug was rock when the map was finished, and is read as that rock.
       if (dug.has(index)) { add(0); add(0); add(0); add(0); add(0); continue; }
       add(tileIsOpen[index]); add(tileFloorHeight[index]); add(tileCeilingHeight[index]); add(tileFlags[index]); add(tileZone[index]);
+      // (What a tile is made of counts too, where it is anything but panels: so the annex has the number it always had.)
+      if (tileLook[index] !== LOOK_PANEL) add(tileLook[index] + 0.5);
       if (parts && parts.tiles) parts.tiles.push(tileX, tileZ, tileIsOpen[index], tileFloorHeight[index], tileCeilingHeight[index], tileFlags[index], tileZone[index]);
     }
   }
@@ -1873,14 +1969,19 @@ function auditMapApartFromQuests() {
   return problems;
 }
 
-function buildStationRooms(kind, seed, sizeKey, layoutKey, levelsKey) {
+function buildStationRooms(kind, seed, sizeKey, layoutKey, levelsKey, locationKey) {
   resetWorldForNewLevel();
   stillSpawnPoints.length = 0; lateStillSpawnPoints.length = 0; phantomDefinitions.length = 0;
   liftDoor = null;
-  if (kind === 'generated' && buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey)) return true;
+  // (Kessel-9 is the annex. So is the station that is built when no plan worked for a seed.)
+  level.locationKey = DEFAULT_LOCATION_KEY;
+  level.signTexts = null;
+  if (kind === 'generated' && buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey, locationKey)) return true;
   if (kind === 'generated') {
     // No plan worked for this seed (rare). Fall back to the classic station so there is always something to play.
     resetWorldForNewLevel();
+    level.locationKey = DEFAULT_LOCATION_KEY;
+    level.signTexts = null;
     stillSpawnPoints.length = 0; lateStillSpawnPoints.length = 0; phantomDefinitions.length = 0;
   }
   level.seed = 0;

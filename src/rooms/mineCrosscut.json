@@ -1,0 +1,36 @@
+{
+  "name": "CROSSCUT 7",
+  "width": 16,
+  "depth": 6,
+  "ceiling": 2.4,
+  "tiers": [0,1,2],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "west", "at": 1 },
+    { "wall": "east", "at": 4 },
+    { "wall": "south", "at": 8 }
+  ],
+  "tiles": [
+    "################",
+    "........########",
+    "#.........######",
+    "####..........##",
+    "#######.........",
+    "########.#######"
+  ],
+  "tileKinds": {  },
+  "itemSpot": null,
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "north", "along": 3.5, "centerY": 1.9, "width": 1.8, "height": 0.26, "isScrawled": false },
+    { "type": "timberSet", "x": 2.5, "z": 2, "angle": 90, "span": 2, "height": 2.3 },
+    { "type": "timberSet", "x": 6.5, "z": 2.5, "angle": 90, "span": 3, "height": 2.3 },
+    { "type": "timberSet", "x": 11.5, "z": 4, "angle": 90, "span": 2, "height": 2.3 },
+    { "type": "railTrack", "x": 8, "z": 3, "angle": 281, "length": 8 },
+    { "type": "rockPile", "x": 12.6, "z": 3.4, "size": 0.7 },
+    { "type": "hangingLamp", "x": 8.5, "z": 3.5, "drop": 0.3 },
+    { "type": "hangingLamp", "x": 4.5, "z": 2.2, "drop": 0.3 }
+  ]
+}

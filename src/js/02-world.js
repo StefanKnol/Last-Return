@@ -17,6 +17,14 @@ const tileZone = new Uint8Array(TILE_COUNT);
 const tilePropLists = new Array(TILE_COUNT).fill(null);
 const tileSignLists = new Array(TILE_COUNT).fill(null);
 const tileIsWalkable = new Uint8Array(TILE_COUNT);
+// What the walls, floor and ceiling of a tile are made of: one of the LOOK_ numbers below. It changes nothing
+// about where they are, only what a scan of them looks like (05-raycast.js). A room gets it from the place the
+// station is in, or has one of its own (03-locations.js).
+const tileLook = new Uint8Array(TILE_COUNT);
+const LOOK_PANEL = 0;   // wall panels with seams and a skirting, a floor of slabs, a ceiling grid: something built
+const LOOK_ROCK = 1;    // bare rock as it was cut: no seams, nothing level, nothing flat
+const LOOK_MASONRY = 2; // brick, in courses
+const LOOK_KEYS = { panel: LOOK_PANEL, rock: LOOK_ROCK, masonry: LOOK_MASONRY };
 
 const TILE_FLAG_WATER = 1;
 const TILE_FLAG_PIT = 2;
@@ -106,12 +114,13 @@ const placement = {
   offsetY: 0,        // how far below (negative) or above the lift's floor this room's floor is, in metres
   isGenerating: false,
   zone: 0,           // zone given to tiles carved by the room being placed
-  zoneMap: null      // optional: classic zone number -> zone number in this station
+  zoneMap: null,     // optional: classic zone number -> zone number in this station
+  look: LOOK_PANEL   // what tiles carved by the room being placed are made of
 };
 
 function clearPlacement() {
   placement.turns = 0; placement.offsetX = 0; placement.offsetZ = 0; placement.offsetY = 0;
-  placement.zone = 0; placement.zoneMap = null;
+  placement.zone = 0; placement.zoneMap = null; placement.look = LOOK_PANEL;
 }
 
 function rotatePointByTurns(x, z, turns) {
@@ -158,6 +167,8 @@ const level = {
   sizeKey: 'medium',
   layoutKey: 'mixed',
   levelsKey: 'two',
+  locationKey: 'annex',   // where a generated station is: a key of LOCATIONS (03-locations.js). Kessel-9 is the annex.
+  signTexts: null,        // other words for lettering that rooms put on their own walls, by what it says (the location's)
   stairCount: 0,          // flights of stairs between the levels (0 in a one-level station)
   ventCount: 0,           // crawl-height vents (generated stations only)
   ventBranchCount: 0,     // ... how many of those end on another vent (so have one mouth, not two)
@@ -248,6 +259,7 @@ function carveRoom(startX, startZ, endX, endZ, ceilingHeight, zone) {
       tileFloorHeight[index] = placement.offsetY;
       tileCeilingHeight[index] = placement.offsetY + ceilingHeight;
       tileZone[index] = resolvedZone;
+      tileLook[index] = placement.look;
     }
   }
 }
@@ -261,6 +273,7 @@ function carveTile(tileX, tileZ, floorHeight, ceilingHeight, zone) {
   tileFloorHeight[index] = placement.offsetY + floorHeight;
   tileCeilingHeight[index] = placement.offsetY + ceilingHeight;
   tileZone[index] = resolveZone(zone);
+  tileLook[index] = placement.look;
 }
 
 function setTileFlagInRectangle(startX, startZ, endX, endZ, flag) {
@@ -298,7 +311,7 @@ function setPitTile(tileX, tileZ, isPit) {
 // Empties the whole map so another station can be built.
 function resetWorldForNewLevel() {
   clearQuests(); // the quests belong to the station that is being cleared away (09-quests.js)
-  tileIsOpen.fill(0); tileFloorHeight.fill(0); tileCeilingHeight.fill(0); tileFlags.fill(0); tileZone.fill(0);
+  tileIsOpen.fill(0); tileFloorHeight.fill(0); tileCeilingHeight.fill(0); tileFlags.fill(0); tileZone.fill(0); tileLook.fill(0);
   tileIsWalkable.fill(0);
   tilePropLists.fill(null); tileSignLists.fill(null);
   level.ventMouths.length = 0; level.ventPockets.length = 0; level.ventDrops.length = 0; level.ventNests.length = 0;
@@ -639,6 +652,92 @@ function addShelfRackAlongZ(centerX, startZ, endZ, height, random, fillAmount) {
   }
 }
 
+// ---- What a mine has ----
+
+// A timber set: two posts and a cap across them, as wide as the drift. It stands across the way, so `yaw` 0
+// has its cap running east-west. The posts are in the way; the cap is overhead.
+function addTimberSet(x, z, yaw, span, height) {
+  const frame = createLocalFrame(x, z, yaw);
+  const postTop = height - 0.2;
+  for (const side of [-1, 1]) addBoxInFrame(frame, side * (span / 2 - 0.09), postTop / 2, 0, 0.09, postTop / 2, 0.09, {});
+  addBoxInFrame(frame, 0, height - 0.1, 0, span / 2, 0.1, 0.11, CLUTTER);
+}
+
+// One post from floor to roof, with a wedge under the roof.
+function addTimberProp(x, z, ceilingHeight) {
+  addCylinderProp(AXIS_Y, x, (ceilingHeight - 0.08) / 2, z, 0.09, (ceilingHeight - 0.08) / 2, {});
+  addBoxProp(x, ceilingHeight - 0.04, z, 0.2, 0.04, 0.12, CLUTTER);
+}
+
+// A length of narrow track on the floor: two rails on sleepers. It runs along local Z. Low enough to walk over.
+function addRailTrack(x, z, yaw, length) {
+  const frame = createLocalFrame(x, z, yaw);
+  for (const side of [-1, 1]) addBoxInFrame(frame, side * 0.3, 0.07, 0, 0.025, 0.035, length / 2, { surfaceClass: SURFACE_METAL, blocksMovement: false });
+  for (let along = -length / 2 + 0.3; along < length / 2 - 0.1; along += 0.7) addBoxInFrame(frame, 0, 0.02, along, 0.45, 0.02, 0.07, CLUTTER);
+}
+
+// A tub: the small iron wagon that ran on that track. `isTipped` lays it on its side.
+function addMineCart(x, z, yaw, isTipped) {
+  const frame = createLocalFrame(x, z, yaw);
+  const metal = { surfaceClass: SURFACE_METAL };
+  if (isTipped) {
+    addBoxInFrame(frame, 0.12, 0.33, 0, 0.3, 0.33, 0.55, metal);
+    for (const end of [-1, 1]) addBoxInFrame(frame, -0.24, 0.33 + end * 0.2, end * 0.32, 0.05, 0.11, 0.11, { surfaceClass: SURFACE_METAL, blocksMovement: false });
+    return;
+  }
+  addBoxInFrame(frame, 0, 0.52, 0, 0.36, 0.3, 0.55, metal);
+  addBoxInFrame(frame, 0, 0.19, 0, 0.3, 0.04, 0.48, metal);
+  for (const side of [-1, 1]) for (const end of [-1, 1]) addBoxInFrame(frame, side * 0.3, 0.11, end * 0.32, 0.03, 0.11, 0.11, { surfaceClass: SURFACE_METAL, blocksMovement: false });
+}
+
+// A heap of broken rock: one boulder in the middle with rubble round it, never quite the same twice. `size` is
+// about how far across the boulder is. Only the boulder is in the way: it is the same size and in the same
+// place every time, so what can be walked round it does not hang on chance. The rubble is stepped over.
+function addRockPile(x, z, size, random) {
+  addSphereProp(x, 0.2 * size, z, 0.36 * size, {});
+  const count = 4 + Math.floor(random() * 4);
+  for (let index = 0; index < count; index++) {
+    const angle = random() * Math.PI * 2, away = (0.34 + random() * 0.3) * size;
+    const radius = (0.1 + random() * 0.12) * size;
+    addSphereProp(x + Math.cos(angle) * away, radius * (0.2 + random() * 0.4), z + Math.sin(angle) * away, radius, CLUTTER);
+  }
+}
+
+// A ladder leaning the way it faces: its foot at (x, z), its top `height` up and a little further on.
+function addLadder(x, z, yaw, height) {
+  const frame = createLocalFrame(x, z, yaw);
+  const lean = 0.18; // how far the top is from the foot, for every metre it rises
+  const pieces = Math.max(2, Math.ceil(height / 0.5));
+  for (let piece = 0; piece < pieces; piece++) {
+    const middle = (piece + 0.5) * height / pieces;
+    for (const side of [-1, 1]) addBoxInFrame(frame, side * 0.21, middle, middle * lean, 0.025, height / pieces / 2 + 0.02, 0.03, CLUTTER);
+  }
+  for (let rung = 0.3; rung < height - 0.1; rung += 0.3) addBoxInFrame(frame, 0, rung, rung * lean, 0.21, 0.015, 0.015, CLUTTER);
+}
+
+// A lamp on a cable from the roof.
+function addHangingLamp(x, z, ceilingHeight, drop) {
+  addCylinderProp(AXIS_Y, x, ceilingHeight - drop / 2, z, 0.012, drop / 2, CLUTTER);
+  addCylinderProp(AXIS_Y, x, ceilingHeight - drop - 0.1, z, 0.11, 0.1, { surfaceClass: SURFACE_METAL, blocksMovement: false });
+}
+
+// ---- What a cave has ----
+
+// A stalagmite: lengths of it one on the other, each thinner than the one under it. Only the foot is in the way.
+const STALAGMITE_TAPER = [1, 0.8, 0.6, 0.42, 0.24]; // how thick each fifth of it is, from the foot up
+function addStalagmite(x, z, height, radius) {
+  for (let part = 0; part < STALAGMITE_TAPER.length; part++) {
+    addCylinderProp(AXIS_Y, x, height * (part + 0.5) / STALAGMITE_TAPER.length, z, radius * STALAGMITE_TAPER[part], height / STALAGMITE_TAPER.length / 2, part < 2 ? {} : CLUTTER);
+  }
+}
+
+// A stalactite: the same, hanging from the roof. It is overhead, in nobody's way.
+function addStalactite(x, z, ceilingHeight, length, radius) {
+  for (let part = 0; part < STALAGMITE_TAPER.length; part++) {
+    addCylinderProp(AXIS_Y, x, ceilingHeight - length * (part + 0.5) / STALAGMITE_TAPER.length, z, radius * STALAGMITE_TAPER[part], length / STALAGMITE_TAPER.length / 2, CLUTTER);
+  }
+}
+
 function addGurney(x, z, yaw, hasCoveredShape) {
   const frame = createLocalFrame(x, z, yaw);
   addBoxInFrame(frame, 0, 0.8, 0, 0.35, 0.03, 0.95, { surfaceClass: SURFACE_METAL });
@@ -732,6 +831,8 @@ function renderSignBitmap(text, widthMetres, heightMetres, isScrawled) {
 // Places lettering on one wall of a tile. `wall` says which side of the tile the wall is on.
 function addWallSign(text, tileX, tileZ, wall, options) {
   const width = options.width, height = options.height;
+  // Where the station is may have other words for what a room letters its own walls with (03-locations.js).
+  if (level.signTexts && Object.prototype.hasOwnProperty.call(level.signTexts, text)) text = level.signTexts[text];
   // Move and turn the sign with the room it belongs to.
   let alongOffset = options.alongOffset || 0;
   if (placement.turns !== 0 || placement.offsetX !== 0 || placement.offsetZ !== 0) {
@@ -820,8 +921,11 @@ function addDoor(tileX, tileZ, kind, cardLevel) {
   tileCeilingHeight[index] = baseY + DOOR_OPENING_HEIGHT;
   tileFlags[index] |= TILE_FLAG_DOOR;
   const passageRunsAlongX = isTileOpenAt(tileX - 1, tileZ) && isTileOpenAt(tileX + 1, tileZ);
-  tileZone[index] = passageRunsAlongX ? tileZone[tileIndexAt(tileX - 1, tileZ)] : tileZone[tileIndexAt(tileX, tileZ + 1)];
-  if (!tileZone[index]) tileZone[index] = passageRunsAlongX ? tileZone[tileIndexAt(tileX + 1, tileZ)] : tileZone[tileIndexAt(tileX, tileZ - 1)];
+  // The doorway belongs to one of the two rooms it is between, and is made of what that room is made of.
+  let ownerIndex = passageRunsAlongX ? tileIndexAt(tileX - 1, tileZ) : tileIndexAt(tileX, tileZ + 1);
+  if (!tileZone[ownerIndex]) ownerIndex = passageRunsAlongX ? tileIndexAt(tileX + 1, tileZ) : tileIndexAt(tileX, tileZ - 1);
+  tileZone[index] = tileZone[ownerIndex];
+  tileLook[index] = tileIsOpen[ownerIndex] ? tileLook[ownerIndex] : LOOK_PANEL;
   let surfaceClass = SURFACE_DOOR_AUTOMATIC;
   if (kind === DOOR_KIND_POWERED) surfaceClass = SURFACE_DOOR_POWERED;
   if (kind === DOOR_KIND_KEYCARD) surfaceClass = doorCardLevel >= 3 ? SURFACE_DOOR_KEYCARD_3 : (doorCardLevel === 2 ? SURFACE_DOOR_KEYCARD_2 : SURFACE_DOOR_KEYCARD);

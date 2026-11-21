@@ -226,6 +226,59 @@ function computeWallIntensity(alongCoordinate, y) {
   return 0.62 + Math.random() * 0.18;
 }
 
+// ---------------------------------------------------------------------------
+// What a surface is made of (tileLook, 02-world.js). The world knows only flat walls, floors and ceilings, one
+// tile at a time; what a scan of them shows is decided here, per pulse. Panels are the functions above.
+// ---------------------------------------------------------------------------
+
+// A number from 0 up to 1 for a pair of whole numbers: always the same one for the same pair.
+function hashLattice(x, y) {
+  let hash = Math.imul(x, 374761393) ^ Math.imul(y, 668265263);
+  hash = Math.imul(hash ^ (hash >>> 13), 1274126177);
+  return ((hash ^ (hash >>> 16)) >>> 0) / 4294967296;
+}
+
+// The same, for any two numbers, and smooth: near places have near values. From 0 to 1.
+function smoothNoise(x, y) {
+  const wholeX = Math.floor(x), wholeY = Math.floor(y);
+  let partX = x - wholeX, partY = y - wholeY;
+  partX = partX * partX * (3 - 2 * partX); partY = partY * partY * (3 - 2 * partY);
+  const top = hashLattice(wholeX, wholeY) + (hashLattice(wholeX + 1, wholeY) - hashLattice(wholeX, wholeY)) * partX;
+  const bottom = hashLattice(wholeX, wholeY + 1) + (hashLattice(wholeX + 1, wholeY + 1) - hashLattice(wholeX, wholeY + 1)) * partX;
+  return top + (bottom - top) * partY;
+}
+
+// TWEAK: bare rock. How far, in metres, the rough face stands out from the flat one the world knows: a wall into
+// the room, a roof downwards, a floor upwards. A body still stops at the flat wall, so keep the first well under
+// how wide a player is (TUNING.playerRadius); and things lie on the flat floor, so keep the last small.
+const ROCK_WALL_RELIEF = 0.2, ROCK_ROOF_RELIEF = 0.28, ROCK_FLOOR_RELIEF = 0.05;
+
+// How far a spot of rock stands out, from 0 to 1: broad swells with a finer grain on them. `across` and `along`
+// are metres on the face; `face` is a number that tells one face from another, so that no two are alike.
+function computeRockRelief(across, along, face) {
+  return smoothNoise(across * 0.85 + face * 7.31, along * 0.85 - face * 3.17) * 0.7 + smoothNoise(across * 2.9 - face * 1.93, along * 2.9 + face * 5.71) * 0.3;
+}
+
+// How strongly rock returns. `relief` is computeRockRelief there: what stands out returns more. A wall also
+// has its bedding: thin dark seams that run nearly level and wander a little (`height` given).
+function computeRockIntensity(relief, across, height) {
+  if (height !== undefined) {
+    const bedding = height * 1.9 + smoothNoise(across * 0.35, 4.2) * 1.4;
+    if (bedding - Math.floor(bedding) < 0.045) return 0.14;
+  }
+  return 0.36 + relief * 0.34 + Math.random() * 0.14;
+}
+
+// Brick: courses a quarter of a metre high, every other one shifted by half a brick, dark mortar between.
+function computeMasonryIntensity(alongCoordinate, y) {
+  const course = Math.floor(y / 0.25);
+  if (y - course * 0.25 < 0.022) return 0.16;
+  const along = alongCoordinate + (course & 1 ? 0.28 : 0);
+  const brick = Math.floor(along / 0.56);
+  if (along - brick * 0.56 < 0.022) return 0.16;
+  return 0.5 + hashLattice(brick, course) * 0.2 + Math.random() * 0.12;
+}
+
 function fillRayHit(distance, surfaceClass, intensity, objectId, originX, originY, originZ, directionX, directionY, directionZ) {
   rayHit.distance = distance;
   rayHit.surfaceClass = surfaceClass;
@@ -287,11 +340,18 @@ function castRayAgainstWorld(originX, originY, originZ, directionX, directionY, 
     }
     if (surfaceDistance <= limit) {
       const hitX = originX + directionX * surfaceDistance, hitZ = originZ + directionZ * surfaceDistance;
+      const isRock = tileLook[index] === LOOK_ROCK;
       let surfaceClass = SURFACE_CEILING, intensity = 0.4 + Math.random() * 0.25;
+      let lift = 0; // rock: how far above the flat floor (or, negative, below the flat roof) the pulse comes back from
       if (hitsFloor) {
         const flags = tileFlags[index];
         surfaceClass = SURFACE_FLOOR;
-        intensity = computeFloorIntensity(hitX, hitZ);
+        if (isRock) {
+          const relief = computeRockRelief(hitX, hitZ, 0.5);
+          intensity = computeRockIntensity(relief, hitX);
+          lift = relief * ROCK_FLOOR_RELIEF;
+        } else intensity = computeFloorIntensity(hitX, hitZ);
+        if (flags & (TILE_FLAG_WATER | TILE_FLAG_HAZARD | TILE_FLAG_GRATE)) lift = 0; // water lies level, and so does what was built
         if (flags & TILE_FLAG_WATER) { surfaceClass = SURFACE_WATER; intensity = 0.35 + Math.random() * 0.5; }
         else if (flags & TILE_FLAG_HAZARD) {
           const stripe = (hitX + hitZ) * 1.6;
@@ -301,11 +361,17 @@ function castRayAgainstWorld(originX, originY, originZ, directionX, directionY, 
           surfaceClass = SURFACE_METAL;
           intensity = (barX < 0.3 || barZ < 0.3) ? 0.85 : 0.1;
         }
+      } else if (isRock) {
+        const relief = computeRockRelief(hitX, hitZ, 1.5);
+        intensity = computeRockIntensity(relief, hitX);
+        lift = -relief * ROCK_ROOF_RELIEF;
       } else {
         const gridX = hitX * 0.5 - Math.floor(hitX * 0.5), gridZ = hitZ * 0.5 - Math.floor(hitZ * 0.5);
         if (gridX < 0.02 || gridZ < 0.02) intensity = 0.1;
       }
-      return fillRayHit(surfaceDistance, surfaceClass, intensity, 0, originX, originY, originZ, directionX, directionY, directionZ);
+      const isReturned = fillRayHit(surfaceDistance, surfaceClass, intensity, 0, originX, originY, originZ, directionX, directionY, directionZ);
+      rayHit.y += lift;
+      return isReturned;
     }
     if (exitDistance >= maximumDistance) return false;
 
@@ -326,10 +392,27 @@ function castRayAgainstWorld(originX, originY, originZ, directionX, directionY, 
     if (isBlocked) {
       const alongCoordinate = (wall === WALL_NORTH || wall === WALL_SOUTH)
         ? originX + directionX * exitDistance : originZ + directionZ * exitDistance;
-      let surfaceClass = SURFACE_WALL, intensity = computeWallIntensity(alongCoordinate, crossingY);
+      // What the wall is made of is the business of the tile it is a wall of: the one the pulse was in.
+      const look = tileLook[previousIndex];
+      let surfaceClass = SURFACE_WALL, intensity, standsOut = 0;
+      if (look === LOOK_ROCK) {
+        // (Every face has its own roughness: told apart by which way it faces and which line of the grid it is on.)
+        const relief = computeRockRelief(alongCoordinate, crossingY, wall + 2 + ((wall === WALL_NORTH || wall === WALL_SOUTH) ? tileZ : tileX) * 0.37);
+        intensity = computeRockIntensity(relief, alongCoordinate, crossingY);
+        standsOut = relief * ROCK_WALL_RELIEF;
+      } else if (look === LOOK_MASONRY) intensity = computeMasonryIntensity(alongCoordinate, crossingY);
+      else intensity = computeWallIntensity(alongCoordinate, crossingY);
       const signs = tileSignLists[previousIndex];
-      if (signs !== null && isWallHitOnSign(signs, wall, alongCoordinate, crossingY)) { surfaceClass = SURFACE_SIGN; intensity = 1; }
-      return fillRayHit(exitDistance, surfaceClass, intensity, 0, originX, originY, originZ, directionX, directionY, directionZ);
+      if (signs !== null && isWallHitOnSign(signs, wall, alongCoordinate, crossingY)) { surfaceClass = SURFACE_SIGN; intensity = 1; standsOut = 0; }
+      const isReturned = fillRayHit(exitDistance, surfaceClass, intensity, 0, originX, originY, originZ, directionX, directionY, directionZ);
+      // Rock stands out from the flat wall, into the tile the pulse came from.
+      if (standsOut > 0) {
+        if (wall === WALL_NORTH) rayHit.z += standsOut;
+        else if (wall === WALL_SOUTH) rayHit.z -= standsOut;
+        else if (wall === WALL_EAST) rayHit.x -= standsOut;
+        else rayHit.x += standsOut;
+      }
+      return isReturned;
     }
   }
   return false;

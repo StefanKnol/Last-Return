@@ -1,0 +1,36 @@
+{
+  "name": "PILLAR WORKINGS",
+  "width": 9,
+  "depth": 8,
+  "ceiling": 3,
+  "tiers": [0,1],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "north", "at": 4 },
+    { "wall": "east", "at": 3 }
+  ],
+  "tiles": [
+    "####.####",
+    "##.....##",
+    "#...#...#",
+    "#..###...",
+    "#...#....",
+    "##......#",
+    "###...###",
+    "#########"
+  ],
+  "tileKinds": {  },
+  "itemSpot": null,
+  "items": [
+    { "type": "sign", "text": "NO FURTHER", "wall": "south", "along": 4.5, "centerY": 1.4, "width": 2.6, "height": 0.5, "isScrawled": true },
+    { "type": "timberProp", "x": 1.4, "z": 2.5 },
+    { "type": "timberProp", "x": 7.5, "z": 2.4 },
+    { "type": "timberProp", "x": 1.5, "z": 4.5 },
+    { "type": "rockPile", "x": 6.6, "z": 5.3, "size": 0.9 },
+    { "type": "ladder", "x": 4.5, "z": 5.1, "angle": 180, "height": 2.4 },
+    { "type": "hangingLamp", "x": 4.5, "z": 1.5, "drop": 0.4 }
+  ]
+}

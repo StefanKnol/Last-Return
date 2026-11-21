@@ -42,7 +42,7 @@ function initializeInterface() {
     'difficulty-description', 'button-begin', 'intro-lines', 'button-skip-intro', 'pause-objective', 'button-resume',
     'button-pause-restart', 'reader-source', 'reader-heading', 'reader-body', 'button-close-reader', 'death-title',
     'death-lines', 'button-retry', 'button-death-restart', 'ending-stats', 'ending-manifest', 'button-ending-restart',
-    'button-ending-uncharted', 'station-options', 'work-order-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem',
+    'button-ending-uncharted', 'station-options', 'title-station-location', 'work-order-options', 'station-description', 'pause-station', 'pause-build', 'link-report-problem',
     'title-build', 'link-report-problem-title',
     'together-options', 'together-apart', 'together-lobby', 'together-lobby-code', 'together-code', 'together-status',
     'button-host-lobby', 'button-join-lobby', 'button-leave-lobby', 'button-lock-lobby'
@@ -88,6 +88,14 @@ function initializeInterface() {
     if (game.mode === 'reading' && input.isPointerLocked) closeReader();
     else if (game.mode === 'intro' && input.isPointerLocked) finishIntro();
   });
+
+  // Where an uncharted station may be: one choice for every location there is (03-locations.js).
+  for (const locationKey in LOCATIONS) {
+    const option = document.createElement('option');
+    option.value = locationKey;
+    option.textContent = LOCATIONS[locationKey].label;
+    elements['title-station-location'].appendChild(option);
+  }
 
   // Settings controls appear on more than one screen; keep every copy in step.
   const settingControls = document.querySelectorAll('[data-setting]');
@@ -1111,6 +1119,8 @@ function buildReportProblemAddress() {
   if (isGenerated) {
     fields.seed = [level.seed, level.sizeKey, level.layoutKey, level.levelsKey === 'two' ? 'two levels' : 'one level',
       'work order ' + (findWorkOrder(level.workOrder) || WORK_ORDERS[0]).label, level.liftWaits ? 'with the wait for the lift' : 'no wait for the lift'].join(', ');
+    // (Where it is, if that is anywhere but the annex: the same seed is another station there.)
+    if (level.locationKey !== DEFAULT_LOCATION_KEY) fields.seed += ', place: ' + getLocation(level.locationKey).label.toLowerCase();
   }
   return REPORT_PROBLEM_ADDRESS + '?' + new URLSearchParams(fields).toString();
 }

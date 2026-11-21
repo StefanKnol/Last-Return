@@ -237,6 +237,14 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('when the host changes something, it changes there too; what the other chose for themselves is what is kept', followed.size === 'large' && followed.control === 'large' && followed.kept !== 'generated', followed);
   await a.selectOption('#title-station-size', 'small');
   await b.waitForFunction(() => window.lastReturnDebug.settings.stationSize === 'small', null, { timeout: 5000 });
+  // Where the station is, is the host's to choose as well: the other's title screen follows that too, there and back.
+  const otherPlace = await a.evaluate(() => Object.keys(window.lastReturnDebug.locations).filter((key) => key !== 'annex')[0]);
+  await a.selectOption('#title-station-location', otherPlace);
+  await b.waitForFunction((place) => window.lastReturnDebug.settings.stationLocation === place, otherPlace, { timeout: 5000 }).catch(() => {});
+  const placeFollowed = await b.evaluate(() => ({ place: window.lastReturnDebug.settings.stationLocation, control: document.getElementById('title-station-location').value, cannotChange: document.getElementById('title-station-location').disabled }));
+  check('the place the host chooses for the station shows on the other\'s title screen too', placeFollowed.place === otherPlace && placeFollowed.control === otherPlace && placeFollowed.cannotChange, placeFollowed);
+  await a.selectOption('#title-station-location', 'annex');
+  await b.waitForFunction(() => window.lastReturnDebug.settings.stationLocation === 'annex', null, { timeout: 5000 });
 
   // The other's click on "Join" is forgotten by the browser after a few seconds. The host begins after that.
   await b.waitForFunction(() => !navigator.userActivation.isActive, null, { timeout: 15000 });

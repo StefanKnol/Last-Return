@@ -207,8 +207,9 @@ function resetWorldState() {
 // `questSeed` is left out in play: the quests then come from the station's own seed. Given, the same map gets
 // other quests (the tests and debug mode use that; the map does not change by it).
 // `workOrders` is the keys of the work orders it may be given: all of them, if left out.
-function loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders) {
-  const wasBuiltAsAsked = buildStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders);
+// `locationKey` is where it is (a key of LOCATIONS, 03-locations.js): the pumping annex, if left out.
+function loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey) {
+  const wasBuiltAsAsked = buildStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey);
   uploadWorldOccluderMesh(buildWorldOccluderVertices());
   if (debugHooks.stationLoaded) debugHooks.stationLoaded();
   moveMachinerySoundsToLevel();
@@ -235,6 +236,7 @@ function describeChosenDescent() {
   return {
     kind: settings.station === 'generated' ? 'generated' : 'classic',
     seed: chooseSeedFromText(settings.seedText), sizeKey: settings.stationSize, layoutKey: settings.stationLayout, levelsKey: settings.stationLevels,
+    locationKey: resolveLocationKey(settings.stationLocation),
     workOrders: getAllowedWorkOrders(),
     difficultyKey: settings.difficulty, customDifficulty: settings.customDifficulty
   };
@@ -249,7 +251,7 @@ function beginNewGame(descent) {
   game.difficulty = descent.difficultyKey === 'custom' ? buildCustomDifficulty(descent.customDifficulty) : (DIFFICULTY_PRESETS[descent.difficultyKey] || DIFFICULTY_PRESETS.standard);
   const quality = QUALITY_PRESETS[settings.quality];
   if (pointCloud.capacity !== quality.maximumPoints) allocatePointCloud(quality.maximumPoints);
-  if (descent.kind === 'generated') loadStation('generated', descent.seed, descent.sizeKey, descent.layoutKey, descent.levelsKey, undefined, descent.workOrders);
+  if (descent.kind === 'generated') loadStation('generated', descent.seed, descent.sizeKey, descent.layoutKey, descent.levelsKey, undefined, descent.workOrders, descent.locationKey);
   else if (level.kind !== 'classic') loadStation('classic', 0);
   resetWorldState();
   requestPointerLockOnCanvas();
@@ -592,7 +594,10 @@ function startGenerator(interactable) {
 function getIntroLines() {
   const order = findWorkOrder(level.workOrder) || WORK_ORDERS[0];
   const introLines = INTRO_LINES.map(function (line) { return line.indexOf('Work order') === 0 ? order.intro() : line; });
-  if (level.kind === 'generated') introLines.push('No drawings survive for this annex. Survey reference ' + level.seed + '.');
+  // Where the station is has its own name and its own word for there being no drawings of it (03-locations.js).
+  const location = getLocation(level.locationKey);
+  if (level.kind === 'generated' && location.introLines) for (let index = 0; index < location.introLines.length; index++) introLines[index] = location.introLines[index];
+  if (level.kind === 'generated') introLines.push(location.noDrawingsLine.split('{seed}').join(level.seed));
   return introLines;
 }
 
@@ -1040,6 +1045,8 @@ function updateAscending(dt) {
         // Best times are kept per threat level, and per station: a generated station only competes with itself.
         let storageKey = 'last-return-best-' + game.difficulty.key;
         if (level.kind === 'generated') storageKey += '-' + level.sizeKey + '-' + level.layoutKey + '-' + level.levelsKey + '-' + level.seed;
+        // (Another place is another station. The annex keeps the key it had before there were other places.)
+        if (level.kind === 'generated' && level.locationKey !== DEFAULT_LOCATION_KEY) storageKey += '-' + level.locationKey;
         const previousBest = Number(window.localStorage.getItem(storageKey));
         if (!previousBest || game.statistics.elapsed < previousBest) window.localStorage.setItem(storageKey, String(game.statistics.elapsed));
         game.statistics.bestTime = previousBest && previousBest < game.statistics.elapsed ? previousBest : game.statistics.elapsed;
@@ -1206,11 +1213,34 @@ function startApplication() {
     auditLayout: auditFacilityLayout,
     auditProgression: auditLevelProgression, auditVents: auditVents, measureVents: measureVents,
     level: level, interactables: interactables, zoneNames: ZONE_NAMES,
-    loadStation: function (kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders) { const result = loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders); resetWorldState(); return result; },
+    loadStation: function (kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey) { const result = loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey); resetWorldState(); return result; },
     workOrders: WORK_ORDERS, questComplications: QUEST_COMPLICATIONS, rankWorkOrders: rankWorkOrders, getWorkOrderProgressShare: getWorkOrderProgressShare, getDirectorPaceFactor: getDirectorPaceFactor, areSpoolsOnTheOrder: areSpoolsOnTheOrder, describeUploadManifest: describeUploadManifest, getIntroLines: getIntroLines, areStillsHunting: function () { return stillsAreHunting; }, getAllowedWorkOrders: getAllowedWorkOrders,
     auditMapApartFromQuests: auditMapApartFromQuests, computeMapFingerprint: computeMapFingerprint, planQuests: planQuests,
     getFloorHeightAt: getFloorHeightAt,
     getHeadroomAt: getHeadroomAt,
+    // Where a station can be, and what that makes of it (03-locations.js): what a tile is made of, by name
+    // ('' for rock that is not dug), and the rooms of the generated station that is loaded.
+    locations: LOCATIONS, isRoomOfLocation: isRoomOfLocation, growCavernRoom: growCavernRoom, resolveDesignedRoomShape: resolveDesignedRoomShape, describeChosenDescent: describeChosenDescent, readSharedDescent: readSharedDescent,
+    getLookAt: function (x, z) {
+      const tileX = Math.floor(x), tileZ = Math.floor(z);
+      if (!isTileOpenAt(tileX, tileZ)) return '';
+      for (const key in LOOK_KEYS) if (LOOK_KEYS[key] === tileLook[tileIndexAt(tileX, tileZ)]) return key;
+      return '';
+    },
+    // The caverns of the station that is loaded, as they were grown: which kind each is, and its floor as text.
+    getGrownShapes: function () {
+      if (!generatedStationPlan) return [];
+      return generatedStationPlan.rooms.filter(function (room) { return Boolean(room.grownShape); }).map(function (room) {
+        return { key: room.key, name: room.name, tiles: Array.from(room.grownShape.isOpen).join('') + '/' + room.grownShape.floor.join() };
+      });
+    },
+    getStationRooms: function () {
+      if (!generatedStationPlan) return [];
+      return generatedStationPlan.rooms.map(function (room) {
+        return { key: room.key, name: room.name, isCorridor: room.isCorridor === true, isExtra: Boolean(ROOM_CATALOGUE[room.key] && ROOM_CATALOGUE[room.key].isFiller),
+          plannedTiles: room.route ? room.route.length : (room.endX - room.startX) * (room.endZ - room.startZ) };
+      });
+    },
     isVentAt: function (x, z) { return (getTileFlagsAtPosition(x, z) & TILE_FLAG_VENT) !== 0; },
     ventHeight: VENT_HEIGHT,
     chooseSeedFromText: chooseSeedFromText,

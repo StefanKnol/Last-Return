@@ -81,6 +81,7 @@ const settings = {
   stationSize: 'medium',    // a key of GENERATED_SIZE_PRESETS
   stationLayout: 'mixed',   // a key of GENERATED_LAYOUT_PRESETS
   stationLevels: 'two',     // a key of GENERATED_LEVEL_PRESETS
+  stationLocation: 'annex', // a key of LOCATIONS (03-locations.js): where a generated station is
   seedText: '',             // what is typed in the seed box; empty means a new random station each descent
   hud: 'quiet',             // 'quiet' shows instruments only while they matter; 'full' shows everything all the time
   captions: 'tells',        // the lines in square brackets: 'off', 'tells' (what the Hollow has just done) or 'all' (every sound, with where it comes from)
@@ -131,6 +132,7 @@ function loadSettings() {
       if (GENERATED_SIZE_PRESETS[stored.stationSize]) settings.stationSize = stored.stationSize;
       if (GENERATED_LAYOUT_PRESETS[stored.stationLayout]) settings.stationLayout = stored.stationLayout;
       if (GENERATED_LEVEL_PRESETS[stored.stationLevels]) settings.stationLevels = stored.stationLevels;
+      settings.stationLocation = resolveLocationKey(stored.stationLocation);
       if (typeof stored.seedText === 'string') settings.seedText = stored.seedText.slice(0, 24);
       if (stored.hud === 'quiet' || stored.hud === 'full') settings.hud = stored.hud;
       if (stored.captions === 'off' || stored.captions === 'tells' || stored.captions === 'all') settings.captions = stored.captions;

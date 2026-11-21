@@ -106,6 +106,36 @@ const ROOM_ITEM_TYPES = {
   registrationSphere: { label: 'Registration sphere', group: 'Survey gear', placement: 'floor', angleStep: 0, fields: [],
     build: function (item) { addRegistrationSphere(item.x, item.z); } },
 
+  // ---- what a mine has ----
+  timberSet: { label: 'Timber set (two posts and a cap)', group: 'Mine', placement: 'floor', angleStep: 5,
+    fields: [numberField('span', 'Width', 2, 1, 8, 0.1), numberField('height', 'Height (no higher than the roof)', 2.4, 1.6, 8, 0.05)],
+    build: function (item, context) { addTimberSet(item.x, item.z, context.yaw, item.span, Math.min(item.height, context.ceiling)); } },
+  timberProp: { label: 'Timber prop (floor to roof)', group: 'Mine', placement: 'floor', angleStep: 0, fields: [],
+    build: function (item, context) { addTimberProp(item.x, item.z, context.ceiling); } },
+  railTrack: { label: 'Track', group: 'Mine', placement: 'floor', angleStep: 5,
+    fields: [numberField('length', 'Length', 4, 0.6, 24, 0.1)],
+    build: function (item, context) { addRailTrack(item.x, item.z, context.yaw, item.length); } },
+  mineCart: { label: 'Tub (mine cart)', group: 'Mine', placement: 'floor', angleStep: 5,
+    fields: [booleanField('isTipped', 'On its side', false)],
+    build: function (item, context) { addMineCart(item.x, item.z, context.yaw, item.isTipped); } },
+  rockPile: { label: 'Heap of rock (random)', group: 'Mine', placement: 'floor', angleStep: 0,
+    fields: [numberField('size', 'Size', 1, 0.4, 2.5, 0.05)],
+    build: function (item, context) { addRockPile(item.x, item.z, item.size, context.random); } },
+  ladder: { label: 'Ladder', group: 'Mine', placement: 'floor', angleStep: 5,
+    fields: [numberField('height', 'Height', 2.4, 1, 8, 0.1)],
+    build: function (item, context) { addLadder(item.x, item.z, context.yaw, item.height); } },
+  hangingLamp: { label: 'Lamp on a cable', group: 'Mine', placement: 'floor', angleStep: 0,
+    fields: [numberField('drop', 'How far it hangs down', 0.4, 0.1, 3, 0.05)],
+    build: function (item, context) { addHangingLamp(item.x, item.z, context.ceiling, Math.min(item.drop, context.ceiling - 0.3)); } },
+
+  // ---- what a cave has ----
+  stalagmite: { label: 'Stalagmite', group: 'Cave', placement: 'floor', angleStep: 0,
+    fields: [numberField('height', 'Height (no higher than the roof)', 1.2, 0.8, 4, 0.05), numberField('radius', 'How thick at the foot', 0.22, 0.1, 0.6, 0.01)],
+    build: function (item, context) { addStalagmite(item.x, item.z, Math.min(item.height, context.ceiling - 0.1), item.radius); } },
+  stalactite: { label: 'Stalactite', group: 'Cave', placement: 'floor', angleStep: 0,
+    fields: [numberField('length', 'Length', 0.6, 0.2, 3, 0.05), numberField('radius', 'How thick at the roof', 0.14, 0.05, 0.5, 0.01)],
+    build: function (item, context) { addStalactite(item.x, item.z, context.ceiling, Math.min(item.length, context.ceiling - 0.3), item.radius); } },
+
   // ---- plain shapes, for anything the list above does not have ----
   box: { label: 'Box', group: 'Shapes', placement: 'floor', angleStep: 5,
     fields: [numberField('sizeX', 'Width', 1, 0.02, 24, 0.05), numberField('sizeZ', 'Depth', 1, 0.02, 24, 0.05), numberField('sizeY', 'Height', 1, 0.02, 9, 0.05),
@@ -277,6 +307,10 @@ function normalizeDesignedRoom(source, key) {
     isFlooded: source.isFlooded === true,
     // Off: the room exists (the workshop can open it) but no station is ever built with it.
     useInStations: source.useInStations === true,
+    // Where a station must be to have this room: keys of LOCATIONS (03-locations.js). One at least.
+    locations: [],
+    // What it is made of: a key of LOOK_KEYS (02-world.js), or '' for whatever the place it is in is made of.
+    look: typeof source.look === 'string' && Object.prototype.hasOwnProperty.call(LOOK_KEYS, source.look) ? source.look : '',
     doors: [],
     // The room's shape, if it is not a plain box: see "The shape of a room" below.
     tiles: null,
@@ -288,6 +322,9 @@ function normalizeDesignedRoom(source, key) {
     if ((tier === 0 || tier === 1 || tier === 2) && room.tiers.indexOf(tier) < 0) room.tiers.push(tier);
   }
   if (room.tiers.length === 0) room.tiers.push(0);
+  // (In the order the locations are listed in, whatever order the file has them in.)
+  for (const locationKey in LOCATIONS) if (Array.isArray(source.locations) && source.locations.indexOf(locationKey) >= 0) room.locations.push(locationKey);
+  if (room.locations.length === 0) room.locations.push(DEFAULT_LOCATION_KEY); // a file from before there were locations
   // Doors: which wall, and how many tiles along it (counted from its west or north end).
   for (const door of Array.isArray(source.doors) ? source.doors : []) {
     const wall = ROOM_WALL_NAMES.indexOf(door && door.wall);
@@ -562,8 +599,10 @@ function createDesignedRoomDefinition(room) {
     furnish: function (random, roomName) { furnishDesignedRoom(room, random, roomName, null, shape); },
     sockets: getDesignedRoomSockets(room, shape),
     isFiller: room.useInStations,
-    isDesigned: true
+    isDesigned: true,
+    locations: room.locations.slice()
   };
+  if (room.look !== '') definition.look = room.look;
   if (shape) definition.shape = shape; // (a room with one gets no ceiling beams: 03-levelgen.js)
   if (room.isFlooded) definition.isFlooded = true;
   if (room.itemSpot) {

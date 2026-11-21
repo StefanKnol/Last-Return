@@ -24,6 +24,7 @@ const roomWorkshop = {
   definition: null,      // the catalogue entry on screen
   selectedIndex: -1,     // which of room.items is selected
   seed: 1,               // for the things that come out a little different every time (shelf contents, crate stacks)
+  previewLocation: '',   // which location the room is shown in: a key of LOCATIONS, or '' for the first one it belongs to
   showUnwalkable: false,
   needsRebuild: false,
   itemRanges: [],        // per item: which worldProps it became
@@ -42,6 +43,8 @@ const roomWorkshop = {
   hoverTile: null,       // [tileX, tileZ] of the tile under the mouse, while painting
   stroke: null,          // the mouse button is down: { lastTileX, lastTileZ, skippedDoor, outOfLetters }
   tileInfoElement: null,
+  growNumber: 1,         // which cavern "Grow a cavern" grows next: every press is another one
+  growFill: 0.44,        // how much of it starts as rock (growCavern, 04-caverns.js)
   distanceField: new Int16Array(TILE_COUNT)
 };
 
@@ -128,6 +131,15 @@ function createNewWorkshopRoom(source) {
 // Building the room on the empty map
 // ---------------------------------------------------------------------------
 
+// Which location the room on screen is shown in: the one chosen, if the room belongs there; otherwise the first
+// it does belong to. (A room written as code: the one chosen, or the annex.)
+function getRoomWorkshopLocation() {
+  const state = roomWorkshop;
+  const chosen = resolveLocationKey(state.previewLocation);
+  if (!state.room) return chosen;
+  return state.room.locations.indexOf(chosen) >= 0 ? chosen : state.room.locations[0];
+}
+
 function getRoomWorkshopSize() {
   const rect = roomWorkshop.definition.rect;
   return { width: rect[2] - rect[0], depth: rect[3] - rect[1], ceiling: roomWorkshop.definition.ceiling };
@@ -163,14 +175,21 @@ function rebuildRoomWorkshopWorld() {
   const rect = definition.rect;
   prepareWorkshopWorld('Workshop · ' + name);
   ZONE_NAMES.push('UNSURVEYED', name, 'OUTSIDE', 'LIFT CAR');
+  // The place it is shown in: that says what it is made of where the room does not, and what is outside its doors.
+  const locationKey = getRoomWorkshopLocation();
+  level.locationKey = locationKey;
+  level.signTexts = getLocation(locationKey).signTexts;
+  const roomLook = state.room ? LOOK_KEYS[state.room.look || getLocation(locationKey).look] || LOOK_PANEL : getLocationRoomLook(locationKey, state.key);
   const placeRoom = function () {
     clearPlacement();
     setPlacement(0, rect[0], rect[1], WORKSHOP_ORIGIN_X, WORKSHOP_ORIGIN_Z);
     placement.zone = 1;
+    placement.look = roomLook;
     placement.zoneMap = state.key === 'liftLobby' ? { [ZONE_LIFT_CAR]: 3 } : null;
   };
 
   placeRoom();
+  grownRoomPreviewSeed = state.seed; // (a cavern that is grown is grown from the number that shuffles everything else here)
   definition.carve();
   if (definition.isFlooded) setTileFlagInRectangle(rect[0], rect[1], rect[2], rect[3], TILE_FLAG_WATER);
   if (liftDoor) liftDoor.forcedState = true;
@@ -182,6 +201,7 @@ function rebuildRoomWorkshopWorld() {
     const step = WALL_DIRECTIONS[placeWall(socket[2])];
     clearPlacement();
     placement.zone = 2;
+    placement.look = getLocationRoomLook(locationKey, 'corridor');
     placement.offsetY = definition.socketDrops ? definition.socketDrops[socketIndex] : 0;
     const nearX = tile[0] + step[0], nearZ = tile[1] + step[1], farX = tile[0] + step[0] * 3, farZ = tile[1] + step[1] * 3;
     const sideX = step[0] === 0 ? 1 : 0, sideZ = step[1] === 0 ? 1 : 0;
@@ -200,7 +220,7 @@ function rebuildRoomWorkshopWorld() {
     definition.furnish(random, name);
   }
   clearPlacement();
-  if (state.key !== 'liftLobby' && !definition.shape) {
+  if (state.key !== 'liftLobby' && !definition.shape && !definition.isGrown) {
     addBeamsToLargeRoom({ startX: WORKSHOP_ORIGIN_X, startZ: WORKSHOP_ORIGIN_Z, endX: WORKSHOP_ORIGIN_X + rect[2] - rect[0], endZ: WORKSHOP_ORIGIN_Z + rect[3] - rect[1], ceiling: definition.ceiling });
   }
   finishWorkshopWorld();
@@ -569,6 +589,23 @@ function finishRoomWorkshopStroke() {
   else if (stroke.skippedDoor) setWorkshopStatus('The tile just inside a door is always plain floor: the brush left it alone.', 'info');
 }
 
+// Gives the room the floor of a cavern, grown as a station grows them (04-caverns.js), in place of whatever
+// shape it had: something to start from, and to go over with the brush. Every press grows another one.
+function growRoomWorkshopCavern() {
+  const state = roomWorkshop;
+  if (!state.room) return;
+  const grown = growCavernRoom(state.room.width, state.room.depth, state.room.ceiling, state.room.doors, state.growNumber * 613 + state.room.width * 31 + state.room.depth, { fill: state.growFill });
+  state.growNumber++;
+  markWorkshopStateChanged();
+  if (!grown.tiles) { setWorkshopStatus('Nothing worth keeping grew this time. Press again for another, or start with less rock.', 'warning'); return; }
+  beginRoomWorkshopEdit('grow ' + state.growNumber);
+  state.room.tiles = grown.tiles; state.room.tileKinds = grown.tileKinds;
+  state.room = normalizeDesignedRoom(state.room, state.key);
+  finishRoomWorkshopEdit();
+  renderWorkshopPanel();
+  setWorkshopStatus('A cavern. Press again for another one, Ctrl+Z for the one before; paint over what you want otherwise.', 'info');
+}
+
 // Back to a plain box.
 function clearRoomWorkshopShape() {
   const state = roomWorkshop;
@@ -603,8 +640,11 @@ function renderRoomWorkshopShape(body) {
   addWorkshopHeading(body, 'The shape of the room');
   addWorkshopCheckbox(body, 'Paint tiles (P): click and drag in the view', state.isPainting, function (isOn) { setRoomWorkshopPainting(isOn); renderWorkshopPanel(); },
     'The mouse becomes a brush. Things in the room cannot be selected while it is one.').id = 'workshop-paint';
+  const growRow = addWorkshopRow(body);
+  addWorkshopButton(growRow, 'Grow a cavern', growRoomWorkshopCavern, 'Replaces the room\'s shape with a cavern grown the way a cave station grows them, round the doors it has. Every press is another one.').id = 'workshop-grow';
+  addWorkshopNumber(body, 'How much of it starts as rock', state.growFill, 0.3, 0.55, 0.01, function (value) { state.growFill = value; markWorkshopStateChanged(); }).element.id = 'workshop-grow-fill';
   if (!state.isPainting) {
-    addWorkshopNote(body, room.tiles ? 'This room has a shape of its own.' : 'A plain box. Paint tiles to fill parts of it in with rock, or to give them a floor or a ceiling of their own.');
+    addWorkshopNote(body, room.tiles ? 'This room has a shape of its own.' : 'A plain box. Paint tiles to fill parts of it in with rock, or to give them a floor or a ceiling of their own; or grow a cavern and paint over that.');
     return;
   }
   addWorkshopSelect(body, 'Brush', state.brush, ROOM_WORKSHOP_BRUSHES, function (brush) { state.brush = brush; markWorkshopStateChanged(); renderWorkshopPanel(); }).id = 'workshop-brush';
@@ -807,6 +847,11 @@ function renderRoomWorkshopPanel(body) {
   addWorkshopCheckbox(body, 'Lights on (L). Off: what the scanner would show', workshop.isLit, function (isLit) { setWorkshopLights(isLit); });
   addWorkshopCheckbox(body, 'Walk instead of fly (G)', workshop.isWalking, function (isWalking) { setWorkshopWalking(isWalking); });
   addWorkshopCheckbox(body, 'Mark floor nothing can walk on (N)', state.showUnwalkable, function (isOn) { state.showUnwalkable = isOn; markWorkshopStateChanged(); });
+  // A room looks different from place to place: what it is made of (unless it says so itself), and what is outside its doors.
+  const locationChoices = Object.keys(LOCATIONS).filter(function (key) { return !room || room.locations.indexOf(key) >= 0; }).map(function (key) { return [key, LOCATIONS[key].label]; });
+  if (locationChoices.length > 1) {
+    addWorkshopSelect(body, 'Shown as it is in', getRoomWorkshopLocation(), locationChoices, function (key) { state.previewLocation = key; state.needsRebuild = true; markWorkshopStateChanged(); }).id = 'workshop-preview-location';
+  }
   row = addWorkshopRow(body);
   addWorkshopButton(row, 'Overview', showRoomWorkshopOverview, 'H');
   addWorkshopButton(row, 'From above', showRoomWorkshopTopView, 'T');
@@ -861,12 +906,24 @@ function renderRoomWorkshopPanel(body) {
   addWorkshopNumber(body, 'Width, west to east (m)', room.width, limits.minimumSize, limits.maximumSize, 1, resize('width')).element.addEventListener('change', renderWorkshopPanel);
   addWorkshopNumber(body, 'Depth, north to south (m)', room.depth, limits.minimumSize, limits.maximumSize, 1, resize('depth')).element.addEventListener('change', renderWorkshopPanel);
   addWorkshopNumber(body, 'Ceiling height (m)', room.ceiling, limits.minimumCeiling, limits.maximumCeiling, 0.1, resize('ceiling'));
+  addWorkshopSelect(body, 'Made of', room.look, [['', 'What the place it is in is made of'], ['panel', 'Panels (something built)'], ['rock', 'Bare rock'], ['masonry', 'Brick']], function (look) {
+    beginRoomWorkshopEdit('look'); state.room.look = look; finishRoomWorkshopEdit();
+  }).id = 'workshop-room-look';
   addWorkshopCheckbox(body, 'Flooded: the whole floor is under water', room.isFlooded, function (isOn) { beginRoomWorkshopEdit('flooded'); state.room.isFlooded = isOn; finishRoomWorkshopEdit(); });
   addWorkshopNumber(body, 'Shuffle the random bits (shelves, stacks)', state.seed, 1, 99, 1, function (value) { state.seed = value; state.needsRebuild = true; markWorkshopStateChanged(); });
 
   addWorkshopHeading(body, 'In generated stations');
   addWorkshopCheckbox(body, 'Use this room in generated stations', room.useInStations, function (isOn) { beginRoomWorkshopEdit('use'); state.room.useInStations = isOn; finishRoomWorkshopEdit(); },
     'Off: the room is kept, but no station is built with it. Switching it on changes which rooms existing seeds produce.');
+  Object.keys(LOCATIONS).forEach(function (locationKey) {
+    addWorkshopCheckbox(body, 'A room of: ' + LOCATIONS[locationKey].label.toLowerCase(), room.locations.indexOf(locationKey) >= 0, function (isOn) {
+      beginRoomWorkshopEdit('locations');
+      const kept = Object.keys(LOCATIONS).filter(function (other) { return other === locationKey ? isOn : state.room.locations.indexOf(other) >= 0; });
+      state.room.locations = kept.length > 0 ? kept : [locationKey]; // a room must belong somewhere
+      finishRoomWorkshopEdit();
+      renderWorkshopPanel(); // (which place it can be shown in follows)
+    }, 'A station only has this room if it is in a place that is ticked.').id = 'workshop-room-location-' + locationKey;
+  });
   ROOM_WORKSHOP_TIER_LABELS.forEach(function (label, tier) {
     addWorkshopCheckbox(body, 'May be placed: ' + label.toLowerCase(), room.tiers.indexOf(tier) >= 0, function (isOn) {
       beginRoomWorkshopEdit('tiers');
@@ -1167,6 +1224,9 @@ workshop.tools.rooms = {
     const state = roomWorkshop;
     state.seed = Number.isFinite(stored.seed) ? clampNumber(Math.round(stored.seed), 1, 99) : 1;
     state.showUnwalkable = stored.showUnwalkable === true;
+    state.previewLocation = typeof stored.previewLocation === 'string' ? stored.previewLocation : '';
+    if (Number.isFinite(stored.growNumber)) state.growNumber = Math.max(1, Math.round(stored.growNumber));
+    if (Number.isFinite(stored.growFill)) state.growFill = clampNumber(stored.growFill, 0.3, 0.55);
     if (ROOM_WORKSHOP_BRUSHES.some(function (brush) { return brush[0] === stored.brush; })) state.brush = stored.brush;
     if (Number.isFinite(stored.brushFloor)) state.brushFloor = roundDesignedHeight(clampNumber(stored.brushFloor, DESIGNED_ROOM_LIMITS.lowestFloor, DESIGNED_ROOM_LIMITS.highestFloor));
     if (Number.isFinite(stored.brushCeiling)) state.brushCeiling = roundDesignedHeight(clampNumber(stored.brushCeiling, DESIGNED_ROOM_LIMITS.minimumHeadroom, DESIGNED_ROOM_LIMITS.highestTileCeiling));
@@ -1192,6 +1252,8 @@ workshop.tools.rooms = {
     stored.selectedIndex = state.selectedIndex;
     stored.seed = state.seed;
     stored.showUnwalkable = state.showUnwalkable;
+    stored.previewLocation = state.previewLocation;
+    stored.growNumber = state.growNumber; stored.growFill = state.growFill;
     stored.isPainting = state.isPainting;
     stored.brush = state.brush; stored.brushFloor = state.brushFloor; stored.brushCeiling = state.brushCeiling; stored.brushSize = state.brushSize;
   },

@@ -277,7 +277,52 @@ function checkSourcePatching() {
     await page.keyboard.press('KeyP');
     await frames();
     check('P again gives the mouse back to the things in the room', (await inPage(() => window.lastReturnDebug.roomWorkshop.isPainting)) === false);
+
+    // --- a cavern, grown: a shape to start from. Whatever grows, it is a room a station could have ---
+    const beforeGrowing = await underTheBrush();
+    await page.click('#workshop-grow');
+    await frames();
+    const grownOnce = await inPage(() => { const state = window.lastReturnDebug.roomWorkshop; return { tiles: state.room.tiles, problems: state.problems.slice(), doorways: state.definition.sockets.length, doors: state.room.doors.length, sealed: state.definition.shape ? state.definition.shape.sealedCount : -1 }; });
+    await page.click('#workshop-grow');
+    await frames();
+    const grownTwice = await inPage(() => window.lastReturnDebug.roomWorkshop.room.tiles);
+    check('"Grow a cavern" gives the room a floor that is no box, with every door of it still a doorway and all of its floor built; every press grows another',
+      grownOnce.tiles !== null && grownOnce.tiles.join('').includes('#') && grownOnce.doorways === grownOnce.doors && grownOnce.sealed === 0 &&
+      !grownOnce.problems.some((problem) => problem.includes('cannot be walked to')) && grownTwice !== null && grownTwice.join() !== grownOnce.tiles.join(), { once: grownOnce, twice: grownTwice });
+    await page.keyboard.press('Control+z');
+    await page.keyboard.press('Control+z');
+    await frames();
+    const ungrown = await inPage(() => window.lastReturnDebug.roomWorkshop.room.tiles);
+    check('and Ctrl+Z goes back through them to the shape that was painted', ungrown !== null && ungrown.join() === beforeGrowing.tiles.join(), ungrown);
     const paintedTiles = raised.tiles;
+
+    // --- where the room belongs, and what it is made of ---
+    // (The places are the game's own, src/js/03-locations.js: the annex and whichever comes after it in that list.
+    // What each makes of a room is read from its entry there.)
+    const places = await inPage(() => {
+      const locations = window.lastReturnDebug.locations, other = Object.keys(locations).filter((key) => key !== 'annex')[0];
+      return { other: other, annex: locations.annex, there: locations[other] };
+    });
+    const madeOf = () => inPage(([origin, door]) => {
+      const debug = window.lastReturnDebug, state = debug.roomWorkshop;
+      return { locations: state.room.locations, look: state.room.look, shownIn: debug.level.locationKey, canChoosePlace: document.getElementById('workshop-preview-location') !== null,
+        room: debug.getLookAt(origin[0] + 0.5, origin[1] + 0.5), outsideTheDoor: debug.getLookAt(origin[0] + door[0] + 0.5, origin[1] + door[1] + 2.5) };
+    }, [workshopOrigin, doorTile]);
+    const atFirst = await madeOf();
+    check('a new room belongs to the annex and is made of what the annex is made of',
+      atFirst.locations.join() === 'annex' && atFirst.look === '' && atFirst.shownIn === 'annex' && !atFirst.canChoosePlace && atFirst.room === places.annex.look && atFirst.outsideTheDoor === places.annex.corridorLook, atFirst);
+    await page.locator('#workshop-room-location-' + places.other).check();
+    await frames();
+    await page.selectOption('#workshop-preview-location', places.other);
+    await frames();
+    const shownThere = await madeOf();
+    check('ticked for another place, it can be shown as it is there: made of what that place is made of, with that place outside its doors',
+      shownThere.locations.join() === 'annex,' + places.other && shownThere.shownIn === places.other && shownThere.room === places.there.look && shownThere.outsideTheDoor === places.there.corridorLook, shownThere);
+    const ownLook = ['rock', 'masonry', 'panel'].filter((look) => look !== places.there.look)[0];
+    await page.selectOption('#workshop-room-look', ownLook);
+    await frames();
+    const withOwnLook = await madeOf();
+    check('a room can say itself what it is made of, wherever it is', withOwnLook.look === ownLook && withOwnLook.room === ownLook && withOwnLook.outsideTheDoor === places.there.corridorLook, withOwnLook);
 
     // --- saving: a file appears, the page reloads into the saved room ---
     await page.fill('#workshop-room-key', 'testRoom');
@@ -290,6 +335,7 @@ function checkSourcePatching() {
     const savedFile = fs.existsSync(roomPath) ? JSON.parse(fs.readFileSync(roomPath, 'utf8')) : null;
     check('saving writes src/rooms/testRoom.json with the table in it',
       savedFile !== null && savedFile.name === 'TEST ROOM' && savedFile.useInStations === true && savedFile.items.some((item) => item.type === 'table' && item.z === 1.5), savedFile);
+    check('and with where it belongs and what it is made of', savedFile !== null && Array.isArray(savedFile.locations) && savedFile.locations.join() === 'annex,' + places.other && savedFile.look === ownLook, savedFile && { locations: savedFile.locations, look: savedFile.look });
     check('and with the room\'s shape in it, as it was painted',
       savedFile !== null && Array.isArray(savedFile.tiles) && savedFile.tiles.join() === paintedTiles.join() && Object.keys(savedFile.tileKinds).length === 1, savedFile && { tiles: savedFile.tiles, tileKinds: savedFile.tileKinds });
     const afterSave = await inPage(() => {
@@ -306,7 +352,7 @@ function checkSourcePatching() {
     gamePage.on('pageerror', (error) => problems.push('page error (game): ' + error.message));
     await gamePage.goto(server.address + 'game');
     await gamePage.waitForFunction(() => Boolean(window.lastReturnDebug));
-    const inStations = await gamePage.evaluate((otherStations) => {
+    const inStations = await gamePage.evaluate(([otherStations, otherPlace]) => {
       const debug = window.lastReturnDebug;
       const found = [], audits = [], shapes = [];
       for (let seed = 1 + otherStations; seed <= 12 + otherStations; seed++) {
@@ -327,8 +373,20 @@ function checkSourcePatching() {
         for (const floor of floors) { const step = (Math.round((floor - lowest) * 100) / 100).toFixed(2); steps[step] = (steps[step] || 0) + 1; }
         shapes.push(steps);
       }
-      return { found: found, audits: audits, shapes: shapes, searched: found.length > 0 ? '' : 'the room is in none of twelve large stations' };
-    }, OTHER_STATIONS);
+      // And in the other place it was ticked for: there too, and made of what it says it is made of.
+      const elsewhere = [];
+      for (let seed = 1 + otherStations; seed <= 12 + otherStations; seed++) {
+        if (!debug.loadStation('generated', seed, 'large', 'mixed', 'two', undefined, undefined, otherPlace)) continue;
+        const zone = debug.zoneNames.findIndex((name) => name.indexOf('TEST ROOM') === 0);
+        if (zone < 0) continue;
+        const looks = {};
+        for (let z = debug.level.boundsMinimumZ; z < debug.level.boundsMaximumZ; z++) for (let x = debug.level.boundsMinimumX; x < debug.level.boundsMaximumX; x++) {
+          if (debug.getZoneAt(x + 0.5, z + 0.5) === zone && debug.getLookAt(x + 0.5, z + 0.5) !== '') looks[debug.getLookAt(x + 0.5, z + 0.5)] = true;
+        }
+        elsewhere.push({ seed: seed, place: debug.level.locationKey, looks: Object.keys(looks).join(), problems: debug.auditProgression().length });
+      }
+      return { found: found, audits: audits, shapes: shapes, elsewhere: elsewhere, searched: found.length > 0 ? '' : 'the room is in none of twelve large stations' };
+    }, [OTHER_STATIONS, places.other]);
     await gamePage.close();
     check('the room is built into generated stations, which can still be finished',
       inStations.found.length > 0 && inStations.audits.every((count) => count === 0), inStations);
@@ -337,6 +395,8 @@ function checkSourcePatching() {
     check('and it has its shape there: rock where rock was painted, the raised floor raised',
       inStations.shapes.length > 0 && rockCount === 1 && inStations.shapes.every((steps) => steps['0.00'] === paintedText.length - rockCount - raisedCount && steps['0.40'] === raisedCount && Object.keys(steps).length === 2),
       { shapes: inStations.shapes, rockCount: rockCount, raisedCount: raisedCount });
+    check('and it turns up in the other place it was ticked for, made of what it says it is made of, in stations that can be finished',
+      inStations.elsewhere.length > 0 && inStations.elsewhere.every((station) => station.place === places.other && station.looks === ownLook && station.problems === 0), inStations.elsewhere);
 
     // --- an unsaved change survives a reload caused by a change to the source ---
     if ((await inPage(() => window.lastReturnDebug.roomWorkshop.selectedIndex)) < 0) await page.click('.workshop-list-entry:has-text("Table")');

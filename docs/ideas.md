@@ -85,7 +85,10 @@
 - more cave like rooms for deeper levels (or different locations)
   - ~~rooms that are not a box~~ (in: "Paint tiles" in the workshop's room tool. Rock, and a floor and a ceiling for every tile; `src/js/03-workshop-rooms.js`)
     - still open: floor you can see and not walk to (a ledge, a hollow), which a station would have to know to leave nothing on; real pits in a room; a crawl that is not a vent; slanted and round walls
-  - locations with a theme of their own (mine, cave, medieval, playground): which rooms, what stands in them, what the walls look like, what dispatch says. Same job in each: power, cards, the last room
+  - ~~locations with a theme of their own~~ (in: "Place" on the title screen, `src/js/03-locations.js`. The mine is the first: its own rooms, drifts for corridors, rock and brick for walls. Same job in each: power, cards, the last room)
+    - ~~winding passages and caverns that are grown instead of drawn, for caves~~ (in: the cave, the third place. `src/js/04-caverns.js`; "Grow a cavern" in the workshop's room tool)
+    - still open: medieval, playground; lines and recordings for a place that calls the rooms dispatch names something else (more generic lines, or a recording per place); things lying about that belong to the place; its own sounds; a place editor in the workshop (a place is a table in the source for now)
+    - still open for the cave: the rooms the job is about are still the annex's rooms inside it (a pump hall with panels in a cave); passages that slope; a way through that is water
   - caves
   - bones and fossils
   - mineshafts with deadly drops
