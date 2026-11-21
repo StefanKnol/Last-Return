@@ -584,11 +584,12 @@ function isCaptionLevelShown(level) {
 // them, 2 to their right, 4 behind) and "close", "near" or "far". Something within arm's reach is simply
 // "right here", with no direction (-1).
 function describeCaptionSource(source) {
-  const offsetX = source.x - player.x, offsetZ = source.z - player.z;
+  const viewer = getViewer(); // (you, or the one you are watching: 11-watching.js)
+  const offsetX = source.x - viewer.x, offsetZ = source.z - viewer.z;
   const metres = Math.hypot(offsetX, offsetZ);
   if (metres < 1.2) return { eighth: -1, word: 'right here' };
-  const ahead = offsetX * Math.sin(player.yaw) - offsetZ * Math.cos(player.yaw);
-  const toTheRight = offsetX * Math.cos(player.yaw) + offsetZ * Math.sin(player.yaw);
+  const ahead = offsetX * Math.sin(viewer.yaw) - offsetZ * Math.cos(viewer.yaw);
+  const toTheRight = offsetX * Math.cos(viewer.yaw) + offsetZ * Math.sin(viewer.yaw);
   const eighth = (Math.round(Math.atan2(toTheRight, ahead) / (Math.PI / 4)) + 8) % 8;
   return { eighth: eighth, word: metres < TUNING.captionCloseMetres ? 'close' : (metres < TUNING.captionNearMetres ? 'near' : 'far') };
 }
@@ -608,7 +609,8 @@ function removeCaptionLine(line) {
 function showCaption(key, source) {
   const caption = CAPTIONS[key], container = interfaceState.elements['hud-caption'];
   if (!caption || !container || !isCaptionLevelShown(caption.level)) return false;
-  if (source && caption.withinMetres > 0 && distanceBetweenPoints(source.x, source.z, player.x, player.z) > caption.withinMetres) return false;
+  const viewer = getViewer(); // (you, or the one you are watching: 11-watching.js)
+  if (source && caption.withinMetres > 0 && distanceBetweenPoints(source.x, source.z, viewer.x, viewer.z) > caption.withinMetres) return false;
   const slot = caption.slot || key, rank = caption.rank || 0;
   let line = null;
   for (const existing of interfaceState.captionLines) if (existing.slot === slot) line = existing;
@@ -1036,6 +1038,8 @@ function closeReader() {
 function showDeathScreen(kind) {
   const elements = interfaceState.elements;
   const text = DEATH_TEXT[kind];
+  // (Watching the others, and it is over: everyone is down, the car has gone, the lobby has. Back to this screen.)
+  if (watching.isOn) { endWatching(); silenceGameplaySounds(); }
   elements['death-title'].textContent = text.title;
   const lines = elements['death-lines'];
   lines.textContent = '';
@@ -1052,6 +1056,11 @@ function showDeathScreen(kind) {
       : game.isDescentLost ? 'Nobody is left to carry anybody back. This descent is over.'
       : 'Your scanner lies where you fell, still lit. If one of the others carries it into the lift car, it restarts.';
     lines.appendChild(paragraph);
+    if (canWatchSomebody()) {
+      const more = document.createElement('p');
+      more.textContent = 'Until then you see the station through their scanners.';
+      lines.appendChild(more);
+    }
   } else if (!game.difficulty.checkpointsEnabled) {
     // One life (a custom threat level can ask for it): there is no checkpoint to go back to.
     const paragraph = document.createElement('p');
@@ -1059,6 +1068,14 @@ function showDeathScreen(kind) {
     lines.appendChild(paragraph);
   }
   elements['button-retry'].hidden = isForOthersToUndo || !game.difficulty.checkpointsEnabled;
+  // Somebody is on their feet: you can watch them, and that begins by itself in a moment (11-watching.js).
+  const canWatch = canWatchSomebody();
+  elements['button-watch'].hidden = !canWatch;
+  elements['button-watch'].textContent = 'Watch the others';
+  watching.offeredAt = canWatch ? game.realTime : -1;
+  // Down there with others "Start over" would be the wrong word for it: you leave, and the others play on.
+  // As their host you take the station with you.
+  elements['button-death-restart'].textContent = !isForOthersToUndo ? 'Start over' : (isLobbyHost() ? 'End the descent for everyone' : 'Leave the descent');
   setHudVisible(false);
   closeMapOverlay();
   showOnlyScreen('screen-death');
