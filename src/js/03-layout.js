@@ -97,12 +97,12 @@ function addExtraGenerator(objectId, number, x, z) {
   registerInteractable(objectId, x, 0.65, z, 'Start generator ' + number, [panel, panelBack], { mapLabel: 'GENERATOR ' + number });
 }
 
-// A core sample: a grey tube as long as your forearm, lying in a cradle.
+// A core sample: a grey tube as long as your forearm, lying on a low crate. The crate is part of the station.
+// The tube is a loose thing lying on it (LOOSE_OBJECT_KINDS.coreSample, 08-loose-objects.js), put out with the
+// quests' other loose things, and it knows the number its quest gave it.
 function addCoreSample(objectId, x, z, yaw) {
   addBoxBetween(x - 0.28, 0, z - 0.28, x + 0.28, 0.42, z + 0.28);
-  const tube = addBoxProp(x, 0.42 + 0.06, z, 0.22, 0.05, 0.05, { yaw: yaw, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  const cap = addBoxProp(x, 0.42 + 0.06, z, 0.03, 0.065, 0.065, { yaw: yaw, surfaceClass: SURFACE_INTERACTIVE, blocksMovement: false, isDynamic: true });
-  registerInteractable(objectId, x, 0.5, z, 'Take the core sample', [tube, cap], { removeWhenUsed: true, mapLabel: 'CORE' });
+  addQuestLooseObject('coreSample', x, (placement.offsetY || 0) + 0.42, z, yaw, objectId);
 }
 
 // The winch breaker: a floor-standing cabinet with one big handle.

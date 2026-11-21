@@ -62,9 +62,13 @@ function check(description, condition, detail) {
       if (quest.requires && !d.questItems[quest.requires.item]) say('needs an item that does not exist: ' + quest.requires.item);
       if (quest.kind !== 'supply' && quest.kind !== 'haul' && typeof quest.build !== 'function') say('has nothing to build its things with');
       if (quest.kind === 'haul' && !(typeof quest.progress === 'function' && quest.text.refused && quest.text.objective && quest.text.chip)) say('a haul quest needs a way to say how far along it is, and the sentences refused, objective and chip');
-      // (The spools are carried and not pressed, so there is no sentence for taking one; they count twice over, with a measure of
-      // their own for how far along they are (`share`), and they have their own place on screen.)
-      if (quest.kind === 'collect' && !(quest.text.refused && quest.text.objective && (quest.text.taken || typeof quest.share === 'function') && (quest.text.chip || quest.always))) say('a collect quest needs the sentences taken, refused, objective and chip');
+      // (What is carried to the lift and not pressed, a spool or a core sample, has no sentence for taking it: it has one
+      // for the first time it is in the beam (`found`), or, like the spools, a doing of its own then and a measure of its
+      // own for how far along it is (`share`). The spools also have their own place on screen. And what is carried is a
+      // kind of loose object, with a name on the map.)
+      const isCarried = typeof quest.carried === 'string';
+      if (quest.kind === 'collect' && !(quest.text.refused && quest.text.objective && (isCarried ? (quest.text.found || typeof quest.share === 'function') : quest.text.taken) && (quest.text.chip || quest.always))) say('a collect quest needs the sentences taken (or found, if its things are carried), refused, objective and chip');
+      if (quest.carried !== undefined && !(quest.kind === 'collect' && isCarried && window.lastReturnDebug.looseObjectKinds[quest.carried] && quest.mapLabel)) say('what it has carried to the lift must be a kind of loose object with a name on the map, and it must be a collect quest');
       if (quest.kind === 'activate' && !(quest.text.activated && quest.text.objective && (quest.text.refused || quest.text.holding))) say('an activate quest needs the sentences activated, objective and refused (or holding)');
       if (quest.kind === 'activate' && quest.needsPower && !quest.text.noPower) say('needs the mains but has no sentence for when it is off');
       if (quest.kind === 'activate' && quest.requires && !quest.text.noItem) say('may need an item but has no sentence for when you have none');

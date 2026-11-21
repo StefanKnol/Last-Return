@@ -18,7 +18,8 @@
 // the marks on the map, the lift terminal's refusal, Dispatch, and the check that it can be finished).
 //
 // There are four kinds (the spools, which every descent has, are a 'collect' quest like the rest):
-//   'collect'   Things lie about the station. Take them all.            (core samples, crew badges)
+//   'collect'   Things lie about the station. Take them all.            (crew badges)
+//               Or, with `carried`: bring them all to the lift terminal. (survey spools, core samples)
 //   'activate'  Machines stand about the station. Switch every one on.  (small generators, valves, the breaker)
 //               A machine may need the mains, may need something brought to it first, and may be loud.
 //   'supply'    One machine that is already part of every descent will not work until you bring it
@@ -43,6 +44,12 @@
 //                  says how many more are put out besides them
 //   placeLast      true: its things are put out after every other quest's, so that giving a station more
 //                  of them moves nothing else
+//   carried        for 'collect': the kind of loose object its things are (LOOSE_OBJECT_KINDS, 08-loose-objects.js).
+//                  Such a thing is not pressed. It is carried, in the beam or (if its kind fits one) a pocket,
+//                  and the lift terminal takes it (loadThingsAtTheTerminal, 11-game.js): that is when the
+//                  quest counts it. What stays a thing to press is what unlocks something (a keycard) and
+//                  what is too small to be worth carrying (a badge).
+//   mapLabel       with `carried`: what such a thing is called on the map once your scanner has been on it
 //   progress       instead of the count the quest keeps: a function returning { done, total }
 //   share          instead of done / total, for how far along the quest is as the Hollow's director counts it: a function returning 0 to 1
 //   count          how many things: a number, or [fewest, most] to let the seed decide
@@ -165,7 +172,7 @@ const QUESTS = [
   // it) is what Dispatch counts and what presses the Hollow on (`share`). How many have been LOADED at the
   // terminal (game.flags.spoolsLoaded) is what the upload waits for (`progress`).
   {
-    key: 'spools', kind: 'collect', blocks: 'upload', always: true, placeLast: true,
+    key: 'spools', kind: 'collect', blocks: 'upload', always: true, placeLast: true, carried: 'spool', mapLabel: 'SPOOL',
     fixedObjectIds: STORY_SPOOL_IDS,
     countFromSize: 'extraSpools', most: MAXIMUM_EXTRA_SPOOLS, firstObjectId: OBJECT_EXTRA_SPOOL_FIRST,
     tiers: [0, 'beforeLast'],
@@ -199,8 +206,10 @@ const QUESTS = [
   },
 
   // ---- core samples ----
+  // Carried, like the spools: a core sample is a loose thing (LOOSE_OBJECT_KINDS.coreSample) lying on a low
+  // crate, and the quest counts the ones the lift terminal has taken. It does not fit a pocket.
   {
-    key: 'cores', kind: 'collect', blocks: 'upload',
+    key: 'cores', kind: 'collect', blocks: 'upload', carried: 'coreSample', mapLabel: 'CORE',
     count: [2, 4], fewest: 2, most: MAXIMUM_CORE_SAMPLES, firstObjectId: OBJECT_CORE_FIRST,
     tiers: [0, 'beforeLast'],
     build: function (objectId, x, z, random) { addCoreSample(objectId, x, z, random() * 3); },
@@ -209,7 +218,7 @@ const QUESTS = [
       objective: 'Dispatch also wants the core samples.',
       objectiveAlone: 'Dispatch still wants the core samples.',
       chip: 'CORES {done}/{total}',
-      taken: 'Core sample {done} of {total}.',
+      found: 'A core sample. The lift terminal takes it.', // the first time one of you has it in the beam
       refused: 'LIFT CONTROL: manifest incomplete. Core samples loaded: {done} of {total}.'
     }
   },
@@ -742,11 +751,43 @@ function getWorkOrderProgressShare() {
     if (instance.isOptional || !order || order.quests.indexOf(instance.key) < 0) continue;
     const progress = getQuestProgress(instance);
     if (progress.total <= 0) continue;
-    // (A quest may have a measure of its own for this: the spools press it on as they are found, not as they are loaded.)
-    share += clampNumber(instance.definition.share ? instance.definition.share() : progress.done / progress.total, 0, 1);
+    // (What is carried to the lift presses it on as it is found, not as it is loaded; and a quest may have a
+    // measure of its own for this, as the spools have.)
+    const definition = instance.definition;
+    share += clampNumber(definition.share ? definition.share() : definition.carried ? countCarriedQuestThingsFound(instance) / progress.total : progress.done / progress.total, 0, 1);
     count++;
   }
   return count > 0 ? share / count : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Things that are carried to the lift (a quest with `carried`: the survey spools, the core samples)
+// ---------------------------------------------------------------------------
+
+// The quest this loose thing is one of the carried things of: its instance, or null. (Not a thing a machine
+// needs, like a fuel can; and not a thing of that kind that no quest of this station put out.)
+function findQuestOfCarriedThing(object) {
+  const entry = object.questObjectId ? questLookup[object.questObjectId] : null;
+  return entry && !entry.isItem && entry.instance.definition.carried === object.kindKey ? entry.instance : null;
+}
+
+// How many of a quest's carried things one of you has had in the beam so far: the ones the terminal has, and
+// the ones that are still about the station or in a pocket, found.
+function countCarriedQuestThingsFound(instance) {
+  let count = 0;
+  for (const object of instance.objects) if (object.isDone) count++;
+  for (const object of looseObjects) if (object.wasFound && findQuestOfCarriedThing(object) === instance) count++;
+  for (const object of listPocketedObjects()) if (object.wasFound && findQuestOfCarriedThing(object) === instance) count++;
+  return count;
+}
+
+// The lift terminal has taken one of a quest's carried things (loadThingsAtTheTerminal, 11-game.js): the quest
+// counts it. (The spools keep their own count, game.flags.spoolsLoaded, and are not counted here.)
+function noteCarriedQuestThingLoaded(questObjectId) {
+  const entry = questLookup[questObjectId];
+  if (!entry || entry.isItem || entry.object.isDone) return;
+  entry.object.isDone = true;
+  entry.instance.done++;
 }
 
 // Are the survey spools what this descent is for? (They are in the station either way.)
@@ -1051,10 +1092,12 @@ function getQuestItemKeyOfLooseObject(object) {
 }
 
 // For the map: what this loose thing is marked as, if you know where it is and it still matters to a quest:
-// { label, isWanted }, or null. A fuel can with fuel in it, and a survey spool.
+// { label, isWanted }, or null. A fuel can with fuel in it, and a thing a quest wants carried to the lift (a
+// survey spool, a core sample).
 function getLooseObjectMapMark(object) {
   if (!object.isKnownOnMap || object.isRemoved) return null;
-  if (object.kindKey === 'spool') return { label: 'SPOOL', isWanted: areSpoolsOnTheOrder() };
+  const quest = findQuestOfCarriedThing(object);
+  if (quest) return { label: quest.definition.mapLabel, isWanted: !quest.isOptional };
   const itemKey = getQuestItemKeyOfLooseObject(object);
   return itemKey ? { label: QUEST_ITEMS[itemKey].mapLabel, isWanted: isQuestItemWantedNow(itemKey) } : null;
 }

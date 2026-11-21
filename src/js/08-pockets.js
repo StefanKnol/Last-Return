@@ -8,7 +8,8 @@
 //
 // What fits: a kind of loose object with `pocket: true` (LOOSE_OBJECT_KINDS, 08-loose-objects.js). Today that
 // is the scan grenade, the first aid kit and the survey spool (which the lift terminal takes out of your
-// pockets: loadSpoolsAtTheTerminal, 11-game.js). Everything else is carried in the beam, a sample jar included:
+// pockets: loadThingsAtTheTerminal, 11-game.js). Everything else is carried in the beam, a sample jar included
+// and a core sample too (it is as long as your forearm):
 // what is worth something to Salvage is not got to a bay by the pocketful.
 // Nor does a thing fit while it is doing something: a grenade that has been armed.
 //
