@@ -33,14 +33,17 @@
 //   key            its name, in this file, the tests and debug mode
 //   isWanted       is it to come at all in this descent?
 //   isHere         has it arrived (by whatever way)?
-//   quietSeconds   [fewest, most]: how long it waits if nothing makes a sound, before the threat level's say
 //   arrive         function (cause): puts it into the station. `cause` is 'time', 'noise' or 'mains'.
+// They do not come together. For every descent an order is drawn among the ones that are wanted
+// (arrivals.order). The first waits TUNING.hollowArrivalQuietSeconds from the moment you leave the lift; each
+// one after it starts its own wait (TUNING.arrivalNextQuietSeconds) when the one before has arrived. So a
+// descent begins with one of them about, either one, and gets another later. A creature added to this list
+// takes its place in that order without anything else being written.
 const CREATURE_ARRIVALS = [
   {
     key: 'hollow',
     isWanted: function () { return game.difficulty.hollowEnabled; },
     isHere: function () { return hollow.isActive; },
-    quietSeconds: function () { return TUNING.hollowArrivalQuietSeconds; },
     arrive: function (cause) {
       activateHollow(HOLLOW_SPAWN_POSITION.x, HOLLOW_SPAWN_POSITION.z, 3);
       if (cause === 'mains') {
@@ -51,12 +54,19 @@ const CREATURE_ARRIVALS = [
         hollow.targetX = arrivals.noiseX; hollow.targetZ = arrivals.noiseZ;
       } // ('time': it roams, and the director brings it nearer in its own time)
     }
+  },
+  {
+    key: 'surveyor',
+    // (Only where things come by themselves. Kessel-9 is the descent as it was written: the Hollow, with the mains.)
+    isWanted: function () { return game.difficulty.surveyorEnabled === true && level.kind === 'generated'; },
+    isHere: function () { return surveyor.isActive; },
+    arrive: function () { activateSurveyor(HOLLOW_SPAWN_POSITION.x, HOLLOW_SPAWN_POSITION.z, 3); } // (it is deaf: whatever brought it, it starts its rounds)
   }
 ];
 
 // How the wait stands, for each creature that arrives, by its key: see resetArrivals for what is in one.
-// And where the last noise that counted was made.
-const arrivals = { waits: {}, noiseX: 0, noiseZ: 0 };
+// `order`: their keys in the order they come in this descent. And where the last noise that counted was made.
+const arrivals = { waits: {}, order: [], noiseX: 0, noiseZ: 0 };
 
 // Does anything come by itself in this descent, or only when the mains comes on?
 function doCreaturesArriveByThemselves() {
@@ -64,14 +74,25 @@ function doCreaturesArriveByThemselves() {
   return level.kind === 'generated' && game.difficulty.arrivalFactor > 0;
 }
 
-// A new descent: nothing has arrived, and how long each will wait in silence is drawn afresh.
+// A new descent: nothing has arrived, the order they come in is drawn afresh, and so is how long each waits in silence.
 function resetArrivals() {
   arrivals.waits = {};
+  // The order: by a draw, unless the tests or debug mode have said (debugState.arrivalOrder: a list of keys).
+  // (With arrivals held, as in every test that is not about them, there is no draw: the order of the list above,
+  // the Hollow first, so that a check which starts the generator gets what it always got.)
+  const drawn = CREATURE_ARRIVALS.filter(function (creature) { return creature.isWanted(); })
+    .map(function (creature, index) { return [debugState.areArrivalsHeld ? index : Math.random(), creature.key]; }).sort(function (a, b) { return a[0] - b[0]; }).map(function (pair) { return pair[1]; });
+  const said = (debugState.arrivalOrder || []).filter(function (key) { return drawn.indexOf(key) >= 0; });
+  arrivals.order = said.concat(drawn.filter(function (key) { return said.indexOf(key) < 0; }));
   for (const creature of CREATURE_ARRIVALS) {
-    const range = creature.quietSeconds(), factor = Math.max(0.01, game.difficulty.arrivalFactor || 1);
+    const place = arrivals.order.indexOf(creature.key);
+    const range = place <= 0 ? TUNING.hollowArrivalQuietSeconds : TUNING.arrivalNextQuietSeconds;
+    // (A threat level on which the first only comes with the power says nothing about the ones after it: they wait as on Standard.)
+    const factor = Math.max(0.01, game.difficulty.arrivalFactor || 1);
     arrivals.waits[creature.key] = {
+      place: place,       // which it is in this descent: 0 the first, 1 the second; -1 if it is not to come
       quietSeconds: (range[0] + (range[1] - range[0]) * Math.random()) / factor, // how long it waits if nothing makes a sound
-      goneBy: 0,          // how much of that is over: the seconds since you left the lift, and what noise has taken off
+      goneBy: 0,          // how much of that is over: the seconds since its wait began, and what noise has taken off
       takenByNoise: 0,    // ... of which by noise
       isDue: '',          // the wait is over, and why ('time' or 'noise'): it arrives at the next turn of the station
       hasArrived: false,  // it has come in this descent (it comes once)
@@ -85,10 +106,22 @@ function findCreatureArrival(key) {
   return null;
 }
 
-// Is this one still waiting, with a wait that runs by itself?
+// Has the one before it in the order arrived (or is it the first)? Its own wait runs from then.
+function hasItsTurnCome(creature) {
+  const wait = arrivals.waits[creature.key];
+  if (!wait || wait.place < 0) return false;
+  if (wait.place === 0) return true;
+  const before = findCreatureArrival(arrivals.order[wait.place - 1]), waitBefore = before ? arrivals.waits[before.key] : null;
+  return Boolean(before) && (waitBefore.hasArrived || before.isHere());
+}
+
+// Is this one still waiting, with a wait that runs by itself? The first only where things come by themselves on
+// this threat level; one after it in any generated station, once the one before is about.
 function isCreatureStillToCome(creature) {
   const wait = arrivals.waits[creature.key];
-  return Boolean(wait) && !wait.hasArrived && !creature.isHere() && creature.isWanted() && doCreaturesArriveByThemselves() && game.flags.hasLeftLift;
+  if (!wait || wait.hasArrived || creature.isHere() || !creature.isWanted() || !game.flags.hasLeftLift || !hasItsTurnCome(creature)) return false;
+  if (debugState.areArrivalsHeld || debugState.options.holdArrivals) return false;
+  return wait.place === 0 ? doCreaturesArriveByThemselves() : level.kind === 'generated';
 }
 
 // Every frame of the station (11-game.js), where the station is yours to run: time goes by, and whatever is due arrives.
@@ -102,8 +135,8 @@ function updateArrivals(dt) {
   }
 }
 
-// A noise was made somewhere in the station (hearNoise, 08-creatures.js): it takes time off every wait. `radius`
-// is how far it carries as it was made, before anybody's hearing has a say.
+// A noise was made somewhere in the station (hearNoise, 08-creatures.js): it takes time off the wait that is
+// running. `radius` is how far it carries as it was made, before anybody's hearing has a say.
 // (It only notes that a wait is over. The arriving is done at the next turn of the station, and not in the
 // middle of whatever made the noise.)
 function noteNoiseForArrivals(x, z, radius) {
@@ -121,9 +154,10 @@ function noteNoiseForArrivals(x, z, radius) {
 // The mains has come on (startGenerator, 11-game.js, a few seconds after): whatever is still asleep wakes.
 function letCreaturesArriveWithTheMains() {
   if (isWorldTheHosts()) return; // the host's game says so
-  for (const creature of CREATURE_ARRIVALS) {
-    if (creature.isWanted() && !creature.isHere()) askToAct({ what: 'arrive', key: creature.key, cause: 'mains' });
-  }
+  // Only if nothing has come yet: then the first in this descent's order wakes. (The ones after it keep to their waits.)
+  for (const creature of CREATURE_ARRIVALS) if (creature.isHere() || (arrivals.waits[creature.key] && arrivals.waits[creature.key].hasArrived)) return;
+  const first = findCreatureArrival(arrivals.order[0]);
+  if (first && first.isWanted()) askToAct({ what: 'arrive', key: first.key, cause: 'mains' });
 }
 
 // It arrives ('arrive': done in every browser down there, in the host's order). The creature itself is put into
@@ -135,13 +169,16 @@ function performArrival(action) {
   wait.hasArrived = true; wait.isDue = ''; wait.cause = action.cause;
   if (!isWorldTheHosts() && !wasHere && creature.isWanted()) creature.arrive(action.cause);
   // (With the mains, Dispatch's line about the generator covers it: DISPATCH_CUES, 'mainsOn'.)
-  if (action.cause !== 'mains' && !wasHere) fireGameEvent(creature.key + 'Arrives');
+  // The first to come is "the shaft sensor has tripped", whichever it is. One that comes with another about already is "again".
+  const isAnotherAbout = CREATURE_ARRIVALS.some(function (other) { return other !== creature && other.isHere(); });
+  if (action.cause !== 'mains' && !wasHere) fireGameEvent(isAnotherAbout ? 'anotherArrives' : creature.key + 'Arrives');
 }
 
 // For the debug readout and the tests: how long until it comes if nothing more makes a sound, or -1 if it is
 // not waiting (it is here, it is not coming, or it only comes with the mains).
 function getSecondsUntilArrival(key) {
   const creature = findCreatureArrival(key), wait = arrivals.waits[key];
-  if (!creature || !wait || wait.hasArrived || creature.isHere() || !creature.isWanted() || !doCreaturesArriveByThemselves()) return -1;
+  if (!creature || !wait || wait.hasArrived || creature.isHere() || !creature.isWanted() || wait.place < 0) return -1;
+  if (wait.place === 0 ? !doCreaturesArriveByThemselves() : (level.kind !== 'generated' || debugState.areArrivalsHeld || debugState.options.holdArrivals)) return -1;
   return Math.max(0, wait.quietSeconds - wait.goneBy);
 }

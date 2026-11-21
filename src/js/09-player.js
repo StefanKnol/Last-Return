@@ -638,13 +638,19 @@ function markInteractableDiscovered(objectId) {
 // is the place it comes to, which is you when it is your scanner and somewhere else when it is not.
 // `object` is the loose thing the light comes out of when it is one that scans by itself (a scanner tripod, a
 // fallen scanner: fireScanCone, 09-scan-cone.js), and null for everybody's own scanner and everything else.
-const scanSource = { x: 0, z: 0, object: null };
+const scanSource = { x: 0, z: 0, object: null, light: null };
 
 // Notes what a pulse has just landed on (it is in `rayHit`): the scan point, and what the game makes of it.
 function recordScanHit(drawBeam) {
   let lifeCode = 0;
   const figure = rayHit.figure;
-  if (figure !== null) {
+  // A light that is not yours (scanSource.light: the Surveyor's, 08-surveyor.js) leaves points of its own kind:
+  // in its colour, gone again after a few seconds, and not on your map. It finds nothing out for you: what it
+  // lands on is not marked, read or appraised. On a creature it is light like any other.
+  const light = scanSource.light;
+  if (figure !== null && scanSource.object !== null && scanSource.object.figure === figure) {
+    // (Its own light on its own body: that is no light on it, and leaves the points it leaves on anything.)
+  } else if (figure !== null) {
     // The light of a scanner that the Hollow has been up to, and knows for a thing, is nothing to it any more
     // (letHollowKnowScanner, 08-entities.js). It still leaves its points.
     if (!(figure === hollow.figure && scanSource.object !== null && scanSource.object.isIgnoredByHollow)) {
@@ -657,6 +663,12 @@ function recordScanHit(drawBeam) {
     lifeCode = convertSecondsToPointLifeCode(TUNING[figure.imprintTuningKey]);
   }
   const looseObject = rayHit.looseObject;
+  if (light) {
+    if (looseObject !== null) lifeCode = getLooseObjectPointLifeCode(looseObject);
+    addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, lifeCode !== 0 && figure !== null ? rayHit.surfaceClass : light.surfaceClass,
+      lifeCode !== 0 ? Math.min(lifeCode, light.lifeCode) : light.lifeCode, true, looseObject !== null);
+    return;
+  }
   if (looseObject !== null) { lifeCode = getLooseObjectPointLifeCode(looseObject); noteLooseObjectScanned(looseObject); }
   addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode, looseObject !== null, looseObject !== null);
   if (rayHit.objectId !== 0) markInteractableDiscovered(rayHit.objectId);

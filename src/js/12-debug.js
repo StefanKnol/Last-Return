@@ -17,7 +17,10 @@ const debugState = {
   // Set by the tests (tools/browser-harness.js), never by the game: nothing arrives by itself, whatever the threat
   // level says, so that a check about something else is not walked in on. The same as the switch "Nothing arrives
   // by itself" in debug mode, which a new page starts with off.
-  areArrivalsHeld: false
+  areArrivalsHeld: false,
+  // The order in which the things that arrive come in the next descent (08-arrivals.js), as a list of their
+  // keys: ['surveyor', 'hollow']. null: drawn afresh for every descent, as in play. Set by the tests and debug mode.
+  arrivalOrder: null
 };
 
 // Filled in by src/dev/10-debug.js.

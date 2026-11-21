@@ -166,6 +166,29 @@ function debugSummonPhantom(kindKey) {
   else showMessage('Debug: "' + label + '" apparition is out, ' + distance + ' m away. Switch on "Show creatures" to see where.', 4, 'warning');
 }
 
+// The Surveyor, eight metres in front of you and looking the other way (so that you have a moment), or taken
+// out of the station again.
+function debugSummonSurveyor() {
+  markDebugUsed();
+  for (let distance = 8; distance >= 2; distance -= 1) {
+    const targetX = player.x + Math.sin(player.yaw) * distance, targetZ = player.z - Math.cos(player.yaw) * distance;
+    if (isWalkableAt(Math.floor(targetX), Math.floor(targetZ)) && hasClearWalkingLine(player.x, player.z, targetX, targetZ)) {
+      activateSurveyor(targetX, targetZ, 2);
+      surveyor.figure.yaw = player.yaw; surveyor.lightYaw = player.yaw;
+      showMessage('Debug: the Surveyor is ' + distance + ' m in front of you, looking the other way.', 3, 'warning');
+      return;
+    }
+  }
+  activateSurveyor(HOLLOW_SPAWN_POSITION.x, HOLLOW_SPAWN_POSITION.z, 2);
+  showMessage('Debug: no room in front of you. The Surveyor was placed at Shaft 9.', 3, 'warning');
+}
+
+function debugRemoveSurveyor() {
+  markDebugUsed();
+  removeSurveyor();
+  showMessage('Debug: the Surveyor is gone.', 3, 'warning');
+}
+
 function debugSummonHollow() {
   markDebugUsed();
   // Look for a spot about eight metres ahead; fall back to nearer ones if that is inside a wall.
@@ -718,6 +741,8 @@ function initializeDebugMode() {
     ['debug-action-remove', 'Remove the Hollow', debugRemoveHollow],
     ['debug-action-stills', 'Wake the Stills', debugWakeStills],
     ['debug-action-looters', 'Send the looters out', debugSendLootersOut],
+    ['debug-action-surveyor', 'Summon the Surveyor ahead', debugSummonSurveyor],
+    ['debug-action-surveyor-remove', 'Remove the Surveyor', debugRemoveSurveyor],
     ['debug-action-hurt', 'Hurt me (a quarter)', debugHurtMe],
     ['debug-action-heal', 'Heal me', debugHealMe],
     ['debug-action-lift', 'Bring the lift now', debugBringLift],

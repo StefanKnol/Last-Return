@@ -35,8 +35,11 @@ function isBodyInScanPulse(one, originX, originY, originZ, directionX, direction
 
 // Fires `pulses` pulses from (originX, Y, Z), spread evenly over a cone about the direction (of length one)
 // that opens `halfAngleDegrees` to every side. `skippedObject` is the loose object the light comes out of, if
-// it is one: its own light does not stop on its own case. Returns scanConeResult (the same object every time).
-function fireScanCone(originX, originY, originZ, directionX, directionY, directionZ, halfAngleDegrees, pulses, skippedObject) {
+// it is one: its own light does not stop on its own case. (It may also be a creature whose light this is: its
+// own light is no light on its own figure, and the Hollow pays no heed to one that says `isIgnoredByHollow`.)
+// `light`, if given, is what kind of points it leaves: { surfaceClass, lifeCode } for a light that is not yours
+// (recordScanHit, 09-player.js). Returns scanConeResult (the same object every time).
+function fireScanCone(originX, originY, originZ, directionX, directionY, directionZ, halfAngleDegrees, pulses, skippedObject, light) {
   const result = scanConeResult;
   result.fired = 0; result.landed = 0; result.onCreatures = 0; result.litPlayers.length = 0;
   // Two directions square to the cone's own and to each other.
@@ -51,6 +54,7 @@ function fireScanCone(originX, originY, originZ, directionX, directionY, directi
   looseRaySkipped = skippedObject || null;
   scanSource.x = originX; scanSource.z = originZ;
   scanSource.object = skippedObject || null; // (whose light this is: a creature may come to know the thing)
+  scanSource.light = light || null;
   for (let pulse = 0; pulse < pulses; pulse++) {
     // Evenly over the cap of the sphere that the cone cuts out: as much light at its edge as in its middle.
     const cosine = 1 - Math.random() * (1 - cosineOfEdge), sine = Math.sqrt(Math.max(0, 1 - cosine * cosine)), turn = Math.random() * TWO_PI;
@@ -63,7 +67,11 @@ function fireScanCone(originX, originY, originZ, directionX, directionY, directi
     result.fired++;
     if (hasLanded) {
       result.landed++;
-      if (rayHit.figure !== null) result.onCreatures++;
+      if (rayHit.figure !== null) {
+        result.onCreatures++;
+        // Landed on the body of somebody who is down here with you: they are in the light.
+        for (const one of players) if (one.figure === rayHit.figure && result.litPlayers.indexOf(one) < 0) result.litPlayers.push(one);
+      }
       recordScanHit(false);
     }
     for (const one of players) {
@@ -71,6 +79,6 @@ function fireScanCone(originX, originY, originZ, directionX, directionY, directi
     }
   }
   looseRaySkipped = before;
-  scanSource.object = null;
+  scanSource.object = null; scanSource.light = null;
   return result;
 }

@@ -35,6 +35,8 @@ const DIFFICULTY_PRESETS = {
                                 // Generator 2 is started, as it always does in Kessel-9.
     looterCount: 2,             // how many looters live in the vents of a generated station (08-looter.js), if it has
                                 // vents for that many. They are there from the start. 0: none.
+    surveyorEnabled: false,     // false: the Surveyor (08-surveyor.js) never comes. true: it is one of the things that
+                                // arrive in a generated station (08-arrivals.js): first, or after the Hollow.
     damageFactor: 0.75,         // multiplies what every hit takes off your health (09-health.js). At 1 the Hollow's
                                 // second hit kills; at 2 its first does, as it always did.
     checkpointsEnabled: true    // false: one life. Being caught ends the descent; there is no resuming from a checkpoint.
@@ -53,6 +55,7 @@ const DIFFICULTY_PRESETS = {
     phantomFactor: 1.0,
     arrivalFactor: 1.0,         // it wakes four to seven quiet minutes after you leave the lift, sooner for every noise
     looterCount: 3,
+    surveyorEnabled: true,
     damageFactor: 1.0,
     checkpointsEnabled: true
   },
@@ -70,6 +73,7 @@ const DIFFICULTY_PRESETS = {
     phantomFactor: 1.4,
     arrivalFactor: 1.5,         // two minutes forty to four minutes forty
     looterCount: 5,
+    surveyorEnabled: true,
     damageFactor: 2.0,          // one hit from the Hollow, two from a Still
     checkpointsEnabled: true
   }
@@ -85,6 +89,7 @@ const DIFFICULTY_PRESETS = {
 // A custom threat level starts out as a copy of Standard.
 const CUSTOM_DIFFICULTY_OPTIONS = [
   { key: 'hollowEnabled', kind: 'switch', label: 'The Hollow', onText: 'It is down there.', offText: 'It never appears.' },
+  { key: 'surveyorEnabled', kind: 'switch', label: 'The Surveyor', onText: 'It comes too, in a generated station.', offText: 'It never appears.' },
   { key: 'arrivalFactor', kind: 'choice', label: 'When it comes', choices: [[0, 'With the power'], [0.5, 'Late'], [1, 'Normal'], [1.5, 'Soon'], [3, 'Very soon']] },
   { key: 'stillsEnabled', kind: 'switch', label: 'The Stills', onText: 'They move while nothing is scanning them.', offText: 'They stay ordinary statues.' },
   { key: 'hollowSpeedFactor', kind: 'percent', label: 'Hollow speed', minimum: 0.7, maximum: 1.4, step: 0.05 },
@@ -209,6 +214,7 @@ const TUNING = {
   playerMaxHealth: 100,
   hollowHitDamage: 35,              // of playerMaxHealth 100: three hits at damageFactor 1 (Standard), four at 0.75 (Survey only), two at 2 (Nightmare)
   stillHitDamage: 25,
+  surveyorHitDamage: 30,            // the Surveyor strikes once and runs (08-surveyor.js): four hits at damageFactor 1, two at 2
   playerHurtGraceSeconds: 2,        // after a hit nothing can hit you again for this long
   hollowAfterHitSeconds: 3,         // the Hollow stands where it struck for this long before it comes on again: your chance to get away
   stillAfterHitSeconds: 5,          // a Still that has struck does not move, or strike, again for this long
@@ -387,6 +393,32 @@ const TUNING = {
   hollowBeamHitsToNotice: 2,        // pulses that must land on it in one frame before it counts as "in the beam"
   hollowKillDistance: 0.3,          // closer than this and it has you
 
+  // ---- The Surveyor (08-surveyor.js): it is deaf, and it sees by its own light ----
+  surveyorRoamSpeed: 1.2,           // walking its rounds, metres a second
+  surveyorChaseSpeed: 3.5,          // after you: faster than you walk, slower than you run. Running is loud, and the Hollow hears that.
+  surveyorFleeSpeed: 4.4,           // running off after it has struck
+  surveyorConeDegrees: 64,          // how wide its light opens, edge to edge
+  surveyorSweepDegrees: 55,         // on its rounds its light swings this far to either side of the way it faces ...
+  surveyorSweepSeconds: 4.5,        // ... once there and back in this long
+  surveyorRoamPulsesPerSecond: 1500,// how many pulses its light is on its rounds: fewer, so it takes it longer to make you out
+  surveyorHuntPulsesPerSecond: 5200,// ... and once it has seen you
+  surveyorSightMetres: 24,          // it makes nobody out from further off than this, however much of its light is on them
+  surveyorNoticeSeconds: 0.7,       // you have to be in its light for this long, in all, before it has seen you: a glance is not enough
+  surveyorForgetSeconds: 2.5,       // out of its light, that count runs down again over this long
+  surveyorLoseSeconds: 4,           // chasing, with you out of its light for this long, it has lost you and goes to where it last saw you
+  surveyorSearchSeconds: 7,         // ... and looks all round there for this long before it goes back to its rounds
+  surveyorLookSeconds: [2.5, 5],    // at the end of each leg of its rounds it stands and looks all round, for somewhere between these
+  surveyorLookTurnRate: 0.9,        // looking all round it turns this fast, in radians a second: once round in seven seconds
+  surveyorStrikeDistance: 0.75,     // this near to you and it strikes. Once.
+  surveyorAfterStrikeSeconds: 10,   // after a strike it sees nobody for this long: it is running off
+  surveyorLandingBlindSeconds: 1.5, // dropped out of a hatch, it sees nobody for this long
+  surveyorLightSeconds: 7,          // how long the points of its light stay before they fade (maximum 63)
+  surveyorDazzleHits: 2,            // this many pulses of somebody else's light on it in one frame count as light in its eye ...
+  surveyorDazzleAfterSeconds: 0.45, // ... and after this long of that it is dazzled
+  surveyorDazzledSeconds: 3.5,      // dazzled: it stands, its light is out and it sees nobody
+  surveyorDazzleImmuneSeconds: 9,   // then it cannot be dazzled again for this long
+  surveyorImprintSeconds: 4,        // how long the points your scan leaves on it stay visible (maximum 63)
+
   // ---- The crawlspace: the Hollow's way round locked doors (see 08-crawlspace.js) ----
   // It cannot open a keycard door or the lift door. It goes up through a ceiling hatch, crawls, and drops out of another.
   hollowCrawlSpeed: 2.4,              // metres per second above the ceiling. Slower than it hunts on foot (hollowHuntSpeed).
@@ -490,6 +522,8 @@ const TUNING = {
   // When it comes by itself (08-arrivals.js). In a generated station it does not wait for the generator.
   hollowArrivalQuietSeconds: [240, 420], // with nothing making a sound it wakes this long after you leave the lift: somewhere between the
                                     // two, drawn afresh for every descent. A threat level's arrivalFactor divides it (Nightmare: 1.5).
+  arrivalNextQuietSeconds: [200, 380], // once one thing has arrived, the next waits this long in silence before it comes too (drawn afresh,
+                                    // divided by the threat level's arrivalFactor, and noise takes time off it as off the first wait)
   arrivalQuietNoiseRadius: 4,       // a noise that carries no further than this takes no time off the wait: a walking step, the scanner's hum
   arrivalSecondsPerNoiseMetre: 0.3, // a louder one takes this many seconds off for every metre it carries beyond that: a door (8 m) 1.2 s,
                                     // a running step (14 m) 3 s, a full sweep (22 m) 5.4 s, a small generator starting (30 m) 7.8 s
@@ -597,6 +631,8 @@ const RADIO_MESSAGES = {
   generatorFollowUp: 'Odd. The motion sensor in the shaft chamber just tripped. Probably the mains coming back.',
   // Said when it wakes by itself, in a generated station: with nothing to blame it on (08-arrivals.js).
   shaftSensorTripped: 'Odd. The motion sensor in the shaft chamber just tripped, and you are nowhere near it. Keep the noise down.',
+  // Said when a second thing arrives, with one about already.
+  shaftSensorTrippedAgain: 'The shaft sensor again. That is not the same one. There are two of them down there with you now.',
   keycardTaken: 'That card opens the keycard doors. Shaft 9 is behind one of them.',
   // Only in stations with more than one keycard: said for every card except the last.
   lowerKeycardTaken: 'That card opens some of the doors. Not the way to Shaft 9. There is another card further in.',
@@ -661,6 +697,8 @@ const DISPATCH_CUES = [
   { when: 'mainsOn', line: 'generatorStarted', seconds: 4.5 },
   { when: 'mainsOn', line: 'generatorFollowUp', seconds: 11, onlyWithHollow: true, ifItWasAsleep: true },
   { when: 'hollowArrives', line: 'shaftSensorTripped', seconds: 4, onlyWithHollow: true },
+  { when: 'surveyorArrives', line: 'shaftSensorTripped', seconds: 4 },       // (he does not know which of them it is)
+  { when: 'anotherArrives', line: 'shaftSensorTrippedAgain', seconds: 4 },   // something is down there already, and now a second
   { when: 'lastKeycard', line: 'keycardTaken', seconds: 1.5 },
   { when: 'lowerKeycard', line: 'lowerKeycardTaken', seconds: 1.5 }
 ];
@@ -714,6 +752,13 @@ const CAPTIONS = {
   looterStartled: { text: '[a chirp: something small has heard that]', level: 'sound', withinMetres: 12, seconds: 1.8, slot: 'looterVoice', rank: 1 },
   looterMad: { text: '[a furious chitter: it wants you out of its vent]', level: 'sound', withinMetres: 12, seconds: 2, slot: 'looterVoice', rank: 1 },
   looterScared: { text: '[a squeal, and small feet running]', level: 'sound', withinMetres: 18, seconds: 2.2, slot: 'looterVoice', rank: 2 },
+  // ---- the Surveyor (08-surveyor.js) ----
+  surveyorScans: { text: '[a dry ticking, sweeping about]', level: 'sound', withinMetres: 16, seconds: 1.8, slot: 'surveyorLight', rank: 0 },
+  surveyorSees: { text: '[the ticking quickens: its light is on you]', level: 'tell', withinMetres: 0, seconds: 2.6, slot: 'surveyorVoice', rank: 2 },
+  surveyorLoses: { text: '[the ticking slows: it has lost you]', level: 'tell', withinMetres: 0, seconds: 2.4, slot: 'surveyorVoice', rank: 1 },
+  surveyorDazzled: { text: '[a rising whine: it is dazzled]', level: 'tell', withinMetres: 20, seconds: 2.6, slot: 'surveyorVoice', rank: 3 },
+  surveyorRuns: { text: '[long steps, running off]', level: 'sound', withinMetres: 16, seconds: 2, slot: 'surveyorFeet', rank: 1 },
+  surveyorSteps: { text: '[long, light steps]', level: 'sound', withinMetres: 9, seconds: 1.6, slot: 'surveyorFeet', rank: 0 },
 
   // ---- where it puts its feet ----
   hollowSteps: { text: '[heavy footsteps]', level: 'sound', withinMetres: 10, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
@@ -884,6 +929,13 @@ const DEATH_TEXT = {
     lines: [
       'Scanner 4471-B stopped reporting.',
       'Store C4 inventory, revised: twelve.'
+    ]
+  },
+  surveyor: {
+    title: 'SIGNAL LOST',
+    lines: [
+      'Scanner 4471-B stopped reporting.',
+      'Last frame: a second scanner, not on the manifest.'
     ]
   }
 };

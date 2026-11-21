@@ -416,6 +416,44 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     !spaceWhileCrawling.other.scannable && spaceAfter.host.space === spaceAfter.host.station && spaceAfter.other.space === spaceAfter.other.station && spaceAfter.other.scannable,
     crawlBegun.metres ? [crawlBegun, spaceWhileCrawling, spaceAfter] : ['fewer than two ceiling hatches in station ' + lobbySeed, crawlBegun]);
 
+  // The host's Surveyor (src/js/08-surveyor.js): shown to the other where the host has it, with its light, and its strike is the other's own game's to take.
+  const surveyorAt = await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0];
+    let spot = null;
+    for (const way of [[7, 0], [-7, 0], [0, 7], [0, -7], [5, 5], [-5, -5]]) { const tried = d.findWalkableSpotNear(other.x + way[0], other.z + way[1]); if (tried && Math.hypot(tried.x - other.x, tried.z - other.z) > 4) { spot = tried; break; } }
+    if (!spot) return null;
+    d.tuning.surveyorLookTurnRate = 0;
+    d.activateSurveyor(spot.x, spot.z, 60); // (it sees nobody for a minute: this is about what the others are shown)
+    d.surveyor.state = 1; d.surveyor.timer = 999;
+    return { x: spot.x, z: spot.z };
+  });
+  const surveyorIn = (page) => page.evaluate(() => { const d = window.lastReturnDebug, s = d.surveyor; return { isActive: s.isActive, x: s.figure.x, z: s.figure.z, state: s.state, pulses: s.statistics.pulses, lit: s.isLit, scannable: d.raycastableFigures.indexOf(s.figure) >= 0, health: d.player.health, mode: d.game.mode,
+    takes: d.getHitDamage('surveyor') * d.game.difficulty.damageFactor, said: document.getElementById('hud-messages').textContent }; });
+  let surveyorShown = null, surveyorStruck = null, surveyorGone = null;
+  if (surveyorAt) {
+    await both(1.2);
+    const pulsesBefore = (await surveyorIn(b)).pulses;
+    await both(0.9);
+    surveyorShown = { host: await surveyorIn(a), other: await surveyorIn(b) };
+    surveyorShown.otherPulses = surveyorShown.other.pulses - pulsesBefore;
+    // It strikes the other: the host's game says so, and the other's own game takes it off their health.
+    await b.evaluate(() => { window.lastReturnDebug.player.hurtGraceSeconds = 0; });
+    await a.evaluate(() => { const d = window.lastReturnDebug; d.catchPlayer(d.together.others[0], 'surveyor', d.surveyor.figure); });
+    await both(0.9);
+    surveyorStruck = { before: surveyorShown.other.health, other: await surveyorIn(b) };
+    await b.evaluate(() => { const d = window.lastReturnDebug; d.healPlayer(d.tuning.playerMaxHealth); d.clearMessages(); });
+    // Taken out of the host's station, it is gone from the other's.
+    await a.evaluate(() => { const d = window.lastReturnDebug; d.removeSurveyor(); d.tuning.surveyorLookTurnRate = 0.9; });
+    await both(0.9);
+    surveyorGone = await surveyorIn(b);
+  }
+  check('the host\'s Surveyor is in the other\'s game where the host has it, doing what it is doing, and the other\'s game shines its light for itself',
+    surveyorAt !== null && surveyorShown.other.isActive && surveyorShown.other.scannable && Math.hypot(surveyorShown.other.x - surveyorAt.x, surveyorShown.other.z - surveyorAt.z) < 0.6 &&
+    surveyorShown.other.state === surveyorShown.host.state && surveyorShown.other.lit && surveyorShown.otherPulses > 200, surveyorAt ? [surveyorAt, surveyorShown] : 'no walkable place a few metres from the other in station ' + lobbySeed);
+  check('its strike on the other is taken off their health in their own game, and they are told; taken out of the host\'s station it is gone from theirs',
+    surveyorAt !== null && Math.abs(surveyorStruck.other.health - (surveyorStruck.before - surveyorStruck.other.takes)) < 0.01 && surveyorStruck.other.mode === 'playing' && /struck you/.test(surveyorStruck.other.said) &&
+    !surveyorGone.isActive && !surveyorGone.scannable, [surveyorStruck, surveyorGone]);
+
   // The host's Hollow: shown to the other where the host has it, and it hears the other.
   const hollowAt = await a.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0];
