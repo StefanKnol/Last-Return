@@ -937,19 +937,22 @@ function updateGameProgress(dt) {
 }
 
 function updateAtmosphere(dt) {
-  let hollowPressure = 0, hollowDistance = Infinity;
+  let hollowPressure = 0, hollowDistance = Infinity, hollowPresence = 1;
   if (hollow.isActive) {
     hollowDistance = distanceBetweenPoints(hollow.figure.x, hollow.figure.z, player.x, player.z);
     const aggression = getHollowAggression();
     hollowPressure = clampNumber(1 - hollowDistance / 16, 0, 1) * (0.35 + 0.65 * aggression) + hollow.heldAmount * 0.2;
     if (hollow.enragedTimer > 0) hollowPressure = Math.max(hollowPressure, 0.85);
+    // Above the ceiling it is not in the room with you, however near on the map: it weighs on you less ("Spaces", 08-creatures.js).
+    hollowPresence = getPresenceBetweenSpaces(getSpaceOf(hollow.figure), getSpaceOf(player));
+    hollowPressure *= hollowPresence;
   }
   const stillDistance = getNearestHuntingStillDistance();
   const stillPressure = clampNumber(1 - stillDistance / 5, 0, 1) * 0.6;
   const pressure = Math.min(1, Math.max(hollowPressure, stillPressure));
   game.interference = approachValue(game.interference, pressure, dt * 1.8);
   const isCloseHunt = hollow.isActive && hollow.state === HOLLOW_STATE_HUNT;
-  game.danger = approachValue(game.danger, isCloseHunt ? clampNumber(1 - hollowDistance / 7, 0, 1) : 0, dt * 1.5);
+  game.danger = approachValue(game.danger, isCloseHunt ? clampNumber(1 - hollowDistance / 7, 0, 1) * hollowPresence : 0, dt * 1.5);
   updatePlayerHealth(dt); // (here, so that it also runs while you have the menu open down there with others)
   if (game.fade < 1) game.fade = Math.min(1, game.fade + dt * 0.9);
 
@@ -1374,7 +1377,9 @@ function startApplication() {
     // Noisy things on the floor: where they are, how often they have been set off, and a check of their placing.
     noisyFloorPatches: noisyFloorPatches, findNoisyFloorPatchAt: findNoisyFloorPatchAt, noisyFloorCounts: noisyFloorCounts, auditNoisyFloor: auditNoisyFloor, playNoisyFloorSound: playNoisyFloorSound,
     doorKinds: { automatic: DOOR_KIND_AUTOMATIC, powered: DOOR_KIND_POWERED, keycard: DOOR_KIND_KEYCARD, lift: DOOR_KIND_LIFT, bay: DOOR_KIND_BAY },
-    canHollowOpenDoor: canHollowOpenDoor, isDoorPassableToHollow: isDoorPassableToHollow, isHollowInCrawlspace: isHollowInCrawlspace,
+    canHollowOpenDoor: canHollowOpenDoor, isDoorPassableToHollow: isDoorPassableToHollow, isHollowInCrawlspace: isHollowInCrawlspace, beginHollowCrawl: beginHollowCrawl,
+    spaces: { station: SPACE_STATION, crawlspace: SPACE_CRAWLSPACE }, getSpaceOf: getSpaceOf, areInTheSameSpace: areInTheSameSpace,
+    getNoiseCarryBetweenSpaces: getNoiseCarryBetweenSpaces, getPresenceBetweenSpaces: getPresenceBetweenSpaces, hearNoise: hearNoise, raycastableFigures: raycastableFigures,
     getHollowPartAt: function (x, z) { return isInsideGrid(Math.floor(x), Math.floor(z)) ? tileHollowPart[tileIndexAt(Math.floor(x), Math.floor(z))] : 0; },
     getHollowPartCount: function () { return hollowPartCount; },
     getHollowStepsTo: function (x, z) {

@@ -382,6 +382,40 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('a door opens for the other in the host\'s game, and the other\'s door follows it', doorBefore[0] === 0 && doorBefore[1] === 0 && doorAfter[0] === 1 && doorAfter[1] === 1,
     doorIndex >= 0 ? [doorBefore, doorAfter] : 'no automatic door more than ten metres from the host in station ' + lobbySeed);
 
+  // The host's Hollow above the ceiling: the other's game knows it is in another space ("Spaces", src/js/08-creatures.js),
+  // so what that game asks about it for itself (how it weighs on you) is asked rightly there too.
+  const crawlBegun = await a.evaluate(() => {
+    const d = window.lastReturnDebug;
+    let pair = null, most = 0;
+    for (const first of d.hollowHatches) for (const second of d.hollowHatches) {
+      const metres = Math.hypot(first.x - second.x, first.z - second.z);
+      if (first !== second && metres > most) { most = metres; pair = [first, second]; }
+    }
+    if (!pair) return { hatches: d.hollowHatches.length };
+    d.spawnHollow(pair[0].x, pair[0].z);
+    d.hollow.graceTimer = 0;
+    d.beginHollowCrawl(pair[0], pair[1]);
+    return { hatches: d.hollowHatches.length, metres: Math.round(most * 10) / 10, climbSeconds: d.tuning.hollowCrawlClimbSeconds };
+  });
+  const spaceIn = (page) => page.evaluate(() => { const d = window.lastReturnDebug; return { space: d.getSpaceOf(d.hollow.figure), isActive: d.hollow.isActive, scannable: d.raycastableFigures.indexOf(d.hollow.figure) >= 0, crawlspace: d.spaces.crawlspace, station: d.spaces.station }; });
+  let spaceWhileCrawling = null, spaceAfter = null;
+  if (crawlBegun.metres) {
+    await both(crawlBegun.climbSeconds + 0.9);
+    spaceWhileCrawling = { host: await spaceIn(a), other: await spaceIn(b) };
+    // Sent somewhere else (as the checks below do): it is in the station again, in both games.
+    await a.evaluate(() => { const d = window.lastReturnDebug; d.spawnHollow(d.hollow.figure.x, d.hollow.figure.z); d.hollow.isActive = false; });
+    await both(0.9);
+    await a.evaluate(() => { const d = window.lastReturnDebug, spot = d.findWalkableSpotNear(d.player.x + 3, d.player.z); d.spawnHollow(spot.x, spot.z); d.hollow.graceTimer = 5; });
+    await both(0.9);
+    spaceAfter = { host: await spaceIn(a), other: await spaceIn(b) };
+    await a.evaluate(() => { window.lastReturnDebug.hollow.isActive = false; });
+    await both(0.6);
+  }
+  check('the host\'s Hollow crawling above the ceiling is above the ceiling in the other\'s game too, with nothing there for a scan; put back on the floor it is in the station in both',
+    crawlBegun.metres > 0 && spaceWhileCrawling.host.space === spaceWhileCrawling.host.crawlspace && spaceWhileCrawling.other.space === spaceWhileCrawling.other.crawlspace && spaceWhileCrawling.other.isActive &&
+    !spaceWhileCrawling.other.scannable && spaceAfter.host.space === spaceAfter.host.station && spaceAfter.other.space === spaceAfter.other.station && spaceAfter.other.scannable,
+    crawlBegun.metres ? [crawlBegun, spaceWhileCrawling, spaceAfter] : ['fewer than two ceiling hatches in station ' + lobbySeed, crawlBegun]);
+
   // The host's Hollow: shown to the other where the host has it, and it hears the other.
   const hollowAt = await a.evaluate(() => {
     const d = window.lastReturnDebug, other = d.together.others[0];
