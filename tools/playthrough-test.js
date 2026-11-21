@@ -308,8 +308,19 @@ function check(description, condition, detail) {
     return result;
   });
   check('holding it until its anger is full enrages it', enraged.enragedTimer > 0, enraged);
-  await inGame(() => { window.lastReturnDebug.setScanHeld(false); window.lastReturnDebug.simulate(8); });
-  check('with the beam off it reaches the player', (await inGame(() => window.lastReturnDebug.game.mode)) === 'dying');
+  // (It reaches you and hits you. How many hits that takes to be your death is the numbers' to say, hollowHitDamage
+  // and the threat level's damageFactor: it is given the time for that many, each with its pause after.)
+  const reached = await inGame(() => {
+    const debug = window.lastReturnDebug, p = debug.player, healthBefore = p.health;
+    const takes = debug.getHitDamage('hollow') * debug.game.difficulty.damageFactor, hitsItShouldTake = Math.ceil((healthBefore - 0.5) / takes);
+    debug.setScanHeld(false);
+    debug.simulate(8);
+    const afterEightSeconds = { mode: debug.game.mode, health: p.health };
+    for (let time = 0; time < hitsItShouldTake * (debug.tuning.hollowAfterHitSeconds + 3) && debug.game.mode === 'playing'; time += 0.5) debug.simulate(0.5);
+    return { healthBefore: healthBefore, takes: takes, hitsItShouldTake: hitsItShouldTake, afterEightSeconds: afterEightSeconds, mode: debug.game.mode };
+  });
+  check('with the beam off it reaches the player: within eight seconds it has hit them, and it goes on until the hit that kills',
+    (reached.afterEightSeconds.health < reached.healthBefore || reached.afterEightSeconds.mode === 'dying') && reached.mode === 'dying', reached);
   await page.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 60000 });
   await page.evaluate(() => document.getElementById('button-retry').click());
   const afterRetry = await inGame(() => {

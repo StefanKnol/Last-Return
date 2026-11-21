@@ -683,9 +683,8 @@ function auditQuests(problems, reach, canReach, mustExistOnce, canReachSpot) {
     if (entries.length !== 1) { problems.push(what + ' is put out ' + entries.length + ' times, not once'); return null; }
     const entry = entries[0];
     if (entry.kindKey !== QUEST_ITEMS[instance.definition.requires.item].looseKind) problems.push(what + ' is a ' + entry.kindKey);
-    const index = findNearestWalkableTileIndex(entry.x, entry.z);
-    const distance = index < 0 ? Infinity : distanceBetweenPoints(entry.x, entry.z, index % GRID_WIDTH + 0.5, Math.floor(index / GRID_WIDTH) + 0.5);
-    if (distance > TUNING.looseBeamReach - 0.6) problems.push(what + ' is out of reach: ' + distance.toFixed(2) + ' m from the nearest standing spot');
+    const problem = describeIfOutOfReach(entry.x, entry.y, entry.z, true); // (03-levelgen.js: by the beam's reach, from where you can stand)
+    if (problem) problems.push(what + ' ' + problem);
     return entry;
   };
   if (level.fuelTanks.length !== questLooseObjects.filter(function (entry) { return entry.kindKey === QUEST_ITEMS.fuel.looseKind; }).length) {

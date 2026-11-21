@@ -1366,7 +1366,7 @@ function startApplication() {
     // What the creatures have in common (08-creatures.js): the kinds, their ways of getting around, and the path finding of a way.
     roamingWaypoints: roamingWaypoints,
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
-    hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
+    hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getNearestEyeDistanceTo: getNearestEyeDistanceTo, describeIfOutOfReach: describeIfOutOfReach, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
     looters: looters, looterStates: LOOTER_STATE_NAMES, frightenLooter: frightenLooter, chooseLooterOuting: chooseLooterOuting, isLootable: isLootable,
     creatureKinds: CREATURE_KINDS, creatureWays: CREATURE_WAYS, createCreatureWay: createCreatureWay, createCreatureLegs: createCreatureLegs,
     computeWayDistanceField: computeWayDistanceField, refreshCreatureDoorBlocks: refreshCreatureDoorBlocks, moveCreatureToward: moveCreatureToward,

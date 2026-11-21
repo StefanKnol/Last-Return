@@ -126,7 +126,7 @@ const TUNING = {
   playerAcceleration: 16,       // how quickly you reach full speed. Low feels like ice, high feels snappy.
   staminaSeconds: 6.5,          // how long you can sprint on a full bar
   staminaRecoverySeconds: 10,   // how long an empty bar takes to refill
-  interactionReach: 2.0,        // how close you must be to use a terminal, note or pickup
+  interactionReach: 1.4,        // how close you must be to use a terminal, note or pickup
 
   // ---- The scanner ---------------------------------------------------------
   scannerMaximumRange: 50,      // pulses that travel further than this report NO RETURN
@@ -207,16 +207,16 @@ const TUNING = {
   // Being caught is being hit. What a hit takes off is one of these times the threat level's damageFactor, and
   // you die of the hit that takes the last of it. Nothing gives it back but a first aid kit.
   playerMaxHealth: 100,
-  hollowHitDamage: 55,              // two hits at damageFactor 1, three at 0.75, one at 2
-  stillHitDamage: 40,
+  hollowHitDamage: 35,              // of playerMaxHealth 100: three hits at damageFactor 1 (Standard), four at 0.75 (Survey only), two at 2 (Nightmare)
+  stillHitDamage: 25,
   playerHurtGraceSeconds: 2,        // after a hit nothing can hit you again for this long
   hollowAfterHitSeconds: 3,         // the Hollow stands where it struck for this long before it comes on again: your chance to get away
   stillAfterHitSeconds: 5,          // a Still that has struck does not move, or strike, again for this long
-  playerRetryHealth: 50,            // back from a checkpoint, or on your feet again where the others restarted your scanner: at least this much
-  firstAidHeals: 50,                // what a first aid kit gives back
+  playerRetryHealth: 25,            // back from a checkpoint, or on your feet again where the others restarted your scanner: at least this much
+  firstAidHeals: 10,                // what a first aid kit gives back
   firstAidKitsPerRoom: 0.12,        // how many of them a station has, for each of its rooms (never fewer than one)
   healthCriticalShare: 0.3,         // at or below this share of your health the bar on the HUD goes red
-  noiseRadiusDropLanding: 11,   // landing at the foot of a drop in a vent (per metre fallen it is no louder: it is the sheet metal that rings)
+  noiseRadiusDropLanding: 18,   // landing at the foot of a drop in a vent (per metre fallen it is no louder: it is the sheet metal that rings)
   playerFallAcceleration: 14,   // how fast you gather speed going down a drop, in metres per second every second
   // TEMPORARY. A keycard door opens from its inner side without the card, and without the mains: there is a
   // release on that side. It is here because a vent with a drop in it lets you down into what is behind the
@@ -275,14 +275,15 @@ const TUNING = {
   // The scanner tripod (08-loose-objects.js): switched on with Q, it scans what is in front of it in pulses.
   // (The scanner of somebody who fell does the same when it is switched on, by these same numbers, without the battery.)
   tripodPulseEverySeconds: 2,     // one pulse of light this often
-  tripodFlashSeconds: 0.22,         // how long one pulse lasts
-  tripodPulseRays: 1500,            // how many pulses of the scanner go into one of its own
-  tripodConeDegrees: 74,            // how wide its light opens, edge to edge
+  tripodFlashSeconds: 0.25,         // how long one pulse lasts
+  tripodPulseRays: 2500,            // how many pulses of the scanner go into one of its own
+  tripodConeDegrees: 86,            // how wide its light opens, edge to edge
   tripodBatterySeconds: 480,        // how long it scans in all, counted while it is on. Then it is spent
   hollowKnowsScannerMetres: 1.6,    // the Hollow this near to one that is scanning finds out it is a thing: after that its light and its tick are nothing to it, until you handle it again
   hollowAtScannerSeconds: 2.5,      // ... and stands over it for this long, sniffing, before it goes back to its rounds
   noiseRadiusTripodPulse: 5,        // each pulse ticks. The Hollow hears that from a little way off; a looter close by is startled by it
-  scannerTripodsPerRoom: 0.07,      // how many of them a station has, for each of its rooms (never fewer than one)
+  scannerTripodsPerRoom: 0.07,      // how many scanner tripods a station has, for each of its rooms (never fewer than one)
+  scanGrenadePerRoom: 0.05,         // how many scan grenades a station has lying about, for each of its rooms (never fewer than one)
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
@@ -324,8 +325,8 @@ const TUNING = {
   looseValuablesPerRoom: 0.4,       // things worth carrying out: this many for every room and corridor
   haulShareOfValue: 0.4,            // the salvage quest asks for this share of what everything within walking reach of the lift is worth
   haulBayPulseSeconds: 60,          // an open salvage bay's lamp lights the floor in front of its door this often, and pings
-  haulBayPulseRays: 420,            // ... with this many scan points ...
-  haulBayPulseMetres: 1.1,          // ... in a patch of this radius, a step or two in front of the door
+  haulBayPulseRays: 1200,            // ... with this many scan points ...
+  haulBayPulseMetres: 1.3,          // ... in a patch of this radius, a step or two in front of the door
   noiseRadiusHaulBayPing: 9,        // how far the Hollow hears that ping
   looseAppraiseHits: 20,            // after this many pulses on a thing the scanner has read it, and the screen says what it is worth
   looseValuablesShareOnSurfaces: 0.5, // this share of those stands on tables, shelves and crates; the rest on the floor, out of the way
@@ -368,11 +369,11 @@ const TUNING = {
   // walking line to you (or to be within 1.6 m). Also multiplied by hearingFactor.
   audibleRadiusSprinting: 7.5,
   audibleRadiusWalking: 4.2,
-  audibleRadiusStanding: 2.6,
-  audibleRadiusCrouchWalking: 2.0,
+  audibleRadiusStanding: 1.6,
+  audibleRadiusCrouchWalking: 1.5,
   audibleRadiusVentCrawling: 4.0, // crawling in a vent: it notices you from here even between the booms of your knees
-  audibleRadiusCrouchedStill: 0.8, // the "hold your breath" distance. Below hollowKillDistance would make hiding perfect.
-  waterAudibleFactor: 1.3,          // moving through water makes all of the above this much larger
+  audibleRadiusCrouchedStill: 0.7, // the "hold your breath" distance. Below hollowKillDistance would make hiding perfect.
+  waterAudibleFactor: 1.2,          // moving through water makes all of the above this much larger
 
   // ---- The Hollow ----------------------------------------------------------
   hollowRoamSpeed: 1.3,             // wandering between rooms, not aware of you
@@ -384,7 +385,7 @@ const TUNING = {
   hollowVentSpeedFactor: 0.7,       // speed multiplier while it crawls through a vent. Below about 0.4 a vent stops being
                                     // a shortcut for it; at 1 it is as fast on its knees as on its feet.
   hollowBeamHitsToNotice: 2,        // pulses that must land on it in one frame before it counts as "in the beam"
-  hollowKillDistance: 0.4,          // closer than this and it has you
+  hollowKillDistance: 0.3,          // closer than this and it has you
 
   // ---- The crawlspace: the Hollow's way round locked doors (see 08-crawlspace.js) ----
   // It cannot open a keycard door or the lift door. It goes up through a ceiling hatch, crawls, and drops out of another.
@@ -446,11 +447,11 @@ const TUNING = {
   hollowSearchSeconds: 8.0,         // then it pokes around that area this long before giving up
   hollowSearchLeadSeconds: 2.5,     // it starts searching this many seconds of travel ahead of where it lost you,
                                     // in the direction you were moving. 0 = it searches exactly where it lost you.
-  hollowDoubleBackChance: 0.3,      // chance that, after giving up a search, it walks off and then returns to the
+  hollowDoubleBackChance: 0.2,      // chance that, after giving up a search, it walks off and then returns to the
                                     // same spot 6 to 11 seconds later. 0 = never, 1 = always.
   // Listening: while wandering near you it sometimes stops dead for a few seconds. It makes no footsteps
   // while it does, and it hears better.
-  hollowListenWithinMetres: 20,     // it only stops to listen when you are within this distance
+  hollowListenWithinMetres: 25,     // it only stops to listen when you are within this distance
   hollowListenSecondsMinimum: 2,    // shortest pause
   hollowListenSecondsMaximum: 10,  // longest pause
   hollowListenEverySecondsMinimum: 14, // shortest gap between two pauses

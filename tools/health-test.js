@@ -47,9 +47,13 @@ function check(description, condition, detail) {
     seen.customOption = d.customDifficultyOptions.filter((option) => option.key === 'damageFactor').map((option) => option.choices.map((choice) => choice[0]))[0] || null;
     return seen;
   });
-  check('what a hit takes is its creature\'s number times the threat level\'s: the Hollow kills with its second hit on Standard, takes longer on Survey only, and kills at once on Nightmare; a Still takes less than the Hollow and a looter\'s bite least of all; a custom level chooses',
-    levels.factors.survey < levels.factors.standard && levels.factors.standard === 1 && levels.factors.nightmare > 1 && levels.hollowHitsToKill.standard === 2 && levels.hollowHitsToKill.survey > 2 &&
-    levels.hollowHitsToKill.nightmare === 1 && levels.still < levels.hollow && levels.looter < levels.still && levels.customOption !== null && levels.customOption.indexOf(1) >= 0 && levels.customOption.length >= 3, levels);
+  // (How many hits that comes to is the numbers' to say, hollowHitDamage and each level's damageFactor in
+  // src/js/00-config.js, and they are tuned by playing. What has to hold whatever they are: a harder threat level
+  // never takes more hits than an easier one, and Nightmare takes fewer than Survey only.)
+  check('what a hit takes is its creature\'s number times the threat level\'s: the Hollow needs the most hits on Survey only and the fewest on Nightmare, and never more on a harder level than on an easier one; a Still takes less than the Hollow and a looter\'s bite least of all; a custom level chooses',
+    levels.factors.survey < levels.factors.standard && levels.factors.standard === 1 && levels.factors.nightmare > 1 && levels.hollowHitsToKill.nightmare >= 1 &&
+    levels.hollowHitsToKill.survey >= levels.hollowHitsToKill.standard && levels.hollowHitsToKill.standard >= levels.hollowHitsToKill.nightmare && levels.hollowHitsToKill.survey > levels.hollowHitsToKill.nightmare &&
+    levels.still < levels.hollow && levels.looter < levels.still && levels.customOption !== null && levels.customOption.indexOf(1) >= 0 && levels.customOption.length >= 3, levels);
 
   // --- the Hollow reaches you: a hit, and a chance ---
   const hit = await inGame(() => {
@@ -68,9 +72,15 @@ function check(description, condition, detail) {
     d.updateHud(0.016);
     seen.bar = { width: parseFloat(document.getElementById('bar-health').style.width), isRed: document.getElementById('bar-health').classList.contains('is-critical'),
       isShown: !document.getElementById('meter-health').classList.contains('is-faded') };
-    // Then it comes on again, and the second hit takes the last of it.
-    d.simulate(1.2);
-    seen.afterTheSecond = { mode: d.game.mode, health: p.health };
+    // Then it comes on again, and again: each hit takes what a hit takes, and the one that takes the last of it
+    // is your death. How many that is, the numbers say (hollowHitDamage and the level's damageFactor).
+    seen.hitsItShouldTake = Math.ceil((seen.of - 0.5) / seen.takes);
+    let hits = 1, healthWas = p.health;
+    for (let time = 0; time < seen.hitsItShouldTake * (seen.standsFor + 2) + 3 && d.game.mode === 'playing'; time += 0.1) {
+      d.simulate(0.1);
+      if (p.health < healthWas - 0.01) { hits++; healthWas = p.health; }
+    }
+    seen.atTheEnd = { mode: d.game.mode, health: p.health, hits: hits };
     return seen;
   });
   check('the Hollow reaching you is a hit: it takes what its hit takes, you are still on your feet, and you are told',
@@ -80,7 +90,8 @@ function check(description, condition, detail) {
     hit.whileItStands.moved < 0.05 && hit.whileItStands.health === hit.afterTheHit.health && hit.whileItStands.mode === 'playing' && hit.whileItStands.graceLeft === 0, hit);
   check('the bar on the HUD is as long as what is left of you, and stays on the screen while you are hurt',
     Math.abs(hit.bar.width - (hit.of - hit.takes) / hit.of * 100) < 0.2 && hit.bar.isShown, hit.bar);
-  check('still within its reach when it comes on again, its second hit takes the last of your health: that is your death', hit.afterTheSecond.mode === 'dying' && hit.afterTheSecond.health === 0, hit.afterTheSecond);
+  check('still within its reach when it comes on again, it hits again, and the hit that takes the last of your health is your death: as many hits as the numbers say, and no fewer',
+    hit.atTheEnd.mode === 'dying' && hit.atTheEnd.health === 0 && hit.atTheEnd.hits === hit.hitsItShouldTake && hit.hitsItShouldTake >= 1, [hit.atTheEnd, hit.hitsItShouldTake]);
   await page.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
 
   // --- back from the checkpoint ---
@@ -131,9 +142,17 @@ function check(description, condition, detail) {
     seen.bitten = [d.hitPlayer('looter', figure), p.health, d.game.mode];
     p.hurtGraceSeconds = 0;
     seen.bittenAgain = [d.hitPlayer('looter', figure), p.health, d.game.mode];
-    // On Nightmare the Hollow's first hit is the last.
+    // On Nightmare a hit takes more: you are dead in as many hits as the numbers say, which is fewer than on Standard
+    // (or as few, if Standard is already one).
+    const hitsOn = function (levelKey) { return Math.ceil((seen.of - 0.5) / (d.getHitDamage('hollow') * d.difficultyPresets[levelKey].damageFactor)); };
     fresh(); d.game.difficulty = d.difficultyPresets.nightmare;
-    seen.onNightmare = [d.hitPlayer('hollow', figure), d.game.mode];
+    seen.onNightmare = { shouldTake: hitsOn('nightmare'), onStandard: hitsOn('standard'), hits: 0, outcomes: [] };
+    for (let count = 0; count < 20 && d.game.mode === 'playing'; count++) {
+      p.hurtGraceSeconds = 0;
+      seen.onNightmare.outcomes.push(d.hitPlayer('hollow', figure));
+      seen.onNightmare.hits++;
+    }
+    seen.onNightmare.mode = d.game.mode;
     return seen;
   });
   check('nothing hits you twice in a moment; after it, the next hit counts again. A Still\'s hit takes what a Still\'s hit takes',
@@ -141,7 +160,9 @@ function check(description, condition, detail) {
   check('with "Cannot be caught" on in debug mode nothing hurts you', rules.withTheSwitch[0] === 'none' && rules.withTheSwitch[1] === rules.of, rules.withTheSwitch);
   check('a looter\'s bite is never the death of you: it leaves you the last of your health, and you are still on your feet',
     rules.bitten[0] === 'hurt' && rules.bitten[1] >= 1 && rules.bitten[1] < 3 && rules.bitten[2] === 'playing' && rules.bittenAgain[0] === 'hurt' && rules.bittenAgain[1] >= 1 && rules.bittenAgain[2] === 'playing', rules);
-  check('on Nightmare the Hollow\'s first hit is your death, as being caught always was', rules.onNightmare[0] === 'dead' && rules.onNightmare[1] === 'dying', rules.onNightmare);
+  check('on Nightmare the Hollow kills in as many hits as the numbers say, which is not more than on Standard: every hit before the last hurts, and the last is your death',
+    rules.onNightmare.hits === rules.onNightmare.shouldTake && rules.onNightmare.shouldTake <= rules.onNightmare.onStandard && rules.onNightmare.mode === 'dying' &&
+    rules.onNightmare.outcomes[rules.onNightmare.outcomes.length - 1] === 'dead' && rules.onNightmare.outcomes.slice(0, -1).every((outcome) => outcome === 'hurt'), rules.onNightmare);
   await page.waitForFunction(() => window.lastReturnDebug.game.mode === 'dead', null, { timeout: 15000 }).catch(() => {});
 
   // --- a Still's hit, and what it does afterwards ---
