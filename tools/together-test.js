@@ -1017,7 +1017,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const spoolHostPressed = { host: await spoolsIn(a), other: await spoolsIn(b), hostRead: await a.evaluate(() => Array.from(document.querySelectorAll('#hud-messages .hud-message')).map((element) => element.textContent).join(' | ')) };
   // The other presses it, and says with it that the second spool is theirs to load as well, though it lies
   // in its room: which spools a terminal takes is the host's game's to say, and it says the one in their pocket.
-  await b.evaluate((secondId) => { window.lastReturnDebug.askToAct({ what: 'use', objectId: 1, spools: [secondId] }); }, spoolsAtFirst.other.secondId);
+  await b.evaluate((secondId) => { window.lastReturnDebug.askToAct({ what: 'use', objectId: 1, load: [secondId] }); }, spoolsAtFirst.other.secondId);
   for (let turn = 0; turn < 25 && !((await spoolsIn(a)).loaded === 1 && (await spoolsIn(b)).loaded === 1); turn++) await fine(0.2);
   await fine(0.5);
   const spoolLoaded = { host: await spoolsIn(a), other: await spoolsIn(b) };

@@ -126,7 +126,7 @@ const LOOSE_OBJECT_KINDS = {
   // A survey spool: what Crew 2 recorded, on a reel the size of a fist. What a Survey order is for, and in every
   // station whether anybody asks for it or not. It is found the first time one of you takes it into the beam
   // (its log opens, and whatever hangs on finding it happens: noteSpoolFound, 11-game.js), and it counts once it
-  // has been brought to the lift terminal, which takes it (loadSpoolsAtTheTerminal). In between it is a thing
+  // has been brought to the lift terminal, which takes it (loadThingsAtTheTerminal). In between it is a thing
   // like any other: carried, pocketed, dropped where you die, carried off by a looter. On a Survey order one
   // that is lost for good is back where it lay.
   spool: {
@@ -135,6 +135,18 @@ const LOOSE_OBJECT_KINDS = {
       { shape: 'box', center: [0, 0, 0], half: [0.1, 0.07, 0.1] },
       { shape: 'box', center: [0, -0.075, 0], half: [0.14, 0.012, 0.14] },
       { shape: 'box', center: [0, 0.075, 0], half: [0.14, 0.012, 0.14] }
+    ]
+  },
+  // A core sample: rock that Crew 2 drilled out, in a grey tube as long as your forearm with a collar round its
+  // middle. What a Recovery order asks for besides the badges. Like a spool it is carried to the lift terminal,
+  // which takes it, and it counts when the terminal has it. Unlike a spool it is too long for a pocket and has
+  // some weight to it: one in the beam at a time. On the order that asks for it, one that is lost for good is
+  // back on its crate.
+  coreSample: {
+    label: 'core sample', mass: 2.5, value: 0, material: 'metal', loud: 1, lies: 'upright', bulky: false, bounce: 0.15, grip: 0.5,
+    parts: [
+      { shape: 'box', center: [0, 0, 0], half: [0.22, 0.05, 0.05] },
+      { shape: 'box', center: [0, 0, 0], half: [0.03, 0.065, 0.065] }
     ]
   },
   // A fuel can: ten litres of diesel for a generator whose day tank is empty (09-quests.js, "Fuel"). Held
@@ -548,7 +560,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
     fuel: kindKey === 'fuelCan' ? 1 : 0, pourSeconds: 0, hasBeenTaken: false,
-    wasFound: false,                    // a survey spool: one of you has had it in the beam (and so read it)
+    wasFound: false,                    // a thing a quest wants carried to the lift (a survey spool, a core sample): one of you has had it in the beam
     // Put out by a quest (09-quests.js): the number the quest knows it by, and where it stood, to be put back
     // there if it is lost while it is still needed.
     questObjectId: 0, homeEntry: null,
@@ -3403,9 +3415,11 @@ function emptyFuelCan(object) {
   wakeLooseObject(object);
 }
 
-// Is this something a quest cannot be finished without? (A fuel can, for as long as there is fuel in it.)
+// Is this something a quest cannot be finished without? A fuel can, for as long as there is fuel in it; and a
+// thing a quest wants carried to the lift (a survey spool, a core sample), where the work order asks for it.
 function isLooseObjectStillNeeded(object) {
-  if (object.kindKey === 'spool') return areSpoolsOnTheOrder(); // (on any other order nobody asks for it: lost is lost)
+  const quest = findQuestOfCarriedThing(object);
+  if (quest) return !quest.isOptional; // (a spool on an order that is not Survey: nobody asks for it, and lost is lost)
   return object.kindKey === 'fuelCan' && object.fuel > 0;
 }
 
