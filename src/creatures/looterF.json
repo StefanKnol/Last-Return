@@ -1,0 +1,12 @@
+{
+  "label": "Looter F",
+  "skeleton": "person",
+  "scansAs": "player",
+  "playerSkin": false,
+  "proportions": { "torsoLength": 0.32, "neckLength": 0.0506, "headRadius": 0.106, "headLength": 0.0093, "shoulderWidth": 0.27, "hipWidth": 0.13, "upperArm": 0.1, "foreArm": 0.08, "handLength": 0.045, "thigh": 0.0923, "shin": 0.0923, "footLength": 0.0647, "footRadius": 0.0324, "torsoRadius": 0.097, "limbRadius": 0.02, "legRadius": 0.0461, "jointRadius": 0.035 },
+  "hides": ["belly"],
+  "parts": [
+    { "bone": "head", "mirror": true, "shape": "capsule", "from": [0.115,0.12,0.0461], "to": [0.0599,0.0599,0], "radius": 0.0137 },
+    { "bone": "hips", "mirror": false, "shape": "cone", "from": [0,-0.06,0], "to": [0,0.35,0], "radius": 0.2 }
+  ]
+}

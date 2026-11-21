@@ -171,6 +171,10 @@ const TUNING = {
   noiseRadiusDoor: 6,           // a door you open (doors the Hollow opens do not count)
   noiseRadiusPickup: 4,
   // ---- The looters (08-looter.js): small things that live in the vents and carry off what lies loose ----
+  looterBodies: ['looter', 'looterF'], // the bodies there are for them: creatures made in the workshop (src/creatures/<name>.json), or kinds
+                                    // written as code (FIGURE_KINDS, 04-figures.js). A station's looters take them in turn, so
+                                    // where there are two bodies two looters are never the same one; which body the first has
+                                    // goes by the station's seed. A name nothing is made for is passed over.
   looterWalkSpeed: 1.6,             // on its way to a thing, or wandering (you walk at 2.2)
   looterCarrySpeed: 1.25,           // with a thing in its arms: slower than you creep along crouched (1.3)
   looterFleeSpeed: 3.6,             // frightened, on its way home
