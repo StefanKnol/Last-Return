@@ -588,13 +588,197 @@ const labSource = String(function () {
   check('put inside the corner of a wall beside a doorway, it walks out and comes for you',
     doorways.letOutOfAWall >= 5 && doorways.leftInAWall.length === 0, { letOut: doorways.letOutOfAWall, leftInAWall: doorways.leftInAWall });
 
+  // --- above the ceiling it is in another space than you ("Spaces", src/js/08-creatures.js) ---
+  const ceiling = await inGame(() => {
+    const d = window.lastReturnDebug, result = {}, spaces = d.spaces, round = (value) => Math.round(value * 1000) / 1000;
+    const ROAMING = 0, LOOKING = 1, HUNTING = 2; // (HOLLOW_STATE_ROAM, _INVESTIGATE and _HUNT in src/js/08-entities.js)
+    result.rules = {
+      noiseWithin: [d.getNoiseCarryBetweenSpaces(spaces.station, spaces.station), d.getNoiseCarryBetweenSpaces(spaces.crawlspace, spaces.crawlspace)],
+      noiseThrough: [d.getNoiseCarryBetweenSpaces(spaces.station, spaces.crawlspace), d.getNoiseCarryBetweenSpaces(spaces.crawlspace, spaces.station)], noiseFactor: d.tuning.noiseThroughCeilingFactor,
+      presenceWithin: d.getPresenceBetweenSpaces(spaces.station, spaces.station), presenceThrough: d.getPresenceBetweenSpaces(spaces.crawlspace, spaces.station), presenceFactor: d.tuning.presenceThroughCeilingFactor,
+      you: d.getSpaceOf(d.player), aThingThatSaysNothing: d.getSpaceOf({}), station: spaces.station, crawlspace: spaces.crawlspace
+    };
+    // A station with two hatches far apart and floor to stand on under the middle of the line between them.
+    // You stand there; it starts at the one hatch and climbs in, to crawl to the other.
+    let pair = null;
+    const begin = function (state) {
+      d.loadStation('generated', 7, 'medium', 'mixed', 'one');
+      d.game.flags.hasLeftLift = true; d.setDebugOption('invulnerable', true); d.settings.captions = 'all';
+      pair = null;
+      for (const first of d.hollowHatches) for (const second of d.hollowHatches) {
+        if (first === second || pair) continue;
+        const metres = Math.hypot(first.x - second.x, first.z - second.z);
+        if (metres < 12) continue;
+        const middle = d.findWalkableSpotNear((first.x + second.x) / 2, (first.z + second.z) / 2);
+        if (middle && Math.hypot(middle.x - (first.x + second.x) / 2, middle.z - (first.z + second.z) / 2) < 0.8) pair = { first: first, second: second, middle: middle, metres: metres };
+      }
+      if (!pair) return false;
+      d.teleport(pair.middle.x, pair.middle.z, 0); d.simulate(0.2);
+      d.spawnHollow(pair.first.x, pair.first.z);
+      d.hollow.graceTimer = 0; d.hollow.state = state === undefined ? ROAMING : state; d.hollow.anger = 0;
+      d.beginHollowCrawl(pair.first, pair.second);
+      for (const key of ['hollowFound', 'hollowRoar', 'hollowTrill', 'hollowOverheadListens']) d.captionCounts[key] = 0;
+      return true;
+    };
+    const metresFromYou = () => Math.hypot(d.hollow.figure.x - d.player.x, d.hollow.figure.z - d.player.z);
+    // Goes on until it is right over your head, by the map. Returns which space it was in, in each part of the crawl so far.
+    const untilOverhead = function () {
+      const seen = {};
+      for (let step = 0; step < 900 && d.isHollowInCrawlspace() && metresFromYou() > 0.8; step++) {
+        seen[d.hollow.crawlspace.phase] = d.getSpaceOf(d.hollow.figure);
+        d.simulate(1 / 30);
+      }
+      return seen;
+    };
+    const hearing = () => d.game.difficulty.hearingFactor;
+    const said = () => ({ found: d.captionCounts.hollowFound + d.captionCounts.hollowRoar, listens: d.captionCounts.hollowOverheadListens });
+    if (!begin()) return { none: true };
+    result.metres = round(pair.metres);
+
+    // Which space, when.
+    const seen = untilOverhead();
+    result.spaces = { climbing: seen[0], travelling: d.getSpaceOf(d.hollow.figure), overheadMetres: round(metresFromYou()), scannable: d.raycastableFigures.indexOf(d.hollow.figure) >= 0 };
+
+    // You run a step right under it.
+    result.runStep = { before: d.hollow.state };
+    d.emitNoise(d.player.x, d.player.z, d.tuning.noiseRadiusSprintStep);
+    d.simulate(1 / 30);
+    result.runStep.state = d.hollow.state; result.runStep.said = said();
+    result.runStep.goesToLookMetresFromYou = round(Math.hypot(d.hollow.targetX - d.player.x, d.hollow.targetZ - d.player.z));
+    result.runStep.stillCrawling = d.isHollowInCrawlspace() && d.getSpaceOf(d.hollow.figure) === spaces.crawlspace;
+    // It lies still and makes no sound for as long as it listens, and then goes on.
+    let at = [d.hollow.figure.x, d.hollow.figure.z];
+    const overheadCaptions = d.captionCounts.hollowOverhead;
+    d.simulate(d.tuning.hollowCrawlListenSeconds - 0.2);
+    result.runStep.movedWhileListening = round(Math.hypot(d.hollow.figure.x - at[0], d.hollow.figure.z - at[1]));
+    result.runStep.crawlingHeardWhileListening = d.captionCounts.hollowOverhead - overheadCaptions;
+    d.simulate(1);
+    result.runStep.movedAfter = round(Math.hypot(d.hollow.figure.x - at[0], d.hollow.figure.z - at[1]));
+    // A second noise: it has listened once, and does not stop again.
+    at = [d.hollow.figure.x, d.hollow.figure.z];
+    d.emitNoise(d.hollow.figure.x, d.hollow.figure.z, d.tuning.noiseRadiusSprintStep);
+    d.simulate(0.5);
+    result.runStep.secondNoise = { moved: round(Math.hypot(d.hollow.figure.x - at[0], d.hollow.figure.z - at[1])), said: said(), state: d.hollow.state };
+    // Out at the other hatch: in the station again, on its way to look, and it has not found anybody.
+    let wasRattlingIn = -1;
+    for (let step = 0; step < 1200 && d.isHollowInCrawlspace(); step++) { if (d.hollow.crawlspace.phase === 2) wasRattlingIn = d.getSpaceOf(d.hollow.figure); d.simulate(1 / 30); }
+    result.dropped = { rattlingIn: wasRattlingIn, space: d.getSpaceOf(d.hollow.figure), state: d.hollow.state, said: said(), scannable: d.raycastableFigures.indexOf(d.hollow.figure) >= 0,
+      metresFromTheHatch: round(Math.hypot(d.hollow.figure.x - pair.second.x, d.hollow.figure.z - pair.second.z)) };
+
+    // A walking step. Through the ceiling it carries half as far: at three quarters of how far the Hollow hears
+    // one in a room, it hears nothing; right under it, it does, and comes to look instead of finding you.
+    const walk = d.tuning.noiseRadiusWalkStep * hearing();
+    begin(); untilOverhead();
+    d.emitNoise(d.hollow.figure.x + walk * 0.75, d.hollow.figure.z, d.tuning.noiseRadiusWalkStep);
+    d.simulate(1 / 30);
+    result.walkStep = { carriesInARoom: round(walk), asideMetres: round(walk * 0.75), aside: { state: d.hollow.state, said: said() } };
+    d.emitNoise(d.player.x, d.player.z, d.tuning.noiseRadiusWalkStep);
+    d.simulate(1 / 30);
+    result.walkStep.under = { state: d.hollow.state, said: said(), metres: round(metresFromYou()) };
+    // The same two steps with it on its feet in the room, for comparison: it hears the one, and finds you by the other.
+    const onTheFloor = function (noiseMetresAway) {
+      d.loadStation('generated', 7, 'medium', 'mixed', 'one');
+      d.game.flags.hasLeftLift = true; d.setDebugOption('invulnerable', true);
+      d.teleport(pair.middle.x, pair.middle.z, 0); d.simulate(0.2);
+      d.spawnHollow(pair.middle.x, pair.middle.z);
+      d.hollow.graceTimer = 0; d.hollow.state = 4; d.hollow.listenTimer = 30; d.hollow.anger = 0; // standing still (listening sharpens its ear: allowed for below)
+      d.setDebugOption('creaturesIgnorePlayer', false);
+      d.hollow.state = ROAMING;
+      d.emitNoise(d.hollow.figure.x + noiseMetresAway, d.hollow.figure.z, d.tuning.noiseRadiusWalkStep);
+      return d.hollow.state;
+    };
+    result.walkStep.inARoomAside = onTheFloor(walk * 0.75);
+    result.walkStep.inARoomUnder = onTheFloor(0.1);
+
+    // It was hunting when it went up: a noise under it tells it where you are now, as it would in a room. It
+    // goes on hunting, and does not stop to listen.
+    begin(HUNTING); untilOverhead();
+    d.hollow.state = HUNTING; d.hollow.lastKnownPlayerX = 0; d.hollow.lastKnownPlayerZ = 0;
+    const before = said();
+    d.emitNoise(d.player.x, d.player.z, d.tuning.noiseRadiusSprintStep);
+    d.simulate(1 / 30);
+    result.hunting = { state: d.hollow.state, knowsYouWithinMetres: round(Math.hypot(d.hollow.lastKnownPlayerX - d.player.x, d.hollow.lastKnownPlayerZ - d.player.z)),
+      saidMore: said().found - before.found, listens: said().listens };
+
+    // A noise made above the ceiling itself (nothing makes one today: the rule is there for what will). Up
+    // there with it, it carries all the way; down to one in a room, half.
+    begin(); untilOverhead();
+    d.hearNoise(d.hollow.figure.x + walk * 0.75, d.hollow.figure.z, d.tuning.noiseRadiusWalkStep, spaces.crawlspace);
+    result.madeUpThere = { heardUpThere: d.hollow.state !== ROAMING };
+    d.loadStation('generated', 7, 'medium', 'mixed', 'one');
+    d.game.flags.hasLeftLift = true;
+    d.spawnHollow(pair.middle.x, pair.middle.z);
+    d.hollow.graceTimer = 0; d.hollow.state = ROAMING; d.hollow.anger = 0;
+    d.hearNoise(d.hollow.figure.x + walk * 0.75, d.hollow.figure.z, d.tuning.noiseRadiusWalkStep, spaces.crawlspace);
+    result.madeUpThere.heardInARoom = d.hollow.state !== ROAMING;
+
+    // What it does not touch from up there: a can on the floor right under its way.
+    begin();
+    const can = d.createLooseObject('can', pair.middle.x, 0.2, pair.middle.z, 0);
+    d.teleport(pair.first.x, pair.first.z, 0); // (you stand aside, at the hatch it left by: the can is not yours to kick either)
+    for (let step = 0; step < 150 && !can.isAsleep; step++) d.simulate(1 / 30);
+    const canAt = [can.x, can.z];
+    let nearest = 99;
+    for (let step = 0; step < 1200 && d.isHollowInCrawlspace(); step++) { d.simulate(1 / 30); nearest = Math.min(nearest, Math.hypot(d.hollow.figure.x - can.x, d.hollow.figure.z - can.z)); }
+    result.can = { passedOverItWithinMetres: round(nearest), asleep: can.isAsleep, moved: round(Math.hypot(can.x - canAt[0], can.z - canAt[1])), kicked: can.kickedByHollowTime > 0 };
+
+    // How it weighs on you: right overhead and lying still, against standing in the room at the same spot.
+    begin(); untilOverhead();
+    d.hollow.crawlspace.listenSeconds = 30; d.hollow.crawlspace.hasListened = true;
+    d.hollow.state = 4; // (the same as the one in the room below: what it is doing counts towards how it weighs on you)
+    d.simulate(4);
+    result.presence = { overhead: round(d.game.interference), overheadMetres: round(metresFromYou()), space: d.getSpaceOf(d.hollow.figure) };
+    d.loadStation('generated', 7, 'medium', 'mixed', 'one');
+    d.game.flags.hasLeftLift = true; d.setDebugOption('invulnerable', true);
+    d.teleport(pair.middle.x, pair.middle.z, 0);
+    d.setDebugOption('creaturesIgnorePlayer', true);
+    d.spawnHollow(pair.middle.x, pair.middle.z);
+    d.hollow.graceTimer = 0; d.hollow.state = 4; d.hollow.listenTimer = 30;
+    d.simulate(4);
+    result.presence.inTheRoom = round(d.game.interference); result.presence.inTheRoomMetres = round(metresFromYou());
+    d.setDebugOption('creaturesIgnorePlayer', false);
+    d.hollow.isActive = false;
+    // (The counts were set back for each try above. For the last check of this suite: how often it was put into words that it stopped to listen.)
+    d.captionCounts.hollowOverheadListens = result.runStep.said.listens + result.walkStep.under.said.listens;
+    return result;
+  });
+  check('there is a station with two hatches far apart and floor under the way between them', !ceiling.none, ceiling.none ? ceiling : ceiling.metres);
+  if (!ceiling.none) {
+    check('the rules of spaces: within one a noise carries all its way and a thing weighs all it weighs, through a ceiling as much as the two numbers say, either way; you, and a thing that says nothing, are in the station',
+      ceiling.rules.noiseWithin.join() === '1,1' && ceiling.rules.noiseThrough.every((carry) => carry === ceiling.rules.noiseFactor) && ceiling.rules.noiseFactor > 0 && ceiling.rules.noiseFactor < 1 &&
+      ceiling.rules.presenceWithin === 1 && ceiling.rules.presenceThrough === ceiling.rules.presenceFactor && ceiling.rules.presenceFactor < 1 &&
+      ceiling.rules.you === ceiling.rules.station && ceiling.rules.aThingThatSaysNothing === ceiling.rules.station && ceiling.rules.station !== ceiling.rules.crawlspace, ceiling.rules);
+    check('reaching up under the hatch it is still in the station; crawling, and waiting at the hatch it comes out of, it is above the ceiling; dropped, it is in the station again and a scan finds it',
+      ceiling.spaces.climbing === ceiling.rules.station && ceiling.spaces.travelling === ceiling.rules.crawlspace && !ceiling.spaces.scannable && ceiling.spaces.overheadMetres <= 0.8 &&
+      ceiling.dropped.rattlingIn === ceiling.rules.crawlspace && ceiling.dropped.space === ceiling.rules.station && ceiling.dropped.scannable && ceiling.dropped.metresFromTheHatch < 0.5, [ceiling.spaces, ceiling.dropped]);
+    check('you run a step right under it: it does not find you from up there (no roar, no hunt), it goes on crawling, and it means to come and look where the noise was',
+      ceiling.runStep.before === 0 && ceiling.runStep.state === 1 && ceiling.runStep.said.found === 0 && ceiling.runStep.goesToLookMetresFromYou < 0.1 && ceiling.runStep.stillCrawling, ceiling.runStep);
+    check('it stops and listens, and that is captioned: it lies still and silent for as long as the number says, then crawls on; a second noise does not stop it again',
+      ceiling.runStep.said.listens === 1 && ceiling.runStep.movedWhileListening < 0.01 && ceiling.runStep.crawlingHeardWhileListening === 0 && ceiling.runStep.movedAfter > 1 &&
+      ceiling.runStep.secondNoise.moved > 0.8 && ceiling.runStep.secondNoise.said.listens === 1 && ceiling.runStep.secondNoise.said.found === 0 && ceiling.runStep.secondNoise.state === 1, ceiling.runStep);
+    check('out of the other hatch it is still only on its way to look: nothing found, nothing roared',
+      ceiling.dropped.state === 1 && ceiling.dropped.said.found === 0, ceiling.dropped);
+    check('a walking step carries half as far through the ceiling: one that a Hollow in the room would come to look at, it does not hear at all from above; one right under it, it does, and comes to look where one in the room would have found you',
+      ceiling.walkStep.aside.state === 0 && ceiling.walkStep.aside.said.listens === 0 && ceiling.walkStep.inARoomAside === 1 && ceiling.walkStep.under.state === 1 && ceiling.walkStep.under.said.found === 0 &&
+      ceiling.walkStep.under.said.listens === 1 && ceiling.walkStep.inARoomUnder === 2, ceiling.walkStep);
+    check('if it was hunting when it went up, a noise under it tells it where you are now and it goes on hunting, without a new roar and without stopping',
+      ceiling.hunting.state === 2 && ceiling.hunting.knowsYouWithinMetres < 0.1 && ceiling.hunting.saidMore === 0 && ceiling.hunting.listens === 0, ceiling.hunting);
+    check('a noise made above the ceiling itself is heard up there all its way, and by one in the room only half as far',
+      ceiling.madeUpThere.heardUpThere && !ceiling.madeUpThere.heardInARoom, ceiling.madeUpThere);
+    check('it passes over a can on the floor without touching it: the can lies as it lay',
+      ceiling.can.passedOverItWithinMetres < 0.6 && ceiling.can.asleep && ceiling.can.moved < 0.001 && !ceiling.can.kicked, ceiling.can);
+    check('right overhead it weighs on you about half as much as standing in the room at the same spot',
+      ceiling.presence.space === ceiling.rules.crawlspace && ceiling.presence.overhead > 0.02 && ceiling.presence.inTheRoom > 0.1 &&
+      Math.abs(ceiling.presence.overhead / ceiling.presence.inTheRoom - ceiling.rules.presenceFactor * (1 - ceiling.presence.overheadMetres / 16)) < 0.05, ceiling.presence);
+  }
+
   // --- everything above made its noises with captions on "every sound": each of those sounds has been put into words ---
   const captioned = await inGame(() => {
     const counts = window.lastReturnDebug.captionCounts, shown = {};
-    for (const key of ['hollowOverhead', 'hatchRattle', 'hatchForced', 'hatchBurst', 'doorPounded', 'doorPoundedAgain', 'doorPoundedLast', 'doorBreaks']) shown[key] = counts[key] || 0;
+    for (const key of ['hollowOverhead', 'hollowOverheadListens', 'hatchRattle', 'hatchForced', 'hatchBurst', 'doorPounded', 'doorPoundedAgain', 'doorPoundedLast', 'doorBreaks']) shown[key] = counts[key] || 0;
     return shown;
   });
-  check('crawling overhead, a hatch rattling, a hatch forced, each of the three kinds of pounding and a door giving way were all captioned',
+  check('crawling overhead, the crawling stopping to listen, a hatch rattling, a hatch forced, each of the three kinds of pounding and a door giving way were all captioned',
     Object.keys(captioned).every((key) => captioned[key] > 0), captioned);
 
   check('no script errors were reported', problems.length === 0, problems);

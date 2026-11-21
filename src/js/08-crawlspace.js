@@ -59,6 +59,9 @@ function isDoorPassableToHollow(door) {
 // In the crawlspace
 // ---------------------------------------------------------------------------
 
+// Is it on its way through the crawlspace, from the moment it stands under a hatch reaching up to the moment it
+// has dropped out of another? (Which SPACE it is in is another question: see below, and "Spaces" in
+// 08-creatures.js. Reaching up under the hatch it is still in the station, and a scan finds it there.)
 function isHollowInCrawlspace() {
   return hollow.crawlspace !== null;
 }
@@ -66,6 +69,17 @@ function isHollowInCrawlspace() {
 // Takes the Hollow out of the crawlspace at once, wherever it was (it is being sent somewhere, or removed).
 function cancelHollowCrawl() {
   hollow.crawlspace = null;
+  hollow.figure.space = SPACE_STATION;
+}
+
+// A noise from the station has reached it above the ceiling (hearNoiseFromAnotherSpace, 08-entities.js): it
+// stops where it is and listens. Once in a crawl, so that noise cannot be used to keep it up there.
+function listenFromTheCrawlspace() {
+  const crawl = hollow.crawlspace;
+  if (!crawl || crawl.phase !== CRAWL_PHASE_TRAVELLING || crawl.hasListened || TUNING.hollowCrawlListenSeconds <= 0) return;
+  crawl.hasListened = true;
+  crawl.listenSeconds = TUNING.hollowCrawlListenSeconds;
+  showCaption('hollowOverheadListens', hollow.figure);
 }
 
 function beginHollowCrawl(fromHatch, toHatch) {
@@ -75,8 +89,11 @@ function beginHollowCrawl(fromHatch, toHatch) {
     phase: CRAWL_PHASE_CLIMBING,
     timer: 0,                       // seconds spent in this phase
     travelSeconds: metres / Math.max(0.2, TUNING.hollowCrawlSpeed * game.difficulty.hollowSpeedFactor),
-    soundTimer: 0
+    soundTimer: 0,
+    listenSeconds: 0,               // how much longer it lies still up there, listening to a noise from below
+    hasListened: false              // ... which it does once in a crawl
   };
+  hollow.figure.space = SPACE_STATION; // (reaching up under the hatch: it is still in the room)
   hollow.figure.x = fromHatch.x; hollow.figure.z = fromHatch.z;
   // The first time through a hatch it has to force the cover, and that is loud. After that the cover only rattles.
   if (fromHatch.isOpen) { playHatchRattle(fromHatch.x, fromHatch.z, 1); showCaption('hatchRattle', fromHatch); }
@@ -85,6 +102,8 @@ function beginHollowCrawl(fromHatch, toHatch) {
 
 // One frame of the Hollow going through the crawlspace. While this runs it does nothing else: it cannot be
 // scanned once it is up there, it cannot catch you, and it does not change its mind about where it comes out.
+// Once it is above the ceiling it is in a space of its own (SPACE_CRAWLSPACE: "Spaces", 08-creatures.js), and
+// everything that asks how near it is knows that from its figure.
 function updateHollowInCrawlspace(dt) {
   const crawl = hollow.crawlspace, figure = hollow.figure;
   figure.hitsThisFrame = 0;
@@ -110,12 +129,15 @@ function updateHollowInCrawlspace(dt) {
     }
     if (crawl.timer >= TUNING.hollowCrawlClimbSeconds) {
       crawl.phase = CRAWL_PHASE_TRAVELLING; crawl.timer = 0; crawl.soundTimer = 0;
-      setFigureRaycastable(figure, false); // gone into the ceiling: nothing for a scan to find
+      figure.space = SPACE_CRAWLSPACE;     // gone into the ceiling: it is in another space than you from here ...
+      setFigureRaycastable(figure, false); // ... and there is nothing for a scan to find
     }
     return;
   }
 
   if (crawl.phase === CRAWL_PHASE_TRAVELLING) {
+    // Lying still, listening to something it heard below: no time goes by on its way, and it makes no sound.
+    if (crawl.listenSeconds > 0) { crawl.listenSeconds -= dt; crawl.timer -= dt; crawl.soundTimer = 0.3; return; }
     const amount = crawl.travelSeconds > 0 ? Math.min(1, crawl.timer / crawl.travelSeconds) : 1;
     figure.x = interpolateLinear(crawl.from.x, crawl.to.x, amount);
     figure.z = interpolateLinear(crawl.from.z, crawl.to.z, amount);
@@ -137,6 +159,7 @@ function updateHollowInCrawlspace(dt) {
   }
   if (crawl.timer >= TUNING.hollowCrawlDropWarningSeconds) {
     hollow.crawlspace = null;
+    figure.space = SPACE_STATION; // down: in the room with you
     // Landed in a crouch; it straightens up as it moves off.
     figure.pose.stoop = 1; figure.pose.stretch = 0; figure.pose.armRaise = 0.3; figure.pose.kneeBend = 0.5;
     hollow.armRaise = 0.3;

@@ -98,8 +98,11 @@ function getHollowHearingBoost() {
 }
 
 // What the Hollow makes of a noise (emitNoise and hearNoise are in 08-creatures.js: every kind of creature is told).
-function hearNoiseAsHollow(x, z, radius) {
-  const effectiveRadius = radius * game.difficulty.hearingFactor * getHollowHearingBoost();
+// `space` is where the noise was made. Above the ceiling a noise from the station reaches it through the
+// ceiling, so from less far, and what it does about one is another thing altogether (hearNoiseFromAboveTheCeiling).
+function hearNoiseAsHollow(x, z, radius, space) {
+  const madeIn = space === undefined ? SPACE_STATION : space, isIn = getSpaceOf(hollow.figure);
+  const effectiveRadius = radius * game.difficulty.hearingFactor * getHollowHearingBoost() * getNoiseCarryBetweenSpaces(madeIn, isIn);
   if (debugHooks.recordNoise) debugHooks.recordNoise(x, z, effectiveRadius);
   if (!hollow.isActive || hollow.graceTimer > 0 || debugState.options.creaturesIgnorePlayer) return;
   // The tick of a scanner it has been up to and knows for a thing: it pays that no heed (letHollowKnowScanner).
@@ -119,6 +122,7 @@ function hearNoiseAsHollow(x, z, radius) {
     }
     return;
   }
+  if (madeIn !== isIn) { hearNoiseFromAnotherSpace(x, z); return; }
   if (distance < effectiveRadius * 0.3) {
     beginHollowHunt(x, z);
   } else {
@@ -127,6 +131,18 @@ function hearNoiseAsHollow(x, z, radius) {
     hollow.targetX = x; hollow.targetZ = z;
     hollow.doubleBackTimer = 0;
   }
+}
+
+// It has heard a noise that was made in another space than the one it is in: under it, while it crawls above
+// the ceiling. However near that was on the map, it is not near: there is a ceiling in between, and it cannot
+// get at whatever made it from where it is. So it does not find you (no roar, no hunt). It stops and listens
+// (the crawling overhead goes quiet: that is how you know it heard), and when it is down it comes to look at
+// where the noise was.
+function hearNoiseFromAnotherSpace(x, z) {
+  hollow.state = HOLLOW_STATE_INVESTIGATE;
+  hollow.targetX = x; hollow.targetZ = z;
+  hollow.doubleBackTimer = 0;
+  if (isHollowInCrawlspace()) listenFromTheCrawlspace();
 }
 
 // Stuns the Hollow where it stands, for `seconds`. An enraged Hollow is past that. Returns whether it worked.

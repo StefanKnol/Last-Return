@@ -392,6 +392,11 @@ const TUNING = {
   hollowCrawlClimbSeconds: 1.4,       // how long it stands under a hatch reaching up before it is gone
   hollowCrawlDropWarningSeconds: 2.5, // how long the hatch it is coming out of rattles before it drops. This is your warning.
   hollowCrawlLandingGraceSeconds: 1.0,// after it lands it cannot catch you for this long
+  hollowCrawlListenSeconds: 1.5,      // a noise from below that reaches it up there: it stops crawling and listens for this long (once in a crawl), and that silence is how you know
+  // What a ceiling does to whatever is on the other side of it (see "Spaces" in 08-creatures.js). The same two
+  // numbers will do for a floor between two levels, when a station has levels one above the other.
+  noiseThroughCeilingFactor: 0.5,     // how much of the distance a noise carries is left once it has gone through a ceiling: 0.5 = half as far. 0: nothing gets through.
+  presenceThroughCeilingFactor: 0.5,  // how much of the Hollow's weight on you is left through a ceiling: the scanner's interference, your heartbeat, the red at the edge of the screen
   hollowCrawlFixedSteps: 12,          // how unwilling it is to use the crawlspace at all: going up and coming down count
                                       // as this many steps of walking when it works out the shortest way ...
   hollowCrawlStepsPerMetre: 1.5,      // ... and every metre crawled counts as this many. Raise both and it only goes up
@@ -714,6 +719,7 @@ const CAPTIONS = {
   hollowStepsHunting: { text: '[heavy footsteps, fast]', level: 'sound', withinMetres: 12, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
   hollowVentSteps: { text: '[sheet metal booms: something is in a vent]', level: 'sound', withinMetres: 12, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
   hollowOverhead: { text: '[something crawls overhead]', level: 'sound', withinMetres: 10, seconds: 1.6, slot: 'hollowFeet', rank: 0 },
+  hollowOverheadListens: { text: '[the crawling overhead stops]', level: 'tell', withinMetres: 12, seconds: 2.4, slot: 'hollowFeet', rank: 1 },
   hollowOnGlass: { text: '[glass crunches under something]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
   hollowOnPlate: { text: '[a floor plate clanks under something]', level: 'sound', withinMetres: 13, seconds: 3, slot: 'hollowFeet', rank: 1 },
 

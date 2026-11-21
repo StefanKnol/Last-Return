@@ -73,6 +73,9 @@
   - ~~one way down from the upper level to the lower~~ (done: a vent with a drop in it)
     - temporary: a keycard door opens from its inner side without the card (`keycardDoorsOpenFromInside`), or the drop is a trap. To be replaced by a proper way back out
     - the Hollow and the other creatures do not use the drop yet
+  - levels one above the other (rooms over rooms), which the station cannot hold today: a tile has one floor and one ceiling
+    - ~~the half that is about "how near": a thing is in a space, and a ceiling in between halves a noise, stops a touch and lightens a presence~~ (in: "Spaces", 08-creatures.js; the Hollow above the ceiling is the first to use it)
+    - still open, and the big half: several floors to a tile in the world itself (walls, floors, path finding, what a scan hits, the generator, the map on screen)
   - ~~the scanner tripod: an item to find (or buy in the shop later), set down and switched on, that scans what is in front of it in pulses. The same system the scanning monster will see by, and a way to try it first~~ (in: 08-loose-objects.js, and fireScanCone in 09-scan-cone.js)
     - still open: to buy in the shop; a tripod that warns you when something walks into its light; the Hollow knocking over or breaking a tripod it has found out about (for now it only loses interest)
   - other types of blind monsters with different systems for it
