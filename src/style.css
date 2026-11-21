@@ -151,7 +151,7 @@ body {
 .touch-carried { position: absolute; right: var(--gutter-right); bottom: calc(172px + env(safe-area-inset-bottom, 0px)); min-width: 92px; border-color: var(--instrument); }
 .touch-carried[hidden] { display: none; }
 .hud-pockets { margin-top: 6px; }
-.hud-pockets[hidden] { display: none; }
+.hud-pockets[hidden], .hud-pockets .chip[hidden], .touch-pocket[hidden] { display: none; }
 .touch-pocket-buttons { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; }
 .touch-pocket-buttons[hidden] { display: none; }
 .touch-pocket { min-width: 64px; max-width: 96px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

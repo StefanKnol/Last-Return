@@ -436,15 +436,72 @@ const labSource = String(function () {
       d.simulate(1);
       const bursts = d.getLooseNumber(grenade, 'scanGrenadeBursts'), burstSeconds = d.getLooseNumber(grenade, 'scanGrenadeBurstSeconds');
       d.askToAct({ what: 'setOff', id: grenade.id });
-      d.simulate(d.getLooseNumber(grenade, 'scanGrenadeFuseSeconds') + burstSeconds + 0.3);
+      // (Until its first scan is over, and then until it is spent: one that jumps before each scan takes a little
+      // longer over each than its numbers add up to. Never longer than the 12 s and 40 s given here.)
+      for (let step = 0; step < 360 && grenade.burstsDone < 1; step++) d.simulate(1 / 30);
       const afterTheFirst = { done: grenade.burstsDone, isSpent: grenade.isSpent };
-      d.simulate((bursts - 1) * (d.tuning.scanGrenadeBurstGapSeconds + burstSeconds) + 0.5);
+      for (let step = 0; step < 1200 && !grenade.isSpent; step++) d.simulate(1 / 30);
       seen.push({ key: entry[0], bursts: bursts, afterTheFirst: afterTheFirst, atTheEnd: { done: grenade.burstsDone, isSpent: grenade.isSpent }, canBeArmed: Boolean(grenade.kind.use) });
     }
     return seen;
   });
   check('a scan grenade of a better mark goes off as often as it says: after the first scan one that scans again is not spent yet, after the last it is',
     marked.every((grenade) => grenade.canBeArmed && grenade.afterTheFirst.done === 1 && grenade.afterTheFirst.isSpent === (grenade.bursts === 1) && grenade.atTheEnd.done === grenade.bursts && grenade.atTheEnd.isSpent), marked);
+
+  // --- a scan grenade that jumps (the bouncing betty): before each of its scans it throws itself off the floor,
+  //     and the whole of the scan is made from the air; between two scans it comes down again. In the beam it
+  //     does not jump, and neither does a make that has no jump in it ---
+  const jumping = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, seen = { jumpers: [], plain: null };
+    const watch = function (key, isCarried) {
+      lab.station();
+      d.clearLooseObjects();
+      const at = lab.pointAt(1.5, 0), floorY = lab.place.floorY;
+      const grenade = d.createLooseObject(key, at[0], floorY + 0.2, at[1], 0);
+      d.simulate(1.5);
+      const lyingAt = grenade.y - floorY, pointsBefore = d.pointCloud.totalReturns;
+      if (isCarried) { d.pickUpLooseObject(grenade, false); d.simulate(0.3); }
+      d.askToAct({ what: 'setOff', id: grenade.id });
+      // For every scan: the lowest and the highest it was above the floor while its light was on, and for every
+      // dark stretch between two scans the lowest it came.
+      const scans = [], betweenScans = [];
+      let lowest = Infinity, highest = -Infinity, lowestBetween = Infinity, done = 0;
+      for (let step = 0; step < 2400 && !grenade.isSpent; step++) {
+        d.simulate(1 / 60);
+        const height = grenade.y - floorY, isScanning = grenade.burstSeconds > 0 && grenade.burstsDone === done;
+        if (isScanning) { lowest = Math.min(lowest, height); highest = Math.max(highest, height); }
+        else if (done > 0) lowestBetween = Math.min(lowestBetween, height);
+        if (grenade.burstsDone > done) {
+          scans.push([lab.round(lowest), lab.round(highest)]);
+          if (done > 0) betweenScans.push(lab.round(lowestBetween));
+          lowest = Infinity; highest = -Infinity; lowestBetween = Infinity; done = grenade.burstsDone;
+        }
+      }
+      return { key: key, jump: d.getLooseNumber(grenade, 'scanGrenadeHopMetres'), wanted: d.getLooseNumber(grenade, 'scanGrenadeBursts'), lyingAt: lab.round(lyingAt), scans: scans, betweenScans: betweenScans,
+        isSpent: grenade.isSpent, stillInTheBeam: d.getHeldLooseObject() === grenade, points: d.pointCloud.totalReturns - pointsBefore,
+        metresFromWhereItLay: lab.round(Math.hypot(grenade.x - at[0], grenade.z - at[1])), aside: d.tuning.scanGrenadeHopSideSpeed };
+    };
+    for (const entry of d.looseObjectMarks.scanGrenade || []) {
+      if (!(d.looseObjectKinds[entry[0]].numbers.scanGrenadeHopMetres > 0)) continue;
+      seen.jumpers.push({ onTheFloor: watch(entry[0], false), inTheBeam: watch(entry[0], true) });
+    }
+    seen.plain = watch('scanGrenade', false);
+    d.releaseHeldLooseObject(0);
+    return seen;
+  });
+  check('there is a scan grenade that jumps, the rarest make there is of it: the bouncing betty',
+    jumping.jumpers.length >= 1 && jumping.jumpers.some((jumper) => jumper.onTheFloor.key === 'bouncingBetty'), jumping.jumpers.map((jumper) => jumper.onTheFloor.key));
+  check('lying on the floor it jumps before every one of its scans, and each scan is made from the air: never from lower than a third of its jump, never higher than the jump, and it is spent after the last',
+    jumping.jumpers.every((jumper) => { const seen = jumper.onTheFloor; return seen.isSpent && seen.scans.length === seen.wanted && seen.wanted >= 2 &&
+      seen.scans.every((scan) => scan[0] > seen.lyingAt + seen.jump / 3 && scan[1] <= seen.lyingAt + seen.jump + 0.1 && scan[1] > seen.lyingAt + seen.jump * 0.8); }), jumping.jumpers.map((jumper) => jumper.onTheFloor));
+  // (How far: each jump takes it aside at scanGrenadeHopSideSpeed for the second or so it is in the air, and it rolls a little.)
+  check('between two scans it comes down again, and it ends up no further from where it lay than its jumps can have taken it',
+    jumping.jumpers.every((jumper) => jumper.onTheFloor.betweenScans.length === jumper.onTheFloor.wanted - 1 && jumper.onTheFloor.betweenScans.every((height) => height < jumper.onTheFloor.lyingAt + 0.15) &&
+      jumper.onTheFloor.metresFromWhereItLay < jumper.onTheFloor.wanted * jumper.onTheFloor.aside * 1.5 + 1), jumping.jumpers.map((jumper) => [jumper.onTheFloor.betweenScans, jumper.onTheFloor.metresFromWhereItLay]));
+  check('in the beam it does not jump: it goes off where you hold it, as often as it says, and stays in the beam',
+    jumping.jumpers.every((jumper) => jumper.inTheBeam.isSpent && jumper.inTheBeam.stillInTheBeam && jumper.inTheBeam.scans.length === jumper.inTheBeam.wanted && jumper.inTheBeam.points > 8000), jumping.jumpers.map((jumper) => jumper.inTheBeam));
+  check('the plain scan grenade does not jump: it scans from where it lies',
+    jumping.plain.jump === 0 && jumping.plain.isSpent && jumping.plain.scans.length === 1 && jumping.plain.scans[0][1] < jumping.plain.lyingAt + 0.1 && jumping.plain.metresFromWhereItLay < 0.5, jumping.plain);
 
   // --- a tripod of a better mark: it is a tripod (it stands, it is switched on, it scans), with the numbers its
   //     file says, and it scans out of its own shape: its lens is on it, not where the plain one's is ---

@@ -18,7 +18,7 @@
     { "shape": "capsule", "from": [0,0.5,0], "to": [0.3,0,-0.22], "radius": 0.025 },
     { "shape": "capsule", "from": [0,0.5,0], "to": [-0.3,0,-0.22], "radius": 0.025 },
     { "shape": "box", "center": [0,1,0], "half": [0.1,0.08,0.1] },
-    { "shape": "ball", "center": [0,1,0.1], "radius": 0.065 },
+    { "shape": "ball", "center": [0,1,-0.1], "radius": 0.07 },
     { "shape": "capsule", "from": [0,0.91,0], "to": [0,0.48,0], "radius": 0.04 }
   ],
   "worksLike": "scannerTripod",
