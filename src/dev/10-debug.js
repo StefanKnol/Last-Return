@@ -640,9 +640,6 @@ function buildDebugReadout() {
       lines.push('  SPACE      ' + SPACE_NAMES[getSpaceOf(hollow.figure)] + ': a noise of yours carries x' + getNoiseCarryBetweenSpaces(getSpaceOf(player), getSpaceOf(hollow.figure)) +
         ' to it, it weighs x' + getPresenceBetweenSpaces(getSpaceOf(hollow.figure), getSpaceOf(player)) + ' on you' + (crawl.listenSeconds > 0 ? '; LISTENING, ' + crawl.listenSeconds.toFixed(1) + ' s more' : (crawl.hasListened ? '; it has listened once' : '')));
     }
-    lines.push('DIRECTOR    ' + (isDirectorOverruled() ? 'OVERRULED (the ending)' : DIRECTOR_PHASE_NAMES[director.phase]) + '   menace ' + director.menace.toFixed(2) + (director.hasPeaked ? ' (breather owed)' : '') + '   pace x' + getDirectorPaceFactor().toFixed(2));
-    lines.push('  steering  to rooms ' + director.ringMinimumSteps + ' to ' + (director.ringMaximumSteps > 9000 ? 'any' : director.ringMaximumSteps) + ' steps from you; it is ' +
-      (director.stepsToPlayer >= NAVIGATION_UNREACHABLE ? 'unreachable' : director.stepsToPlayer + ' steps') + ' away');
   } else {
     const secondsLeft = getSecondsUntilArrival('hollow'), wait = arrivals.waits.hollow;
     lines.push('HOLLOW      not in the station' + (secondsLeft < 0

@@ -673,6 +673,7 @@ function recordScanHit(drawBeam) {
       lifeCode !== 0 ? Math.min(lifeCode, light.lifeCode) : light.lifeCode, true, looseObject !== null);
     return;
   }
+  noteScanLightAt(rayHit.x, rayHit.z); // somebody's light has landed here ("Light", 08-creatures.js): a creature that goes by light may come to look
   if (looseObject !== null) { lifeCode = getLooseObjectPointLifeCode(looseObject); noteLooseObjectScanned(looseObject); }
   addScanPoint(rayHit.x, rayHit.y, rayHit.z, rayHit.intensity, rayHit.surfaceClass, lifeCode, looseObject !== null, looseObject !== null);
   if (rayHit.objectId !== 0) markInteractableDiscovered(rayHit.objectId);

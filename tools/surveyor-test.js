@@ -3,7 +3,10 @@
 // its own kind which fade and are not on your map, that it makes you out only when its light has been on you
 // for long enough with nothing in between, that it comes for you, strikes once and runs off, that it loses
 // you, that light in its eye dazzles it, that noise is nothing to it, that the Hollow pays its light no heed,
-// and that it goes through the crawlspace as the Hollow does, with its light out up there.
+// and that it goes through the crawlspace as the Hollow does, with its light out up there. Then what it goes
+// by on its rounds: the map of where scanning has been landing ("Light", 08-creatures.js), that it goes to the
+// brightest of it, that tripods and scan grenades draw it too. And the director (08-director.js): that it paces
+// the Hollow and the Surveyor as one, with one breather for both.
 //
 // (When it arrives, and that it does not arrive together with the Hollow: arrivals-test.js. That the others
 // are shown it down there with others: together-test.js.)
@@ -85,6 +88,20 @@ const labSource = String(function () {
       if (life === 0) forever++; else longest = Math.max(longest, life * 0.25);
     }
     return { count: count, longestSeconds: longest, forever: forever };
+  };
+  // So many pulses of somebody's light land at a place. (Through the same door as a real pulse: "Light", 08-creatures.js.)
+  lab.light = function (x, z, pulses) { for (let pulse = 0; pulse < pulses; pulse++) d.noteScanLightAt(x, z); };
+  // Three of the station's rooms for the checks of what light does to it: one it starts in, and two to be lit,
+  // each within the distance it notices light at just after a breather, a good way from where it starts and
+  // from each other, and none in the others' square of the map or the next one.
+  lab.threePlaces = function () {
+    const rooms = d.roamingWaypoints.map((waypoint) => ({ x: waypoint[0], z: waypoint[1] })), most = d.tuning.surveyorLightNoticeNearMetres * 0.9, least = d.lightCellMetres * 3;
+    const apart = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+    for (const from of rooms) for (const first of rooms) for (const second of rooms) {
+      if (apart(from, first) < least || apart(from, first) > most || apart(from, second) < least || apart(from, second) > most || apart(first, second) < least) continue;
+      return { from: from, first: first, second: second };
+    }
+    return null;
   };
   lab.turnRate = d.tuning.surveyorLookTurnRate;
   window.lab = lab;
@@ -417,6 +434,317 @@ const labSource = String(function () {
     check('it drops out of the other hatch into the station, where a scan finds it; it sees nobody for a moment, and its light is on again',
       others.landed.space === others.landed.station && others.landed.scannable && others.landed.metresFromTheHatch < 0.5 && others.landed.blind > 0 && others.landed.litAgain, others.landed);
   }
+
+  // --- what it goes by on its rounds: light ("Light", 08-creatures.js) ---
+  const map = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, s = d.surveyor, result = {};
+    const stretch = lab.station(8);
+    d.setDebugOption('invulnerable', true); d.setDebugOption('unlimitedScanner', true);
+    result.numbers = { halfLife: d.tuning.lightHeatHalfLifeSeconds, interest: d.tuning.surveyorLightInterestPulses, cell: d.lightCellMetres };
+    result.inANewStation = d.lightState.total;
+    // Its own light, for three seconds, with nobody else scanning: nothing on the map.
+    lab.faceToFace(stretch);
+    s.blindSeconds = 9999;
+    const itsPulsesBefore = s.statistics.pulses;
+    d.simulate(3);
+    result.itsOwn = { itsPulses: s.statistics.pulses - itsPulsesBefore, onTheMap: d.lightState.total };
+    d.removeSurveyor();
+    // Yours, for a second, along the stretch: on the map, where it lands.
+    d.player.pitch = 0;
+    const returnsBefore = d.pointCloud.totalReturns;
+    d.setScanHeld(true); d.simulate(1); d.setScanHeld(false); d.simulate(0.1);
+    const brightest = d.findBrightestLightNear(d.player.x, d.player.z, 300, 1);
+    let inAll = 0;
+    for (let index = 0; index < d.lightHeat.length; index++) inAll += d.lightHeat[index];
+    result.yours = { counted: d.lightState.total, pointsLeft: d.pointCloud.totalReturns - returnsBefore, onTheMap: Math.round(inAll), whereYouStand: Math.round(d.getLightHeatAt(d.player.x, d.player.z)),
+      brightest: brightest ? { heat: Math.round(brightest.heat), metresFromYou: lab.round(Math.hypot(brightest.x - d.player.x, brightest.z - d.player.z)) } : null };
+    // It fades by half in the time the number says.
+    d.clearLightHeat();
+    lab.light(stretch.it.x, stretch.it.z, 8000);
+    d.simulate(d.tuning.lightHeatHalfLifeSeconds);
+    result.fades = { from: 8000, to: Math.round(d.getLightHeatAt(stretch.it.x, stretch.it.z)) };
+    d.simulate(d.tuning.lightHeatHalfLifeSeconds * 14);
+    result.fades.inTheEnd = d.getLightHeatAt(stretch.it.x, stretch.it.z);
+    // A new station starts with none.
+    lab.light(stretch.it.x, stretch.it.z, 500);
+    lab.station(8);
+    result.afterANewStation = { counted: d.lightState.total, there: d.getLightHeatAt(stretch.it.x, stretch.it.z) };
+    d.setDebugOption('invulnerable', false); d.setDebugOption('unlimitedScanner', false);
+    return result;
+  });
+  check('its own light is not on the map of light: three seconds of it, thousands of pulses, and the map is empty', map.inANewStation === 0 && map.itsOwn.itsPulses > 2000 && map.itsOwn.onTheMap === 0, [map.inANewStation, map.itsOwn]);
+  check('your scanning is: every pulse that lands is counted, where it lands and not where you stand',
+    map.yours.counted > 3000 && map.yours.onTheMap > map.yours.counted * 0.9 && map.yours.onTheMap <= map.yours.counted && map.yours.brightest !== null &&
+    map.yours.brightest.metresFromYou > map.numbers.cell && map.yours.whereYouStand < map.yours.brightest.heat * 0.2, map.yours);
+  check('light on the map fades by half in the time the number says, and to nothing in the end; a new station starts with none',
+    Math.abs(map.fades.to - map.fades.from / 2) < map.fades.from * 0.03 && map.fades.inTheEnd === 0 && map.afterANewStation.counted === 0 && map.afterANewStation.there === 0, [map.fades, map.afterANewStation, map.numbers]);
+
+  const drawn = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, s = d.surveyor, result = {};
+    lab.station(8);
+    d.setDebugOption('invulnerable', true);
+    const tuning = d.tuning, interest = tuning.surveyorLightInterestPulses;
+    result.numbers = { interest: interest, near: tuning.surveyorLightNoticeNearMetres, far: tuning.surveyorLightNoticeFarMetres, brighter: tuning.surveyorLightBrighterFactor, coolsTo: tuning.surveyorLightCoolsTo,
+      drawnSpeed: tuning.surveyorDrawnSpeed, roamSpeed: tuning.surveyorRoamSpeed, walkSpeed: tuning.walkSpeed, relief: tuning.directorReliefSteps };
+    const places = lab.threePlaces();
+    result.hasPlaces = places !== null;
+    if (!places) return result;
+    const { from, first, second } = places;
+    result.places = { firstMetres: lab.round(Math.hypot(first.x - from.x, first.z - from.z)), secondMetres: lab.round(Math.hypot(second.x - from.x, second.z - from.z)) };
+    // You stand near where it starts. It sees nobody in all of this: what is asked is what light does to it.
+    const you = d.findWalkableSpotNear(from.x + 2, from.z + 2);
+    d.teleport(you.x, you.z, 0); d.simulate(0.2);
+    const start = function () {
+      d.clearLightHeat(); d.resetDirector(false);
+      d.activateSurveyor(from.x, from.z, 0);
+      s.blindSeconds = 9999;
+      d.clearCaptions(); // (one of its captions still on the screen would keep the next one off it)
+      d.captionCounts.surveyorDrawn = 0; d.captionCounts.surveyorMovingOff = 0;
+      s.statistics.timesDrawn = 0;
+    };
+    result.states = { onItsRounds: d.surveyorStates[0], lookingRound: d.surveyorStates[1] };
+
+    // Nothing lit anywhere: a room from the director's band, as the Hollow is given.
+    start();
+    const band = { justAfter: null, closedIn: null };
+    for (const [name, phaseTime] of [['justAfter', 0], ['closedIn', 99999]]) {
+      d.director.phase = 0; d.director.phaseTime = phaseTime;
+      let nearest = Infinity, furthest = 0, drawnAtAll = false, onAWaypoint = true;
+      for (let pick = 0; pick < 80; pick++) {
+        d.chooseSurveyorRound();
+        const steps = d.stepsFromPlayerTo(s.goalX, s.goalZ);
+        nearest = Math.min(nearest, steps); furthest = Math.max(furthest, steps);
+        if (s.isDrawnByLight) drawnAtAll = true;
+        if (!d.roamingWaypoints.some((waypoint) => waypoint[0] === s.goalX && waypoint[1] === s.goalZ)) onAWaypoint = false;
+      }
+      const inTheBand = d.roamingWaypoints.filter((waypoint) => { const steps = d.stepsFromPlayerTo(waypoint[0], waypoint[1]); return steps >= d.director.ringMinimumSteps && steps <= d.director.ringMaximumSteps && Math.hypot(waypoint[0] - s.figure.x, waypoint[1] - s.figure.z) > 2.5; }).length;
+      band[name] = { nearest: nearest, furthest: furthest, band: [d.director.ringMinimumSteps, d.director.ringMaximumSteps], roomsInTheBand: inTheBand, drawnAtAll: drawnAtAll, onAWaypoint: onAWaypoint };
+    }
+    result.band = band;
+
+    // Too little light to be worth a look.
+    start();
+    lab.light(first.x, first.z, Math.round(interest * 0.8));
+    d.chooseSurveyorRound();
+    result.dim = { drawn: s.isDrawnByLight };
+
+    // Enough of it: that is where it goes, quicker than on its rounds and slower than you walk.
+    start();
+    d.chooseSurveyorRound(); // (on its rounds to a room, first)
+    const before = Math.round(interest * 3);
+    lab.light(first.x, first.z, before);
+    s.lightCheckTimer = 0;
+    d.simulate(0.2);
+    result.turned = { drawn: s.isDrawnByLight, state: lab.state(), goalFromTheLight: lab.round(Math.hypot(s.goalX - first.x, s.goalZ - first.z)), captions: d.captionCounts.surveyorDrawn, timesDrawn: s.statistics.timesDrawn };
+    let fastest = 0;
+    const seconds = lab.until(() => { fastest = Math.max(fastest, s.currentSpeed); return s.state === 1; }, 120);
+    result.arrived = { seconds: seconds, fastest: lab.round(fastest), metresFromTheLight: lab.round(Math.hypot(s.figure.x - first.x, s.figure.z - first.z)), state: lab.state(), stillDrawn: s.isDrawnByLight,
+      heatLeft: Math.round(d.getLightHeatAt(first.x, first.z)), heatBefore: before };
+    // When it has looked round, it does not come back to it.
+    s.timer = 0; d.simulate(0.1);
+    result.afterLooking = { drawn: s.isDrawnByLight, state: lab.state() };
+
+    // On its way to one lit place, another flares up: a little brighter is nothing, a good deal brighter turns it aside.
+    start();
+    lab.light(first.x, first.z, before);
+    d.chooseSurveyorRound();
+    const goingTo = { x: s.lightX, z: s.lightZ };
+    lab.light(second.x, second.z, Math.round(before * (1 + (tuning.surveyorLightBrighterFactor - 1) * 0.4)));
+    s.lightCheckTimer = 0; d.simulate(0.3);
+    result.aLittleBrighter = { drawn: s.isDrawnByLight, sameLight: s.lightX === goingTo.x && s.lightZ === goingTo.z, timesDrawn: s.statistics.timesDrawn };
+    lab.light(second.x, second.z, Math.round(before * tuning.surveyorLightBrighterFactor));
+    s.lightCheckTimer = 0; d.simulate(0.3);
+    result.aGoodDealBrighter = { drawn: s.isDrawnByLight, goalFromTheSecond: lab.round(Math.hypot(s.goalX - second.x, s.goalZ - second.z)), timesDrawn: s.statistics.timesDrawn, captions: d.captionCounts.surveyorDrawn };
+
+    // How far afield it notices light is the director's to say: just after a breather only near itself, closed in from far off.
+    start();
+    d.director.phase = 0; d.director.phaseTime = 0;
+    result.range = { justAfter: d.getSurveyorLightRange() };
+    d.director.phaseTime = 99999;
+    result.range.closedIn = d.getSurveyorLightRange();
+    // (The numbers are set round how far this lit place is, so that it is beyond the one and within the other.)
+    const nearReally = tuning.surveyorLightNoticeNearMetres, farReally = tuning.surveyorLightNoticeFarMetres, metres = Math.hypot(first.x - from.x, first.z - from.z);
+    tuning.surveyorLightNoticeNearMetres = metres * 0.5; tuning.surveyorLightNoticeFarMetres = metres * 1.6;
+    lab.light(first.x, first.z, before);
+    d.director.phaseTime = 0; d.chooseSurveyorRound();
+    result.range.drawnJustAfter = s.isDrawnByLight;
+    d.director.phaseTime = 99999; d.chooseSurveyorRound();
+    result.range.drawnClosedIn = s.isDrawnByLight;
+    tuning.surveyorLightNoticeNearMetres = nearReally; tuning.surveyorLightNoticeFarMetres = farReally;
+
+    // A breather: it turns its back on the light it was going to, and goes far from you; more light does not turn it.
+    start();
+    lab.light(first.x, first.z, before);
+    d.chooseSurveyorRound();
+    const wasDrawn = s.isDrawnByLight;
+    d.beginDirectorBreather();
+    let furthestRoom = 0;
+    for (const waypoint of d.roamingWaypoints) { const steps = d.stepsFromPlayerTo(waypoint[0], waypoint[1]); if (steps < 9000) furthestRoom = Math.max(furthestRoom, steps); }
+    result.breather = { wasDrawn: wasDrawn, drawn: s.isDrawnByLight, goalSteps: d.stepsFromPlayerTo(s.goalX, s.goalZ), furthestRoom: furthestRoom, captions: d.captionCounts.surveyorMovingOff, isBreather: d.isDirectorInBreather() };
+    lab.light(second.x, second.z, before * 10);
+    let drawnInTheBreather = false;
+    d.director.menace = 1; // (so that the breather lasts the three seconds)
+    for (let step = 0; step < 30; step++) { s.lightCheckTimer = 0; d.simulate(0.1); if (s.isDrawnByLight) drawnInTheBreather = true; }
+    result.breather.drawnByMoreLight = drawnInTheBreather; result.breather.stillBreather = d.isDirectorInBreather();
+    d.setDebugOption('invulnerable', false);
+    return result;
+  });
+  check('the station has three places apart from one another: where it starts and two to light', drawn.hasPlaces, drawn.places);
+  if (drawn.hasPlaces) {
+    // (Where no room is inside the band, the director gives the one room that misses it by least: pickDirectedWaypoint.)
+    const isFromTheBand = (picks) => !picks.drawnAtAll && picks.onAWaypoint && picks.nearest >= picks.band[0] &&
+      (picks.roomsInTheBand > 0 ? picks.furthest <= picks.band[1] : picks.furthest === picks.nearest);
+    check('with nothing lit anywhere it is given a room from the director\'s band, as the Hollow is: far rooms just after a breather, nearer ones closed in, never nearer than the floor',
+      isFromTheBand(drawn.band.justAfter) && isFromTheBand(drawn.band.closedIn) && drawn.band.justAfter.roomsInTheBand > 0 && drawn.band.justAfter.band[0] > drawn.band.closedIn.band[0] &&
+      drawn.band.closedIn.furthest < drawn.band.justAfter.furthest, drawn.band);
+    check('a place with less light than the number says is not worth a look', !drawn.dim.drawn, [drawn.dim, drawn.numbers.interest]);
+    check('a place with enough turns it from its rounds at once, with a caption: it goes to where the light landed',
+      drawn.turned.drawn && drawn.turned.state === drawn.states.onItsRounds && drawn.turned.goalFromTheLight < 4.5 && drawn.turned.captions === 1 && drawn.turned.timesDrawn === 1, drawn.turned);
+    check('it walks there quicker than on its rounds and slower than you walk, looks round, and the place counts for little from then: it does not come back to it',
+      drawn.arrived.seconds > 0 && drawn.arrived.state === drawn.states.lookingRound && !drawn.arrived.stillDrawn && drawn.arrived.metresFromTheLight < 5.5 &&
+      drawn.arrived.fastest > drawn.numbers.roamSpeed + 0.1 && drawn.arrived.fastest <= drawn.numbers.drawnSpeed + 0.02 && drawn.numbers.drawnSpeed < drawn.numbers.walkSpeed &&
+      drawn.arrived.heatLeft <= drawn.arrived.heatBefore * drawn.numbers.coolsTo && !drawn.afterLooking.drawn && drawn.afterLooking.state === drawn.states.onItsRounds, [drawn.arrived, drawn.afterLooking, drawn.numbers]);
+    check('on its way, a place a little brighter is nothing to it; one brighter by what the number says turns it aside, with a caption',
+      drawn.aLittleBrighter.drawn && drawn.aLittleBrighter.sameLight && drawn.aLittleBrighter.timesDrawn === 1 && drawn.aGoodDealBrighter.drawn && drawn.aGoodDealBrighter.goalFromTheSecond < 4.5 &&
+      drawn.aGoodDealBrighter.timesDrawn === 2 && drawn.aGoodDealBrighter.captions === 1, [drawn.aLittleBrighter, drawn.aGoodDealBrighter]);
+    check('how far afield it notices light is the director\'s to say: just after a breather only near itself, closed in from far off',
+      drawn.range.justAfter === drawn.numbers.near && drawn.range.closedIn === drawn.numbers.far && drawn.numbers.far > drawn.numbers.near && !drawn.range.drawnJustAfter && drawn.range.drawnClosedIn, drawn.range);
+    check('in a breather it turns its back on the light it was going to and goes as far from you as the Hollow is sent, with a caption; more light does not turn it',
+      drawn.breather.wasDrawn && !drawn.breather.drawn && drawn.breather.isBreather && drawn.breather.goalSteps >= Math.min(drawn.numbers.relief, drawn.breather.furthestRoom - 6) && drawn.breather.captions === 1 &&
+      !drawn.breather.drawnByMoreLight && drawn.breather.stillBreather, drawn.breather);
+  }
+
+  // --- things that scan by themselves draw it too ---
+  const lures = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, s = d.surveyor, result = {};
+    lab.station(8);
+    d.setDebugOption('invulnerable', true);
+    const places = lab.threePlaces();
+    if (!places) return result;
+    const { from, first, second } = places;
+    const you = d.findWalkableSpotNear(from.x + 2, from.z + 2);
+    d.teleport(you.x, you.z, 0); d.simulate(0.2);
+    // A scanner tripod, switched on, a good way off. Nobody scans.
+    const tripod = d.createLooseObject('scannerTripod', first.x, d.getFloorHeightAt(first.x, first.z) + 0.34, first.z, 0);
+    for (let step = 0; step < 90 && !tripod.isAsleep; step++) d.simulate(1 / 30);
+    d.clearLightHeat(); d.resetDirector(false);
+    d.activateSurveyor(from.x, from.z, 0); s.blindSeconds = 9999;
+    d.director.phase = 0; d.director.phaseTime = 99999; // (closed in: it notices light from far off)
+    d.askToAct({ what: 'setOff', id: tripod.id });
+    const seconds = lab.until(() => s.isDrawnByLight, 40);
+    result.tripod = { secondsUntilDrawn: seconds, lightFromTheTripod: lab.round(Math.hypot(s.lightX - tripod.x, s.lightZ - tripod.z)), heat: Math.round(d.getLightHeatAt(s.lightX, s.lightZ)) };
+    d.askToAct({ what: 'setOff', id: tripod.id });
+    d.removeSurveyor(); d.clearLooseObjects();
+    // A scan grenade, armed and left lying: it goes off when its fuse runs out.
+    d.clearLightHeat();
+    const grenade = d.createLooseObject('scanGrenade', second.x, d.getFloorHeightAt(second.x, second.z) + 0.2, second.z, 0);
+    for (let step = 0; step < 90 && !grenade.isAsleep; step++) d.simulate(1 / 30);
+    d.armScanGrenade(grenade);
+    d.simulate(d.tuning.scanGrenadeFuseSeconds + d.tuning.scanGrenadeBurstSeconds + 1);
+    const brightest = d.findBrightestLightNear(second.x, second.z, 40, 1);
+    result.grenade = { counted: d.lightState.total, brightest: brightest ? Math.round(brightest.heat) : 0, interest: d.tuning.surveyorLightInterestPulses,
+      worthALook: d.findBrightestLightNear(second.x, second.z, 40, d.tuning.surveyorLightInterestPulses) !== null };
+    d.clearLooseObjects(); d.clearMessages();
+    d.setDebugOption('invulnerable', false);
+    return result;
+  });
+  if (drawn.hasPlaces) {
+    check('a scanner tripod left scanning draws it, with nobody holding a scanner: it sets off for where the tripod\'s light lands',
+      lures.tripod.secondsUntilDrawn > 0 && lures.tripod.lightFromTheTripod < 14, lures.tripod);
+    check('a scan grenade going off puts enough light on the map to be worth a look', lures.grenade.counted > 0 && lures.grenade.worthALook, lures.grenade);
+  }
+
+  // --- the director paces the two of them as one (08-director.js) ---
+  const paced = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, s = d.surveyor, hollow = d.hollow, director = d.director, result = {};
+    lab.station(8);
+    d.setDebugOption('invulnerable', true);
+    const tuning = d.tuning;
+    result.numbers = { huntSeconds: tuning.directorPeakAfterHuntSeconds, relief: tuning.directorReliefSteps, range: tuning.directorMenaceRangeSteps, endsBelow: tuning.directorReliefEndsBelowMenace };
+    result.paces = d.directedCreatures.map((creature) => creature.key);
+    // You stand at the lift. The two of them are put in the two rooms furthest from you, apart from each other.
+    const you = d.findWalkableSpotNear(d.playerStart.x, d.playerStart.z);
+    d.teleport(you.x, you.z, 0); d.simulate(0.2);
+    const rooms = d.roamingWaypoints.map((waypoint) => ({ x: waypoint[0], z: waypoint[1], steps: d.stepsFromPlayerTo(waypoint[0], waypoint[1]) })).filter((room) => room.steps < 9000).sort((a, b) => b.steps - a.steps);
+    const hollowRoom = rooms[0], surveyorRoom = rooms.filter((room) => Math.hypot(room.x - hollowRoom.x, room.z - hollowRoom.z) > 8)[0];
+    result.rooms = { hollowSteps: hollowRoom.steps, surveyorSteps: surveyorRoom.steps };
+
+    // Which of them comes first sets the rhythm going; the one that comes second joins it as it is.
+    d.spawnHollow(hollowRoom.x, hollowRoom.z);
+    director.menace = 0.5; director.phaseTime = 33;
+    d.activateSurveyor(surveyorRoom.x, surveyorRoom.z, 0);
+    result.surveyorSecond = { menace: director.menace, phaseTime: director.phaseTime };
+    d.removeSurveyor(); hollow.isActive = false;
+    d.activateSurveyor(surveyorRoom.x, surveyorRoom.z, 0);
+    director.menace = 0.5; director.phaseTime = 33;
+    d.spawnHollow(hollowRoom.x, hollowRoom.z);
+    result.hollowSecond = { menace: director.menace, phaseTime: director.phaseTime };
+    d.removeSurveyor(); hollow.isActive = false;
+    director.menace = 0.5; director.phaseTime = 33;
+    d.activateSurveyor(surveyorRoom.x, surveyorRoom.z, 0);
+    result.surveyorAlone = { menace: director.menace, phaseTime: director.phaseTime };
+    d.spawnHollow(hollowRoom.x, hollowRoom.z);
+
+    // (From here the director is run by hand, a tenth of a second at a time, and the two of them are held in the
+    // states the check is about: it is the director that is asked, not what they do.)
+    const run = function (seconds) { for (let time = 0; time < seconds; time += 0.1) d.updateDirector(0.1); };
+    const quiet = function () { hollow.state = 0; hollow.anger = 0; s.state = 0; s.blindSeconds = 9999; };
+    d.resetDirector(false); quiet();
+    d.captionCounts.hollowMovingOff = 0; d.captionCounts.surveyorMovingOff = 0;
+    // The Surveyor is after somebody, the Hollow is on its rounds far off: menace fills as it does for a hunt.
+    s.state = 2;
+    run(tuning.directorPeakAfterHuntSeconds * 0.5);
+    result.halfWay = { menace: lab.round(director.menace), phase: director.phase };
+    run(tuning.directorPeakAfterHuntSeconds * 0.5 + 0.3);
+    result.full = { menace: lab.round(director.menace), hasPeaked: director.hasPeaked, phase: director.phase };
+    run(5);
+    result.whileItChases = { phase: director.phase, isBreather: d.isDirectorInBreather() };
+    // It gives up. There is light where it stands' reach, and all the same both of them leave.
+    lab.light(surveyorRoom.x + 9, surveyorRoom.z, tuning.surveyorLightInterestPulses * 4);
+    s.state = 0;
+    run(0.1);
+    result.breather = { isBreather: d.isDirectorInBreather(), hollowGoesSteps: d.stepsFromPlayerTo(hollow.targetX, hollow.targetZ), surveyorGoesSteps: d.stepsFromPlayerTo(s.goalX, s.goalZ), surveyorDrawn: s.isDrawnByLight,
+      hollowCaptions: d.captionCounts.hollowMovingOff, surveyorCaptions: d.captionCounts.surveyorMovingOff, furthestRoom: rooms[0].steps };
+    // The other way round: the Hollow hunting keeps the breather from beginning, the Surveyor on its rounds or not.
+    d.resetDirector(false); quiet();
+    hollow.state = 3; director.menace = 1; director.hasPeaked = true;
+    run(2);
+    result.whileTheHollowHunts = { isBreather: d.isDirectorInBreather(), hollowState: d.hollowStates ? d.hollowStates[hollow.state] : hollow.state };
+    hollow.state = 0; run(0.1);
+    result.whenItStops = { isBreather: d.isDirectorInBreather() };
+    // The breather ends for both at once, when menace has drained: the Surveyor goes by light again.
+    director.phaseTime = 9999; director.menace = tuning.directorReliefEndsBelowMenace - 0.05;
+    hollow.figure.x = hollowRoom.x; hollow.figure.z = hollowRoom.z; s.figure.x = surveyorRoom.x; s.figure.z = surveyorRoom.z;
+    d.clearLightHeat(); lab.light(surveyorRoom.x + 9, surveyorRoom.z, tuning.surveyorLightInterestPulses * 4);
+    director.refreshTimer = 0;
+    run(0.1);
+    result.afterwards = { phase: director.phase, phaseTime: lab.round(director.phaseTime), surveyorDrawn: s.isDrawnByLight };
+
+    // Sent away together (you are back from a checkpoint): both far from you, not on top of each other, and a breather.
+    quiet(); d.resetDirector(false);
+    const near = d.findWalkableSpotNear(you.x + 3, you.z), alsoNear = d.findWalkableSpotNear(you.x - 3, you.z);
+    hollow.figure.x = near.x; hollow.figure.z = near.z; s.figure.x = alsoNear.x; s.figure.z = alsoNear.z; s.blindSeconds = 0;
+    d.sendDirectedCreaturesAway(12);
+    result.sentAway = { hollowSteps: d.stepsFromPlayerTo(hollow.figure.x, hollow.figure.z), surveyorSteps: d.stepsFromPlayerTo(s.figure.x, s.figure.z), apart: lab.round(Math.hypot(hollow.figure.x - s.figure.x, hollow.figure.z - s.figure.z)),
+      isBreather: d.isDirectorInBreather(), hollowGrace: hollow.graceTimer, surveyorBlind: s.blindSeconds, furthestRoom: rooms[0].steps, secondFurthest: rooms[1].steps };
+    d.removeSurveyor(); hollow.isActive = false;
+    d.setDebugOption('invulnerable', false);
+    return result;
+  });
+  check('the director paces the Hollow and the Surveyor, and neither is near you where this check puts them', paced.paces.join() === 'hollow,surveyor' && paced.rooms.hollowSteps >= paced.numbers.range && paced.rooms.surveyorSteps >= paced.numbers.range, [paced.paces, paced.rooms]);
+  check('the one that comes second joins the descent\'s rhythm as it is, whichever it is; one that comes alone starts it afresh',
+    paced.surveyorSecond.menace === 0.5 && paced.surveyorSecond.phaseTime === 33 && paced.hollowSecond.menace === 0.5 && paced.hollowSecond.phaseTime === 33 && paced.surveyorAlone.menace === 0 && paced.surveyorAlone.phaseTime === 0,
+    [paced.surveyorSecond, paced.hollowSecond, paced.surveyorAlone]);
+  check('the Surveyor after somebody fills menace as a hunt does, with the Hollow far off on its rounds; no breather begins while it is',
+    Math.abs(paced.halfWay.menace - 0.5) < 0.03 && paced.full.menace === 1 && paced.full.hasPeaked && !paced.whileItChases.isBreather, [paced.halfWay, paced.full, paced.whileItChases, paced.numbers.huntSeconds]);
+  check('when it gives up the breather is for both: each is told to leave, with its caption, and goes far from you, the Surveyor past light it would have gone to',
+    paced.breather.isBreather && paced.breather.hollowCaptions + paced.breather.surveyorCaptions >= 1 && paced.breather.surveyorCaptions === 1 && !paced.breather.surveyorDrawn &&
+    paced.breather.hollowGoesSteps >= Math.min(paced.numbers.relief, paced.breather.furthestRoom - 8) && paced.breather.surveyorGoesSteps >= Math.min(paced.numbers.relief, paced.breather.furthestRoom - 8), paced.breather);
+  check('the Hollow hunting holds the breather off just the same, and it begins when the Hollow is back on its rounds', !paced.whileTheHollowHunts.isBreather && paced.whenItStops.isBreather, [paced.whileTheHollowHunts, paced.whenItStops]);
+  check('the breather ends for both at once when menace has drained, and the Surveyor goes by light again', paced.afterwards.phase === 0 && paced.afterwards.phaseTime < 0.2 && paced.afterwards.surveyorDrawn, paced.afterwards);
+  check('sent away together they are both put far from you, not on top of each other, each harmless for the time given, and a breather follows',
+    paced.sentAway.hollowSteps === paced.sentAway.furthestRoom && paced.sentAway.surveyorSteps >= paced.sentAway.secondFurthest - 12 && paced.sentAway.apart >= 6 && paced.sentAway.isBreather &&
+    paced.sentAway.hollowGrace === 12 && paced.sentAway.surveyorBlind >= 12, paced.sentAway);
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();

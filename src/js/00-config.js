@@ -420,6 +420,18 @@ const TUNING = {
   surveyorLoseSeconds: 4,           // chasing, with you out of its light for this long, it has lost you and goes to where it last saw you
   surveyorSearchSeconds: 7,         // ... and looks all round there for this long before it goes back to its rounds
   surveyorLookSeconds: [2.5, 5],    // at the end of each leg of its rounds it stands and looks all round, for somewhere between these
+  // What it goes by on its rounds: where scanning has been landing lately ("Light", 08-creatures.js). Not where you are.
+  lightHeatHalfLifeSeconds: 20,     // light that landed this long ago counts for half as much, twice as long ago for a quarter
+  // (Measured, in one square of the map: a tap of your beam, a third of a second, leaves about 1,900; the beam held
+  // three seconds on one wall 18,700; ten seconds of painting a room up to 11,700 in each of six squares; one
+  // sweep up to 9,000; a tripod left on 8,600 after twenty seconds.)
+  surveyorLightInterestPulses: 3000,// a place has to have had this many pulses land in it lately to be worth a look. As it is: taps go unnoticed; holding the beam, a sweep, a tripod, a scan grenade do not
+  surveyorLightNoticeNearMetres: 30,// just after a breather it notices lit places only this near to itself ...
+  surveyorLightNoticeFarMetres: 110,// ... and with the director fully closed in, this far: from across a station
+  surveyorLightCheckSeconds: 1,     // on its rounds it looks for a brighter place this often
+  surveyorLightBrighterFactor: 1.5, // ... and turns aside for one that is this many times as lit as where it was going
+  surveyorLightCoolsTo: 0.2,        // when it has been to a lit place and looked, that place counts for this share of what it did: it does not stand there
+  surveyorDrawnSpeed: 1.9,          // on its way to a lit place it walks faster than on its rounds (1.2), and slower than you walk (2.2)
   surveyorLookTurnRate: 0.9,        // looking all round it turns this fast, in radians a second: once round in seven seconds
   surveyorStrikeDistance: 0.75,     // this near to you and it strikes. Once.
   surveyorAfterStrikeSeconds: 10,   // after a strike it sees nobody for this long: it is running off
@@ -502,7 +514,8 @@ const TUNING = {
   hollowListenEverySecondsMaximum: 26, // longest gap
   hollowListenHearingFactor: 1.8,   // how much further it hears while listening (1.5 = 50 %)
 
-  // ---- The director: decides which room the Hollow wanders to next. Only the Hollow; the Stills ignore it. ----
+  // ---- The director (08-director.js): the rhythm of a descent, for every creature that hunts. The Stills and the looters ignore it. ----
+  // (Written here for the Hollow, which it steers. What it does for the Surveyor is at the top of 08-director.js.)
   // It keeps a hidden "menace" level from 0 to 1. Menace rises while the Hollow is near you or after you, and
   // drains while it is away. The run is a cycle of two phases:
   //   CLOSING IN  its wandering is steered to rooms nearer and nearer to you.
@@ -768,6 +781,8 @@ const CAPTIONS = {
   surveyorScans: { text: '[a dry ticking, sweeping about]', level: 'sound', withinMetres: 16, seconds: 1.8, slot: 'surveyorLight', rank: 0 },
   surveyorSees: { text: '[the ticking quickens: its light is on you]', level: 'tell', withinMetres: 0, seconds: 2.6, slot: 'surveyorVoice', rank: 2 },
   surveyorLoses: { text: '[the ticking slows: it has lost you]', level: 'tell', withinMetres: 0, seconds: 2.4, slot: 'surveyorVoice', rank: 1 },
+  surveyorDrawn: { text: '[the ticking turns: it comes to look at what was lit]', level: 'tell', withinMetres: 40, seconds: 2.6, slot: 'surveyorVoice', rank: 1 },
+  surveyorMovingOff: { text: '[the ticking moves off]', level: 'tell', withinMetres: 0, seconds: 2.4, slot: 'surveyorVoice', rank: 0 },
   surveyorDazzled: { text: '[a rising whine: it is dazzled]', level: 'tell', withinMetres: 20, seconds: 2.6, slot: 'surveyorVoice', rank: 3 },
   surveyorRuns: { text: '[long steps, running off]', level: 'sound', withinMetres: 16, seconds: 2, slot: 'surveyorFeet', rank: 1 },
   surveyorSteps: { text: '[long, light steps]', level: 'sound', withinMetres: 9, seconds: 1.6, slot: 'surveyorFeet', rank: 0 },

@@ -57,6 +57,9 @@
   - a few of the harmless ones from the start of a descent, how many by threat level (left alone by the crew, in lore)
   - ~~lidar monster produces dots around it on everything, but can see the player~~ (in: the Surveyor, 08-surveyor.js. Deaf, sees by its own light, strikes once and runs, dazzled by light in its eye)
   - ~~not all of them from the start: one first, either one, and more as time goes~~ (in: 08-arrivals.js, an order drawn for every descent)
+  - ~~the director for any main monster, each in its own way~~ (in: 08-director.js. One rhythm for all of them; a creature registers with addDirectedCreature and says what closing in and a breather mean for it)
+  - ~~the Surveyor seeks out lidar activity, since it cannot hear~~ (in: "Light", 08-creatures.js: a map of where scanning has been landing; it goes to the brightest, the director sets how far afield it notices)
+    - still open: something on the screen that tells you how lit the place you are in is, as the noise you make has no meter either; a light meter might be a shop item
     - nearly 2 m: no vents, but the ceiling hatches. A cone of pulses from its face, more of them while it hunts
     - hits once and runs off (wants the health system)
   - ~~small monster (the looter)~~ (in: 08-looter.js. Still open below: summoning others, throwing things, being thrown)

@@ -702,6 +702,7 @@ function wrapForTogether() {
   // The Surveyor (08-surveyor.js): its voice. (Its ticking and its feet each game sounds for itself, as it shows its light for itself.)
   playSurveyorChirp = shareWorldSound('playSurveyorChirp', playSurveyorChirp);
   playSurveyorWhine = shareWorldSound('playSurveyorWhine', playSurveyorWhine);
+  playSurveyorQuery = shareWorldSound('playSurveyorQuery', playSurveyorQuery);
   // The Hollow treading on glass, cans or a loose plate, and flinging a thing: your warning, and so the others' too.
   // (Shared only while the host's creatures are being run, like the rest: your own step on glass is your own.)
   playNoisyFloorSound = shareWorldSound('playNoisyFloorSound', playNoisyFloorSound);
@@ -897,8 +898,8 @@ function catchOtherPlayer(caught, kind, figure) {
 }
 
 // The host's game, when a hit has killed somebody: what did it does not stand over them while the others
-// play on. The Hollow is sent far off, with a breather, as it is when you come back from a checkpoint alone;
-// the Stills go back to where they stood.
+// play on. The Hollow is sent far off, with a breather, as it is when you come back from a checkpoint alone
+// (the breather is the director's, so a Surveyor on its rounds turns away too); the Stills go back to where they stood.
 function sendCreaturesAwayAfterCatch(kind) {
   if (!isWorldYoursToShare()) return;
   if (kind === 'hollow') relocateHollowAwayFromPlayer(12);
