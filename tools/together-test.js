@@ -582,13 +582,34 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     const d = window.lastReturnDebug, object = d.looseObjects.filter((candidate) => candidate.id === id)[0];
     return object ? { x: object.x, y: object.y, z: object.z, heldById: object.heldById, ownerId: object.ownerId, isAsleep: object.isAsleep, worth: object.worth } : null;
   }, id);
+  // How far a thing gets from where it is now, measured along the floor: watched from now until `endWatchingFlight`,
+  // after every stretch of the game a check plays and at every frame the browser draws by itself in between.
+  // (This is what says a thing was thrown. Where it comes to lie does not: thrown hard, it lies wherever what it
+  // met on the way left it, and that is another place every run.)
+  const watchFlight = (page, id) => page.evaluate((id) => {
+    const d = window.lastReturnDebug, object = d.looseObjects.filter((candidate) => candidate.id === id)[0];
+    const flight = window.watchedFlight = { fromX: object.x, fromZ: object.z, furthestMetres: 0, isWatched: true };
+    const look = () => { flight.furthestMetres = Math.max(flight.furthestMetres, Math.hypot(object.x - flight.fromX, object.z - flight.fromZ)); };
+    const simulate = d.simulate;
+    d.simulate = (seconds) => { simulate(seconds); look(); };
+    const lookAtEveryFrame = () => { if (!flight.isWatched) return; look(); window.requestAnimationFrame(lookAtEveryFrame); };
+    window.requestAnimationFrame(lookAtEveryFrame);
+    flight.end = () => { look(); flight.isWatched = false; d.simulate = simulate; return { fromX: flight.fromX, fromZ: flight.fromZ, furthestMetres: flight.furthestMetres }; };
+  }, id);
+  const endWatchingFlight = (page) => page.evaluate(() => window.watchedFlight.end());
   // The other takes something light into their beam, and walks off with it. In the host's game it goes with them.
   // (What they take is this suite's own: the test weight, put down in both games, in the same place, so that it has
   // the same number in both. One of the station's own light things may be any shape, and roll on where it is thrown.)
   for (const page of [a, b]) await installTogetherTestObjectKinds(page);
-  // (Where it is put: on a straight stretch of floor with nothing in the way at the height it lies at and at the
-  // height it is carried at, for five metres, whichever way that is in this station. The other stands at one end of
-  // it, with the weight a little way in front, and carries it along the stretch.)
+  // (Where it is put: on a straight stretch of level floor with nothing in the way at the height it lies at, the
+  // height it is carried at and the height it flies at, for eight metres, whichever way that is in this station.
+  // The other stands at one end of it, with the weight a little way in front, carries it two and a half metres
+  // along the stretch and throws it on from there: it leaves the beam a little under four metres from where
+  // they stood, with four more to fly before anything can be in its way.)
+  // (The stretch is looked along from where they stand. It used to be five metres looked along from 0.6 m behind
+  // them, and with a wall right behind them that look began inside the wall and saw nothing at all, not even the
+  // wall three metres on. So a dead end of three metres was taken for the stretch: they walked into its far wall,
+  // the weight hung pressed between them and it, and the only way to throw it was back through their own body.)
   const stretch = await b.evaluate(() => {
     const d = window.lastReturnDebug, p = d.player;
     const ways = [[1, 0], [-1, 0], [0, 1], [0, -1], [Math.SQRT1_2, Math.SQRT1_2], [-Math.SQRT1_2, -Math.SQRT1_2], [Math.SQRT1_2, -Math.SQRT1_2], [-Math.SQRT1_2, Math.SQRT1_2]];
@@ -603,8 +624,15 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
             const there = d.findWalkableSpotNear(x + way[0] * 3.5, z + way[1] * 3.5); // (the middle of a tile: within three quarters of a metre of the aim)
             if (!there || Math.hypot(there.x - x - way[0] * 3.5, there.z - z - way[1] * 3.5) > 0.75 || Math.abs(d.getFloorHeightAt(there.x, there.z) - floor) > 0.01) continue;
             // (Along the middle and along either side of it: what they carry hangs a little to one side, in front of the scanner in their right hand.)
-            const isClearAt = (height, aside) => !d.castScannerRay(x - way[0] * 0.6 - way[1] * aside, floor + height, z - way[1] * 0.6 + way[0] * aside, way[0], 0, way[1], 6);
-            if (!isClearAt(0.15, 0) || !isClearAt(0.9, 0) || !isClearAt(0.9, -0.4) || !isClearAt(0.9, 0.4)) continue;
+            const isClearAt = (height, aside) => !d.castScannerRay(x - way[1] * aside, floor + height, z + way[0] * aside, way[0], 0, way[1], 8);
+            if (!isClearAt(0.15, 0) || !isClearAt(0.9, 0) || !isClearAt(0.9, -0.4) || !isClearAt(0.9, 0.4) || !isClearAt(1.2, 0)) continue;
+            // (And floor all the way, at the height they stand on: a look along a stretch goes over a pit and over a step down.)
+            let isLevelFloor = true;
+            for (let metres = 1; metres <= 8 && isLevelFloor; metres++) {
+              const alongX = x + way[0] * metres, alongZ = z + way[1] * metres;
+              isLevelFloor = Math.abs(d.getFloorHeightAt(alongX, alongZ) - floor) < 0.01 && (d.getTileFlagsAt(alongX, alongZ) & d.tileFlagPit) === 0;
+            }
+            if (!isLevelFloor) continue;
             return { x: x + way[0] * 1.2, z: z + way[1] * 1.2, y: floor + 0.2, standX: x, standZ: z, isFound: true };
           }
         }
@@ -664,27 +692,40 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('what the other takes into their beam is theirs to move, and in the host\'s game it goes where they carry it',
     stretch.isFound && lightIds[0] === lightIds[1] && carriedA.heldById === ids.other && carriedA.ownerId === ids.other && Math.hypot(carriedA.x - startedAt.x, carriedA.z - startedAt.z) > 1 &&
     Math.hypot(carriedA.x - carriedB.x, carriedA.y - carriedB.y, carriedA.z - carriedB.z) < 0.5,
-    stretch.isFound ? [lightIds, startedAt, carriedA, carriedB] : ['no straight stretch of five metres with nothing in the way within thirty metres of the other in station ' + lobbySeed, carriedA]);
+    stretch.isFound ? [lightIds, startedAt, carriedA, carriedB] : ['no straight stretch of eight metres of level floor with nothing in the way within thirty metres of the other in station ' + lobbySeed, carriedA]);
   // They throw it. Where it comes to lie is the same place in both games, and it is the host's to move again.
+  // (That it was thrown is read from how far it flew in the game that threw it, not from where it lies: see watchFlight.)
   // (The host comes within earshot first: a knock is put on the screen from twenty metres at most, and where the
-  // checks above left the host depends on the station.)
+  // checks above left the host depends on the station. And not into the way of the throw: the host stands where
+  // the other stood when they took the weight, which is behind them now. A thrown thing that meets somebody's
+  // body stops there. Without a stretch, the host stands somewhere near them.)
   const thrower = await b.evaluate(() => ({ x: window.lastReturnDebug.player.x, z: window.lastReturnDebug.player.z }));
   await a.evaluate((thrower) => {
     const d = window.lastReturnDebug;
+    if (thrower.isOnStretch) { d.teleport(thrower.standX, thrower.standZ, 0); return; }
     for (const way of [[-2.5, 0], [0, -2.5], [2.5, 0], [0, 2.5], [-4, 0], [0, -4]]) {
       const spot = d.findWalkableSpotNear(thrower.x + way[0], thrower.z + way[1]);
       if (spot && Math.hypot(spot.x - thrower.x, spot.z - thrower.z) > 1.2 && Math.hypot(spot.x - thrower.x, spot.z - thrower.z) < 8) { d.teleport(spot.x, spot.z, 0); return; }
     }
-  }, thrower);
+  }, Object.assign({ isOnStretch: stretch.isFound, standX: stretch.standX, standZ: stretch.standZ }, thrower));
   await both(0.3);
   const knocksBefore = await a.evaluate(() => { const d = window.lastReturnDebug; return (d.captionCounts.objectKnock || 0) + (d.captionCounts.objectCrash || 0); });
-  // (Thrown back the way they came, where there was room to carry it: thrown at a wall, it would land at their feet.)
-  await b.evaluate((startedAt) => { const d = window.lastReturnDebug; d.player.yaw = Math.atan2(startedAt.x - d.player.x, -(startedAt.z - d.player.z)); d.player.pitch = 0.2; d.releaseHeldLooseObject(1); }, startedAt);
+  // (Thrown on along the stretch, the way they face and the way it hangs in front of them, as hard as the beam
+  // throws, and level, so that it flies no higher than the stretch was looked along. It used to be thrown
+  // back the way they came, in the same moment as they turned round. It still hung on the far side of them then,
+  // so it left at eight metres a second straight into their own body, was down to less than one a frame later,
+  // and came to lie wherever it slid off them: now more than half a metre from where it had hung, now less.)
+  for (const page of [a, b]) await watchFlight(page, carriedId);
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.player.pitch = 0; d.releaseHeldLooseObject(1); });
   for (let turn = 0; turn < 14; turn++) { await both(0.9); if ((await about(b, carriedId)).isAsleep && (await about(a, carriedId)).isAsleep) break; }
   const landedB = await about(b, carriedId), landedA = await about(a, carriedId);
+  const flownB = await endWatchingFlight(b), flownA = await endWatchingFlight(a);
+  // (Thrown: more than two metres from where it left the beam, at some moment, in the game that moves it. The
+  // stretch gives it four. Only let go of, it falls where it hung. What the host's game saw of it is written
+  // beside it and not asked for: that game is told where the thing is a few times a second, not at every step.)
   check('thrown, it comes to lie in the same place in both games, and is the host\'s again',
     landedA.isAsleep && landedB.isAsleep && Math.hypot(landedA.x - landedB.x, landedA.y - landedB.y, landedA.z - landedB.z) < 0.02 &&
-    landedA.heldById === 0 && landedA.ownerId === ids.host && landedB.ownerId === ids.host && Math.hypot(landedB.x - carriedB.x, landedB.z - carriedB.z) > 0.5, [landedA, landedB]);
+    landedA.heldById === 0 && landedA.ownerId === ids.host && landedB.ownerId === ids.host && flownB.furthestMetres > 2, [landedA, landedB, { flownInTheOthersGame: flownB, flownInTheHostsGame: flownA }]);
   const knocksHeard = await a.evaluate((before) => { const d = window.lastReturnDebug; return (d.captionCounts.objectKnock || 0) + (d.captionCounts.objectCrash || 0) - before; }, knocksBefore);
   check('the host hears it land, though it was the other\'s browser that moved it', knocksHeard >= 1, knocksHeard);
   // Something too heavy to shove is put down in both games, in the same place (so it has the same number in both):
@@ -1016,6 +1057,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
       kitIsThere: kit !== null, kitHeldById: kit ? kit.heldById : -1, pocketedBy: pocketed ? pocketed.playerId : 0, holding: d.getHeldLooseObject() ? d.getHeldLooseObject().id : 0 };
   }, [pocketIds[0], ids.other]);
   await fine(1.5);
+  // Is it so in the host's game and in the other's? What the other does with a pocket is asked of the host, done in
+  // the host's game at once, and done in the other's own game only when the host's word has come back to it. So
+  // each step here waits until it is so in both, and never only in the host's: a moment later the other's game is
+  // told to do the next thing, and until that word is in it still has the pockets it had before. (It was waited for
+  // in the host's game alone. Now and then the other was then told to fall with a pocket their own game did not
+  // know was full yet: nothing fell, the grenade never came back, and the suite stopped on reading where it lay.)
+  const isSoInBothGames = async (lookIn, isSo) => isSo(await lookIn(a)) && isSo(await lookIn(b));
   // Not out of thin air: a thing that is not in their beam does not go into their pocket.
   await b.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'stow', id: id, slot: 0 }), pocketIds[0][0]);
   await fine(0.8);
@@ -1026,19 +1074,20 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
   await fine(0.5);
   await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.pocketedBy === ids.other)); turn++) await fine(0.2);
   const pocketStowed = { host: await pocketsIn(a), other: await pocketsIn(b) };
   // Out again, by its key.
   await b.evaluate(() => { window.lastReturnDebug.input.wantsPocket = 0; });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.grenade !== null)); turn++) await fine(0.2);
   await fine(0.6);
   const pocketTakenOut = { host: await pocketsIn(a), other: await pocketsIn(b) };
   // In again, and then they fall: what was in their pockets lies there, in both games.
   await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.pocketedBy === ids.other)); turn++) await fine(0.2);
   await b.evaluate(() => { window.lastReturnDebug.spillOwnPockets(); });
-  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
-  for (let turn = 0; turn < 16 && !((await pocketsIn(a)).grenade.isAsleep && (await pocketsIn(b)).grenade.isAsleep); turn++) await fine(0.4);
+  for (let turn = 0; turn < 20 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.grenade !== null)); turn++) await fine(0.2);
+  // (Should it never come back, the check below says so: there is nothing to wait for here then, and nothing to read.)
+  for (let turn = 0; turn < 16 && !(await isSoInBothGames(pocketsIn, (pockets) => pockets.grenade !== null && pockets.grenade.isAsleep)); turn++) await fine(0.4);
   const pocketSpilled = { host: await pocketsIn(a), other: await pocketsIn(b), fellAt: await b.evaluate(() => [window.lastReturnDebug.player.x, window.lastReturnDebug.player.z]) };
   check('a thing that is not in the other\'s beam does not go into their pocket for the asking',
     pocketIds[0][0] > 0 && pocketIds[0].join() === pocketIds[1].join() && pocketNotHeld.host.grenade !== null && pocketNotHeld.other.grenade !== null && pocketNotHeld.host.pocketedBy === 0 && pocketNotHeld.other.pocketedBy === 0, pocketNotHeld);
@@ -1081,7 +1130,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await fine(0.5);
   // Into their pocket.
   await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
-  for (let turn = 0; turn < 25 && (await spoolsIn(a)).firstPocketedBy !== ids.other; turn++) await fine(0.2);
+  for (let turn = 0; turn < 25 && !(await isSoInBothGames(spoolsIn, (spools) => spools.firstPocketedBy === ids.other)); turn++) await fine(0.2);
   const spoolPocketed = { host: await spoolsIn(a), other: await spoolsIn(b) };
   // The host presses the lift terminal: there is no spool on the host, and none lies by it. Nothing is loaded.
   await a.evaluate(() => { const d = window.lastReturnDebug; d.clearMessages(); d.askToAct({ what: 'use', objectId: 1 }); });
