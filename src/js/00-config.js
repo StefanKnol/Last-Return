@@ -276,6 +276,7 @@ const TUNING = {
   looseHoldSlipDegrees: 22,         // knocked this far round against something, the beam gives and holds it as the knock left it
   looseHoldFastestSpeed: 7,         // it never chases your hands faster than this (m/s), however far behind it is
   looseHoldSagPerKilogram: 0.002,   // metres it hangs below the line the scanner points along, per kilogram
+  looseHoldClearance: 0.02,         // the beam holds a thing no nearer the floor or the ceiling than this (metres): it does not push it into them
   looseHoldShortestDistance: 0.12,  // pressed against something ahead, the beam holds a thing as near as this (from the lens to its nearest side); then it can give no more
   looseHoldGiveSlack: 0.04,         // the thing has to be this far short of where the beam wants it before the beam gives
   looseHoldLetOutSpeed: 1.6,        // how fast the beam lets it out again when there is room (m/s)

@@ -162,9 +162,12 @@ const labSource = String(function () {
     const d = window.lastReturnDebug, lab = window.lab, s = d.surveyor, result = {};
     const stretch = lab.station(8);
     result.notice = d.tuning.surveyorNoticeSeconds;
-    // In its light, eight metres off, nothing in between.
+    // In its light, eight metres off, nothing in between. A glance: under half as long as it takes to be made out,
+    // whatever that number is set to. (Time passes here in steps of a thirtieth of a second.)
     lab.faceToFace(stretch);
-    d.simulate(0.25);
+    const glanceSteps = Math.max(1, Math.floor(result.notice * 0.4 * 30));
+    result.glanceSeconds = glanceSteps / 30;
+    for (let step = 0; step < glanceSteps; step++) d.simulate(1 / 60);
     result.aGlance = { state: lab.state(), seenSeconds: lab.round(s.seenSeconds) };
     result.secondsUntilSeen = lab.until(() => s.state === 2, 12);
     result.onceSeen = { state: lab.state(), isAfterYou: s.quarry === d.player, captions: d.captionCounts.surveyorSees, litFrames: s.statistics.litFrames, timesSeen: s.statistics.timesSeen };
@@ -179,18 +182,19 @@ const labSource = String(function () {
     // Behind its back, however near: it has no eyes there.
     d.simulate(4);
     result.behindIt = { state: lab.state(), timesSeen: s.statistics.timesSeen };
-    // Too far off to be made out: further than it can see.
+    // Too far off to be made out: further than it can see. (And as far as it sees again afterwards, whatever that is set to.)
+    const seesAsFarAs = d.tuning.surveyorSightMetres;
     d.tuning.surveyorSightMetres = 5;
     lab.station(8); lab.faceToFace(stretch);
     d.simulate(6);
     result.tooFar = { state: lab.state(), timesSeen: s.statistics.timesSeen, metres: lab.round(lab.metresFromYou()), sees: 5 };
+    d.tuning.surveyorSightMetres = seesAsFarAs;
     return result;
   });
-  await inGame(() => { window.lastReturnDebug.tuning.surveyorSightMetres = 24; });
-  check('a glance is not enough: a quarter of a second in its light and it has seen nobody yet',
-    seen.aGlance.state === 'looking round' && seen.aGlance.seenSeconds < seen.notice, seen.aGlance);
+  check('a glance is not enough: in its light for under half as long as it takes to be made out, it has seen nobody yet',
+    seen.aGlance.state === 'looking round' && seen.aGlance.seenSeconds < seen.notice, [seen.aGlance, seen.glanceSeconds, seen.notice]);
   check('standing in its light with nothing in between, it makes you out: not sooner than the number says, and then it is after you, with a caption',
-    seen.secondsUntilSeen >= seen.notice - 0.11 && seen.secondsUntilSeen > 0 && seen.secondsUntilSeen < 12 && seen.onceSeen.state === 'after somebody' && seen.onceSeen.isAfterYou &&
+    seen.glanceSeconds + seen.secondsUntilSeen >= seen.notice - 0.11 && seen.secondsUntilSeen > 0 && seen.secondsUntilSeen < 12 && seen.onceSeen.state === 'after somebody' && seen.onceSeen.isAfterYou &&
     seen.onceSeen.captions >= 1 && seen.onceSeen.timesSeen === 1, [seen.secondsUntilSeen, seen.onceSeen]);
   check('out of its light before that, the count runs down again and it has seen nobody; behind its back it sees nobody however near',
     seen.glanceAndAway.glimpsed > 0 && seen.glanceAndAway.seenSecondsAfter === 0 && seen.glanceAndAway.timesSeen === 0 && seen.behindIt.timesSeen === 0 && seen.behindIt.state === 'looking round' &&
@@ -329,10 +333,12 @@ const labSource = String(function () {
     d.setScanHeld(true);
     result.secondsUntilDazzled = lab.until(() => s.state === 5, 6);
     d.setScanHeld(false);
-    const pulsesThen = s.statistics.pulses;
-    result.dazzled = { state: lab.state(), lit: s.isLit, captions: d.captionCounts.surveyorDazzled, armRaise: lab.round(s.figure.pose.armRaise), timesDazzled: s.statistics.timesDazzled };
+    // (Where it stands and whom it has seen by now: with a short enough surveyorNoticeSeconds it has made you out
+    // and started for you before the light in its eye stops it. What is asked is what it does once dazzled.)
+    const pulsesThen = s.statistics.pulses, stoodAt = { x: s.figure.x, z: s.figure.z }, seenByThen = s.statistics.timesSeen;
+    result.dazzled = { state: lab.state(), lit: s.isLit, captions: d.captionCounts.surveyorDazzled, armRaise: lab.round(s.figure.pose.armRaise), timesDazzled: s.statistics.timesDazzled, hadSeenYou: seenByThen > 0 };
     d.simulate(1.5);
-    result.whileDazzled = { pulses: s.statistics.pulses - pulsesThen, state: lab.state(), timesSeen: s.statistics.timesSeen, moved: lab.round(Math.hypot(s.figure.x - stretch.it.x, s.figure.z - stretch.it.z)) };
+    result.whileDazzled = { pulses: s.statistics.pulses - pulsesThen, state: lab.state(), timesSeen: s.statistics.timesSeen - seenByThen, moved: lab.round(Math.hypot(s.figure.x - stoodAt.x, s.figure.z - stoodAt.z)) };
     result.secondsDazzled = 1.5 + lab.until(() => s.state !== 5, 8);
     result.afterwards = { state: lab.state(), lit: s.isLit || s.state !== 5, immune: lab.round(s.dazzleImmuneSeconds) };
     // More light in its eye at once: it cannot be dazzled again yet.
@@ -345,10 +351,10 @@ const labSource = String(function () {
     d.setDebugOption('invulnerable', false); d.setDebugOption('unlimitedScanner', false);
     return result;
   });
-  check('your beam held on its head dazzles it, after about the half second the number says: it stands with its arms up, its light goes out, with a caption',
+  check('your beam held on its head dazzles it, after about the half second the number says: it stands where it is with its arms up, its light goes out, with a caption',
     dazzled.secondsUntilDazzled >= dazzled.numbers.after - 0.11 && dazzled.secondsUntilDazzled < 4 && dazzled.dazzled.state === 'dazzled' && !dazzled.dazzled.lit && dazzled.dazzled.captions >= 1 &&
     dazzled.whileDazzled.pulses === 0 && dazzled.whileDazzled.state === 'dazzled' && dazzled.whileDazzled.moved < 0.05, dazzled);
-  check('dazzled, it sees nobody; it lasts as long as the number says, and then its light is on again',
+  check('dazzled, it sees nobody it had not seen already; it lasts as long as the number says, and then its light is on again',
     dazzled.whileDazzled.timesSeen === 0 && Math.abs(dazzled.secondsDazzled - dazzled.numbers.lasts) < 0.4 && dazzled.afterwards.state !== 'dazzled' && dazzled.afterwards.immune > 0, [dazzled.secondsDazzled, dazzled.afterwards]);
   check('it cannot be dazzled again at once, however much light is in its eye; when that time is over, it can',
     dazzled.again.timesDazzled === 1 && dazzled.again.state !== 'dazzled' && dazzled.later.timesDazzled === 2 && dazzled.later.state === 'dazzled', [dazzled.again, dazzled.later]);

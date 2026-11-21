@@ -2035,10 +2035,30 @@ function canSprintWhileCarrying() {
 }
 
 
+// How far a thing reaches below and above its own middle, as it is turned now: by the balls it touches the
+// station with. Fills `into` with { below, above }.
+function measureLooseObjectHeight(object, into) {
+  const shell = object.prepared.shell, matrix = object.matrix;
+  let below = 0, above = 0;
+  for (let at = 0; at < shell.length; at += 4) {
+    const y = matrix[3] * shell[at] + matrix[4] * shell[at + 1] + matrix[5] * shell[at + 2];
+    if (shell[at + 3] - y > below) below = shell[at + 3] - y;
+    if (shell[at + 3] + y > above) above = shell[at + 3] + y;
+  }
+  into.below = below; into.above = above;
+  return into;
+}
+const looseHeightScratch = { below: 0, above: 0 };
+
 // Where the carried object wants to be: straight out from the scanner's lens, along the way the scanner
 // points, far enough to be clear of it, and a little lower for its weight. The scanner is in your right hand,
 // so that is to the right of and below the middle of what you see. It goes wherever you point: at the floor to
 // set it down, over your head if you look up.
+//
+// But not into the floor, and not into the ceiling. Where the beam points lower or higher than the thing has
+// room for, it is held as low or as high as it fits, a finger's width clear (TUNING.looseHoldClearance). A jar
+// never notices. Something tall does: a tripod a metre high used to be pushed into the floor by a look
+// downwards, and knocked out of the beam by it.
 function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   const held = looseState.held;
   if (!held) return;
@@ -2048,6 +2068,14 @@ function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   looseState.holdTargetX = scanEmitter.x + scannerBasis.forwardX * distance;
   looseState.holdTargetY = scanEmitter.y + scannerBasis.forwardY * distance - getHeldLooseMass() * TUNING.looseHoldSagPerKilogram;
   looseState.holdTargetZ = scanEmitter.z + scannerBasis.forwardZ * distance;
+  const tileX = Math.floor(looseState.holdTargetX), tileZ = Math.floor(looseState.holdTargetZ);
+  if (!isTileOpenAt(tileX, tileZ) || (tileFlags[tileIndexAt(tileX, tileZ)] & TILE_FLAG_PIT)) return; // (a wall, or the shaft: nothing to keep clear of)
+  const height = measureLooseObjectHeight(held, looseHeightScratch);
+  const lowest = tileFloorHeight[tileIndexAt(tileX, tileZ)] + height.below + TUNING.looseHoldClearance;
+  const highest = tileCeilingHeight[tileIndexAt(tileX, tileZ)] - height.above - TUNING.looseHoldClearance;
+  if (highest < lowest) return; // taller than the room where it is wanted: the room will have to stop it
+  if (looseState.holdTargetY < lowest) looseState.holdTargetY = lowest;
+  else if (looseState.holdTargetY > highest) looseState.holdTargetY = highest;
 }
 
 // `isByButton`: it is held for as long as the right mouse button is, and dropped when that is let go.
