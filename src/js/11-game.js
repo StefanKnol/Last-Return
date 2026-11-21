@@ -117,7 +117,7 @@ function fireGameEvent(eventName) {
   for (const cue of DISPATCH_CUES) {
     if (cue.when !== eventName) continue;
     if (cue.onlyWithHollow && !game.difficulty.hollowEnabled) continue;
-    if (cue.ifItWasAsleep && hollow.isActive) continue;
+    if (cue.ifItWasAsleep && CREATURE_ARRIVALS.some(function (creature) { return creature.isHere(); })) continue; // (something is about already: the mains wakes nothing)
     if ((cue.ifCarLeaves && game.isCarStaying) || (cue.ifCarStays && !game.isCarStaying)) continue;
     // (Two of the recordings count the spools, which is only true where there are three and they are what you
     // came for. On any other work order the station counts as one where that is not so.)
@@ -743,7 +743,7 @@ function updateDying(dt) {
   figure.pose.fingerSplay = 1;
   figure.pose.headTilt = (Math.random() - 0.5) * 1.1;
   updateFigureCapsules(figure);
-  emitFigureRevealPoints(figure, Math.floor(26000 * dt), sequence.kind === 'hollow' ? SURFACE_HOLLOW : SURFACE_STILL, 3);
+  emitFigureRevealPoints(figure, Math.floor(26000 * dt), sequence.kind === 'hollow' ? SURFACE_HOLLOW : (sequence.kind === 'surveyor' ? SURFACE_SURVEYOR_LIGHT : SURFACE_STILL), 3);
   game.interference = 0.3 + Math.min(0.5, sequence.timer * 0.5);
   game.danger = Math.min(1, sequence.timer * 1.5);
   if (sequence.timer > 1.25) game.fade = Math.max(0, 1 - (sequence.timer - 1.25) * 5);
@@ -1367,6 +1367,10 @@ function startApplication() {
     roamingWaypoints: roamingWaypoints,
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
     hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getNearestEyeDistanceTo: getNearestEyeDistanceTo, describeIfOutOfReach: describeIfOutOfReach, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
+    hasClearWalkingLine: hasClearWalkingLine,
+    clearAllPoints: clearAllPoints, castRayAgainstWorld: castRayAgainstWorld, getMapImageData: function () { return interfaceState.mapImageData; },
+    surveyor: surveyor, surveyorStates: SURVEYOR_STATE_NAMES, activateSurveyor: activateSurveyor, removeSurveyor: removeSurveyor, dazzleSurveyor: dazzleSurveyor,
+    getSurveyorLens: getSurveyorLens, isCreatureInCrawlspace: isCreatureInCrawlspace, beginCreatureCrawl: beginCreatureCrawl, surfaceSurveyorLight: SURFACE_SURVEYOR_LIGHT,
     looters: looters, looterStates: LOOTER_STATE_NAMES, frightenLooter: frightenLooter, chooseLooterOuting: chooseLooterOuting, isLootable: isLootable,
     creatureKinds: CREATURE_KINDS, creatureWays: CREATURE_WAYS, createCreatureWay: createCreatureWay, createCreatureLegs: createCreatureLegs,
     computeWayDistanceField: computeWayDistanceField, refreshCreatureDoorBlocks: refreshCreatureDoorBlocks, moveCreatureToward: moveCreatureToward,

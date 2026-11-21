@@ -75,6 +75,9 @@ const SOUND_LEVELS = {
   looterStep: 1,          // a looter's small feet
   looterChitter: 1,       // it has got hold of something, or cannot reach it
   looterSqueal: 1,        // it is frightened
+  surveyorTick: 1,        // the Surveyor's light ticking as it scans
+  surveyorStep: 1,        // its long steps
+  surveyorVoice: 1,       // the chirp when it has seen you or runs off, the whine when it is dazzled
   hurt: 1,                // something has hit you
   firstAid: 1,            // a first aid kit, used
   hollowCeilingStep: 1,   // crawling above the ceiling, on its way round a locked door
@@ -1519,6 +1522,40 @@ function playLooterStep(x, z, isInVent) {
   if (!panner) return;
   playNoiseBurst({ duration: 0.035, filterType: 'bandpass', frequency: 1700 + Math.random() * 500, resonance: 2, gain: 0.5 * SOUND_LEVELS.looterStep, destination: panner });
   if (isInVent) playResonantNoise({ frequency: 620 + Math.random() * 160, resonance: 22, duration: 0.16, gain: 0.5 * SOUND_LEVELS.looterStep, attack: 0.002, destination: panner });
+}
+
+// ---- the Surveyor (08-surveyor.js) ----
+
+// Its light ticks as it scans, like a scanner that somebody else is holding: dry, high, from its head.
+// `isHunting`: sharper, and it comes much faster (the caller says how often).
+function playSurveyorTick(x, z, isHunting) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 1.8, z);
+  if (!panner) return;
+  playNoiseBurst({ duration: 0.018, filterType: 'bandpass', frequency: (isHunting ? 5200 : 3900) + Math.random() * 600, resonance: 6, gain: (isHunting ? 0.42 : 0.3) * SOUND_LEVELS.surveyorTick, destination: panner });
+}
+
+// One of its long steps: light for its height, a soft tap. Running, harder.
+function playSurveyorStep(x, z, isRunning) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 0.1, z);
+  if (!panner) return;
+  playNoiseBurst({ duration: isRunning ? 0.06 : 0.045, filterType: 'lowpass', frequency: isRunning ? 520 : 380, gain: (isRunning ? 0.55 : 0.34) * SOUND_LEVELS.surveyorStep, useBrownNoise: true, destination: panner });
+}
+
+// Its voice: two notes. `isRising`: it has seen somebody. Falling: it has struck, and is off.
+function playSurveyorChirp(x, z, isRising) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 1.8, z);
+  if (!panner) return;
+  const first = isRising ? 1500 : 2300, second = isRising ? 2300 : 1300;
+  playTone({ waveform: 'square', frequency: first, duration: 0.09, gain: 0.16 * SOUND_LEVELS.surveyorVoice, attack: 0.004, destination: panner });
+  playTone({ waveform: 'square', frequency: second, frequencyEnd: second * (isRising ? 1.08 : 0.9), duration: 0.16, gain: 0.18 * SOUND_LEVELS.surveyorVoice, attack: 0.004, delay: 0.1, destination: panner });
+}
+
+// Light in its eye: a whine that climbs and breaks off.
+function playSurveyorWhine(x, z) {
+  const panner = createTemporaryPanner(x, getFloorHeightAt(x, z) + 1.8, z);
+  if (!panner) return;
+  playTone({ waveform: 'sawtooth', frequency: 900, frequencyEnd: 3400, duration: 0.7, gain: 0.14 * SOUND_LEVELS.surveyorVoice, attack: 0.03, destination: panner });
+  playResonantNoise({ frequency: 2600, frequencyEnd: 4200, resonance: 30, duration: 0.7, gain: 0.2 * SOUND_LEVELS.surveyorVoice, attack: 0.05, destination: panner });
 }
 
 // Its voice: a run of short high notes. `isCross`: falling, when it cannot have what it wants; otherwise rising.

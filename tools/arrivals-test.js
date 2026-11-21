@@ -29,12 +29,17 @@ function check(description, condition, detail) {
       }
       return Object.keys(seen).join(' | ');
     };
+    // Which of them comes first is drawn for every descent. These checks say: the Hollow first, unless a check says otherwise.
+    d.debugState.arrivalOrder = ['hollow', 'surveyor'];
     // A new descent into the station that is loaded, out of the lift, with nothing able to catch you.
-    lab.descend = function () {
+    // The checks that are about the Hollow's own wait leave the Surveyor out of the descent (`withTheOthers`
+    // false): the ones about the two of them, at the end, do not.
+    lab.descend = function (withTheOthers) {
       d.startOver();
       d.clearMessages();
       d.setDebugOption('invulnerable', true);
       d.game.flags.hasLeftLift = true;
+      if (!withTheOthers && d.arrivals.waits.surveyor) d.arrivals.waits.surveyor.place = -1;
       return d.arrivals.waits.hollow;
     };
     // A generated station of this size whose Generator 2 has fuel (so that it can simply be started).
@@ -286,6 +291,118 @@ function check(description, condition, detail) {
   check('there are hatches all through a station, not only at its locked doors: at least one to every five rooms, in every station, and more in a bigger one',
     hatches.perRoom[0] >= 0.2 && hatches.sizes.massive.fewest > hatches.sizes.small.most, [hatches.sizes, hatches.perRoom[0], hatches.perRoom[hatches.perRoom.length - 1]]);
   check('Kessel-9 has them too, one of them in the part before the powered doors, and its routes check out', hatches.classic.hatches >= 6 && hatches.classic.inTheStartPart >= 1 && hatches.classic.problems.length === 0, hatches.classic);
+
+  // --- more than one thing arrives: one first, either one, and the others later ---
+  const roster = await inGame(async () => {
+    const d = window.lastReturnDebug, lab = window.lab, result = {};
+    result.seed = await lab.findStation('medium', 1);
+    if (!result.seed) return result;
+    d.game.difficulty = d.difficultyPresets.standard;
+    const here = () => ({ hollow: d.hollow.isActive, surveyor: d.surveyor.isActive });
+    const metresFromTheShaft = (figure) => Math.round(Math.hypot(figure.x - d.hollowSpawn.x, figure.z - d.hollowSpawn.z) * 100) / 100;
+    result.threatLevels = Object.keys(d.difficultyPresets).map((key) => [key, d.difficultyPresets[key].hollowEnabled, d.difficultyPresets[key].surveyorEnabled]);
+    result.nextRange = d.tuning.arrivalNextQuietSeconds; result.firstRange = d.tuning.hollowArrivalQuietSeconds;
+
+    // The order is drawn afresh for every descent, and both come first some of the time.
+    d.debugState.arrivalOrder = null;
+    const firsts = { hollow: 0, surveyor: 0 }, wrong = [];
+    for (let descent = 0; descent < 40; descent++) {
+      d.startOver();
+      const order = d.arrivals.order.slice();
+      if (order.slice().sort().join() !== 'hollow,surveyor') wrong.push(order.join());
+      else firsts[order[0]]++;
+      const places = [d.arrivals.waits.hollow.place, d.arrivals.waits.surveyor.place];
+      if (places[0] !== order.indexOf('hollow') || places[1] !== order.indexOf('surveyor')) wrong.push('places ' + places.join());
+    }
+    result.drawn = { firsts: firsts, wrong: wrong };
+    // Kessel-9, and a threat level without it: the Hollow alone.
+    d.loadStation('classic', 0); d.startOver();
+    result.classicOrder = d.arrivals.order.join();
+    d.loadStation('generated', result.seed, 'medium', 'mixed', 'one');
+    d.game.difficulty = d.difficultyPresets.survey; d.startOver();
+    result.surveyOnlyOrder = d.arrivals.order.join();
+    d.game.difficulty = d.difficultyPresets.standard;
+
+    // The Surveyor first. Its wait runs out; the Hollow's has not begun.
+    d.debugState.arrivalOrder = ['surveyor', 'hollow'];
+    lab.descend(true);
+    let first = d.arrivals.waits.surveyor, second = d.arrivals.waits.hollow;
+    result.surveyorFirst = { order: d.arrivals.order.join(), firstWaits: Math.round(first.quietSeconds), secondWaits: Math.round(second.quietSeconds),
+      untilFirst: Math.round(d.getSecondsUntilArrival('surveyor')), untilSecondBeforeItsTurn: Math.round(d.getSecondsUntilArrival('hollow')) };
+    first.quietSeconds = 5;
+    d.simulate(4);
+    result.surveyorFirst.before = { here: here(), secondGoneBy: second.goneBy };
+    d.simulate(1.5);
+    result.surveyorFirst.arrived = { here: here(), cause: first.cause, metresFromTheShaft: metresFromTheShaft(d.surveyor.figure), secondGoneBy: Math.round(second.goneBy * 10) / 10 };
+    result.surveyorFirst.said = lab.playAndRead(6);
+    // Now the Hollow's own wait runs. A noise takes time off it; when it is over the Hollow comes too, and Dispatch counts.
+    const goneByBefore = second.goneBy;
+    d.emitNoise(d.player.x, d.player.z, d.tuning.noiseRadiusSweep);
+    result.surveyorFirst.noiseTookOffTheSecond = Math.round((second.goneBy - goneByBefore) * 100) / 100;
+    result.surveyorFirst.noiseShouldTake = Math.round((d.tuning.noiseRadiusSweep - d.tuning.arrivalQuietNoiseRadius) * d.tuning.arrivalSecondsPerNoiseMetre * 100) / 100;
+    second.quietSeconds = second.goneBy + 3;
+    d.simulate(2);
+    result.surveyorFirst.secondNotYet = here();
+    d.simulate(1.5);
+    result.surveyorFirst.both = { here: here(), cause: second.cause, hollowMetresFromTheShaft: metresFromTheShaft(d.hollow.figure) };
+    result.surveyorFirst.saidThen = lab.playAndRead(6);
+
+    // The Hollow first, the Surveyor after it.
+    d.debugState.arrivalOrder = ['hollow', 'surveyor'];
+    lab.descend(true);
+    first = d.arrivals.waits.hollow; second = d.arrivals.waits.surveyor;
+    first.quietSeconds = 3;
+    d.simulate(4);
+    result.hollowFirst = { order: d.arrivals.order.join(), afterTheFirst: here() };
+    second.quietSeconds = second.goneBy + 2;
+    d.simulate(3);
+    result.hollowFirst.both = here();
+
+    // The mains comes on with nothing about yet: the first in the order wakes, and only that one.
+    d.debugState.arrivalOrder = ['surveyor', 'hollow'];
+    lab.descend(true);
+    d.use(2);
+    d.simulate(d.tuning.hollowWakeDelaySeconds + 1);
+    result.mains = { powerOn: d.game.flags.powerOn, here: here(), cause: d.arrivals.waits.surveyor.cause, hollowWaits: Math.round(d.getSecondsUntilArrival('hollow')) };
+    // ... and with one about already, the mains wakes nothing more.
+    lab.descend(true);
+    d.arrivals.waits.surveyor.quietSeconds = 1;
+    d.simulate(2);
+    const hereBeforeTheMains = here();
+    d.arrivals.waits.hollow.quietSeconds = 9999;
+    d.use(2);
+    d.simulate(d.tuning.hollowWakeDelaySeconds + 2);
+    result.mainsAfter = { before: hereBeforeTheMains, after: here(), powerOn: d.game.flags.powerOn };
+
+    d.debugState.arrivalOrder = ['hollow', 'surveyor'];
+    d.surveyor.isActive = false; d.hollow.isActive = false;
+    return result;
+  });
+  check('there is a generated station to try the two of them in', roster.seed > 0, roster.seed);
+  if (roster.seed > 0) {
+    check('the Surveyor is one of the things that arrive on Standard and Nightmare, not on Survey only; the wait of one that comes second is a number of its own',
+      roster.threatLevels.join(' ') === 'survey,false,false standard,true,true nightmare,true,true' && Array.isArray(roster.nextRange) && roster.nextRange[0] > 0 && roster.nextRange[1] > roster.nextRange[0], [roster.threatLevels, roster.nextRange]);
+    check('which of them comes first is drawn afresh for every descent: in forty descents each is first some of the time, and both are always in the order, once',
+      roster.drawn.wrong.length === 0 && roster.drawn.firsts.hollow >= 5 && roster.drawn.firsts.surveyor >= 5 && roster.drawn.firsts.hollow + roster.drawn.firsts.surveyor === 40, roster.drawn);
+    check('Kessel-9 has the Hollow alone, and so has a threat level without the Surveyor', roster.classicOrder === 'hollow' && roster.surveyOnlyOrder === '', [roster.classicOrder, roster.surveyOnlyOrder]);
+    check('with the Surveyor first: its wait is the first wait, and the Hollow\'s does not run until the Surveyor has come',
+      roster.surveyorFirst.order === 'surveyor,hollow' && roster.surveyorFirst.firstWaits >= roster.firstRange[0] && roster.surveyorFirst.firstWaits <= roster.firstRange[1] &&
+      roster.surveyorFirst.secondWaits >= roster.nextRange[0] && roster.surveyorFirst.secondWaits <= roster.nextRange[1] && roster.surveyorFirst.untilFirst > 0 && roster.surveyorFirst.untilSecondBeforeItsTurn > 0 &&
+      !roster.surveyorFirst.before.here.surveyor && !roster.surveyorFirst.before.here.hollow && roster.surveyorFirst.before.secondGoneBy === 0, roster.surveyorFirst);
+    check('it arrives alone, at the shaft, when its wait is over, and Dispatch says the shaft sensor has tripped',
+      roster.surveyorFirst.arrived.here.surveyor && !roster.surveyorFirst.arrived.here.hollow && roster.surveyorFirst.arrived.cause === 'time' && roster.surveyorFirst.arrived.metresFromTheShaft < 3 &&
+      /motion sensor in the shaft chamber just tripped/.test(roster.surveyorFirst.said) && !/shaft sensor again/.test(roster.surveyorFirst.said), roster.surveyorFirst);
+    check('from then the Hollow\'s own wait runs, sooner for every noise; when it is over the Hollow comes too, and Dispatch says there are two',
+      roster.surveyorFirst.arrived.secondGoneBy > 0 && roster.surveyorFirst.arrived.secondGoneBy < 2 && Math.abs(roster.surveyorFirst.noiseTookOffTheSecond - roster.surveyorFirst.noiseShouldTake) < 0.02 &&
+      roster.surveyorFirst.noiseShouldTake > 0 && !roster.surveyorFirst.secondNotYet.hollow && roster.surveyorFirst.both.here.hollow && roster.surveyorFirst.both.here.surveyor &&
+      roster.surveyorFirst.both.hollowMetresFromTheShaft < 3 && /The shaft sensor again/.test(roster.surveyorFirst.saidThen), roster.surveyorFirst);
+    check('the other way round the Hollow comes first and the Surveyor after it',
+      roster.hollowFirst.order === 'hollow,surveyor' && roster.hollowFirst.afterTheFirst.hollow && !roster.hollowFirst.afterTheFirst.surveyor && roster.hollowFirst.both.hollow && roster.hollowFirst.both.surveyor, roster.hollowFirst);
+    check('Generator 2 started with nothing about wakes the first in the order and only that one: the other keeps to its wait',
+      roster.mains.powerOn && roster.mains.here.surveyor && !roster.mains.here.hollow && roster.mains.cause === 'mains' && roster.mains.hollowWaits > 0, roster.mains);
+    check('started with one of them about already, it wakes nothing more',
+      roster.mainsAfter.before.surveyor && !roster.mainsAfter.before.hollow && roster.mainsAfter.powerOn && roster.mainsAfter.after.surveyor && !roster.mainsAfter.after.hollow, roster.mainsAfter);
+  }
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();
