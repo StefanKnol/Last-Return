@@ -928,6 +928,61 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; if (tripod) d.removeLooseObject(tripod); }, tripodIds[0]);
   await fine(0.3);
 
+  // ---- Pockets: what is in whose pockets is the same in both games ----
+  const pocketIds = [];
+  for (const page of [a, b]) pocketIds.push(await page.evaluate((lane) => {
+    const d = window.lastReturnDebug;
+    if (!lane) return [0, 0];
+    return [d.createLooseObject('scanGrenade', lane.x + lane.wayX * 1.7, lane.floor + 0.1, lane.z + lane.wayZ * 1.7, 0).id,
+      d.createLooseObject('firstAidKit', lane.x + lane.wayX * 3.2, lane.floor + 0.1, lane.z + lane.wayZ * 3.2, 0).id];
+  }, lane));
+  const pocketsIn = (page) => page.evaluate(([ids, otherId]) => {
+    const d = window.lastReturnDebug, find = (id) => d.looseObjects.filter((object) => object.id === id)[0] || null, round = (value) => Math.round(value * 100) / 100;
+    const grenade = find(ids[0]), kit = find(ids[1]), pocketed = d.findPocketedObject(ids[0]);
+    return { theirs: d.getPocketsOf(otherId).map((object) => object ? object.id : 0), own: d.getOwnPockets().map((object) => object ? object.id : 0),
+      grenade: grenade ? { heldById: grenade.heldById, ownerId: grenade.ownerId, x: round(grenade.x), y: round(grenade.y), z: round(grenade.z), isAsleep: grenade.isAsleep } : null,
+      kitIsThere: kit !== null, kitHeldById: kit ? kit.heldById : -1, pocketedBy: pocketed ? pocketed.playerId : 0, holding: d.getHeldLooseObject() ? d.getHeldLooseObject().id : 0 };
+  }, [pocketIds[0], ids.other]);
+  await fine(1.5);
+  // Not out of thin air: a thing that is not in their beam does not go into their pocket.
+  await b.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'stow', id: id, slot: 0 }), pocketIds[0][0]);
+  await fine(0.8);
+  const pocketNotHeld = { host: await pocketsIn(a), other: await pocketsIn(b) };
+  // The other takes the grenade and puts it in a pocket.
+  await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.5; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+  await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, pocketIds[0][0]);
+  await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
+  await fine(0.5);
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  const pocketStowed = { host: await pocketsIn(a), other: await pocketsIn(b) };
+  // Out again, by its key.
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsPocket = 0; });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
+  await fine(0.6);
+  const pocketTakenOut = { host: await pocketsIn(a), other: await pocketsIn(b) };
+  // In again, and then they fall: what was in their pockets lies there, in both games.
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  await b.evaluate(() => { window.lastReturnDebug.spillOwnPockets(); });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
+  for (let turn = 0; turn < 16 && !((await pocketsIn(a)).grenade.isAsleep && (await pocketsIn(b)).grenade.isAsleep); turn++) await fine(0.4);
+  const pocketSpilled = { host: await pocketsIn(a), other: await pocketsIn(b), fellAt: await b.evaluate(() => [window.lastReturnDebug.player.x, window.lastReturnDebug.player.z]) };
+  check('a thing that is not in the other\'s beam does not go into their pocket for the asking',
+    pocketIds[0][0] > 0 && pocketIds[0].join() === pocketIds[1].join() && pocketNotHeld.host.grenade !== null && pocketNotHeld.other.grenade !== null && pocketNotHeld.host.pocketedBy === 0 && pocketNotHeld.other.pocketedBy === 0, pocketNotHeld);
+  check('the other puts a scan grenade from their beam into a pocket: it is out of the station in both games, and in their pocket in both',
+    pocketStowed.host.grenade === null && pocketStowed.other.grenade === null && pocketStowed.host.pocketedBy === ids.other && pocketStowed.other.pocketedBy === ids.other &&
+    pocketStowed.host.theirs[0] === pocketIds[0][0] && pocketStowed.other.own[0] === pocketIds[0][0] && pocketStowed.other.holding === 0 && pocketStowed.host.own.every((id) => id === 0), pocketStowed);
+  check('taken out again, it is in the other\'s beam in both games, and in nobody\'s pocket',
+    pocketTakenOut.host.grenade !== null && pocketTakenOut.host.grenade.heldById === ids.other && pocketTakenOut.other.holding === pocketIds[0][0] && pocketTakenOut.host.pocketedBy === 0 && pocketTakenOut.other.pocketedBy === 0 &&
+    Math.hypot(pocketTakenOut.host.grenade.x - pocketTakenOut.other.grenade.x, pocketTakenOut.host.grenade.z - pocketTakenOut.other.grenade.z) < 0.6, pocketTakenOut);
+  check('when the other falls, what was in their pockets lies where they fell, in the same place in both games, and is the host\'s to move',
+    pocketSpilled.host.grenade !== null && pocketSpilled.other.grenade !== null && pocketSpilled.host.pocketedBy === 0 && pocketSpilled.other.own.every((id) => id === 0) && pocketSpilled.host.theirs.every((id) => id === 0) &&
+    Math.hypot(pocketSpilled.host.grenade.x - pocketSpilled.fellAt[0], pocketSpilled.host.grenade.z - pocketSpilled.fellAt[1]) < 1.5 && pocketSpilled.host.grenade.heldById === 0 &&
+    Math.hypot(pocketSpilled.host.grenade.x - pocketSpilled.other.grenade.x, pocketSpilled.host.grenade.y - pocketSpilled.other.grenade.y, pocketSpilled.host.grenade.z - pocketSpilled.other.grenade.z) < 0.1 &&
+    pocketSpilled.other.grenade.ownerId === ids.host, pocketSpilled);
+  for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } }, pocketIds[0]);
+
   // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
   // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.
   // For this check the host's game is given its say back, with half a minute of its wait left.)

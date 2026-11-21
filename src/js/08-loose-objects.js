@@ -46,6 +46,7 @@
 //              { shape: 'capsule', from: [x, y, z], to: [x, y, z], radius: r }   a rod with round ends
 //              { shape: 'cylinder', from: [x, y, z], to: [x, y, z], radius: r }  a rod with flat ends: it stands on either
 //              { shape: 'cone', from: [x, y, z], to: [x, y, z], radius: r }      flat and `radius` wide at `from`, a point at `to`
+//   pocket     true for a thing that goes into a pocket as well as the beam (08-pockets.js). Left out: it does not.
 //   use        for an object that does something when you press Q with it in the beam:
 //              { prompt: 'Arm the scan grenade', button: 'ARM', activate: function (object) { ... } }
 //              (`button` is what the phone's button for it says)
@@ -78,7 +79,7 @@ const LOOSE_OBJECT_KINDS = {
   // A scan grenade: arm it (Q), throw it, and where it lands it scans the room for you, all round. The light
   // stuns the Hollow if enough of it lands on it, and the noise brings it to where the grenade went off.
   scanGrenade: {
-    label: 'scan grenade', mass: 0.6, value: 15, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.3, grip: 0.6,
+    label: 'scan grenade', mass: 0.6, value: 15, material: 'metal', loud: 1, lies: 'either', bulky: false, bounce: 0.3, grip: 0.6, pocket: true,
     parts: [
       { shape: 'capsule', from: [0, -0.045, 0], to: [0, 0.045, 0], radius: 0.04 },
       { shape: 'box', center: [0.05, 0.02, 0], half: [0.02, 0.05, 0.02] }
@@ -135,7 +136,7 @@ const LOOSE_OBJECT_KINDS = {
   // A first aid kit: what mends you (09-health.js). Q with it in the beam uses it up. A station has a few,
   // lying on the floor out of the way (planStationLooseObjects).
   firstAidKit: {
-    label: 'first aid kit', mass: 1.2, value: 20, fragile: 0.3, material: 'case', loud: 0.8, lies: 'onItsSide', bulky: false, bounce: 0.15, grip: 0.6,
+    label: 'first aid kit', mass: 1.2, value: 20, fragile: 0.3, material: 'case', loud: 0.8, lies: 'onItsSide', bulky: false, bounce: 0.15, grip: 0.6, pocket: true,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.13, 0.09, 0.045] }, { shape: 'capsule', from: [-0.04, 0.1, 0], to: [0.04, 0.1, 0], radius: 0.012 }],
     use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit }
   },
@@ -560,6 +561,7 @@ function clearLooseObjects() {
 
 // A new descent: nothing loose is left over from the last one, and the hints are due again.
 function resetLooseObjectsForNewRun() {
+  resetPockets(); // nothing is carried over from the last descent in anybody's pocket either (08-pockets.js)
   looseState.nextId = 1; // the same thing has the same number in every browser that builds this station
   spawnStationLooseObjects(); // clears whatever was loose, and puts the station's own things back where they lay
   looseState.hasShownCarryHint = false;
@@ -1937,11 +1939,10 @@ function getHeldLooseObject() {
   return looseState.held;
 }
 
-// How much slower you walk with this in the beam: 1 is not at all.
+// How much slower you walk with what you carry, in the beam and in your pockets: 1 is not at all.
 function getCarrySpeedFactor() {
-  const held = looseState.held;
-  if (!held) return 1;
-  return 1 / (1 + getHeldLooseMass() * TUNING.carrySlowdownPerKilogram);
+  const load = getHeldLooseMass() + getPocketMass();
+  return load > 0 ? 1 / (1 + load * TUNING.carrySlowdownPerKilogram) : 1;
 }
 
 function canSprintWhileCarrying() {
@@ -2038,6 +2039,7 @@ function beginLettingGo() {
 }
 
 function updateLooseCarryInput(dt) {
+  updatePocketInput(); // R, and the keys of the pockets (08-pockets.js)
   // Q: set off what the beam is carrying, if it is something that does anything.
   if (input.wantsUseCarried) {
     input.wantsUseCarried = false;
@@ -2786,6 +2788,7 @@ function getHaulProgress() {
   if (!haulState.isActive) return { done: 0, total: 0 };
   let stillThere = 0;
   for (let objectIndex = 0; objectIndex < looseObjects.length; objectIndex++) stillThere += getLooseObjectValue(looseObjects[objectIndex]);
+  for (const pocketed of listPocketedObjects()) stillThere += getLooseObjectValue(pocketed); // (in a pocket it is still down here)
   const open = findOpenHaulBay();
   const total = Math.min(haulState.target, haulState.taken + stillThere);
   return { done: Math.min(haulState.taken + (open ? getHaulBayValue(open) : 0), total), total: total };

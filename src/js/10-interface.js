@@ -875,6 +875,18 @@ function updateHud(realDt) {
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
     if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase();
+    // The pockets: a row of them while there is something in one, or something in the beam that would go in one.
+    const pocketSlots = getOwnPockets(), canPocketCarried = carried !== null && canLooseObjectBePocketed(carried);
+    const arePocketsShown = canPocketCarried || pocketSlots.some(function (object) { return object !== null; });
+    const pocketRow = document.getElementById('hud-pockets'), pocketButtons = document.getElementById('touch-pockets');
+    if (pocketRow) pocketRow.hidden = !arePocketsShown;
+    if (pocketButtons) pocketButtons.hidden = !(arePocketsShown && input.isTouchDevice && game.mode === 'playing');
+    for (let slot = 0; slot < pocketSlots.length; slot++) {
+      const inPocket = pocketSlots[slot], chip = document.getElementById('pocket-' + slot), button = document.getElementById('touch-pocket-' + slot);
+      const name = inPocket ? getLooseObjectLabel(inPocket).toUpperCase() : (canPocketCarried ? 'EMPTY' : '\u2014');
+      if (chip) { chip.textContent = (input.isTouchDevice ? '' : '[' + (slot + 4) + '] ') + name; chip.classList.toggle('is-on', inPocket !== null); }
+      if (button) { button.textContent = name; button.classList.toggle('is-full', inPocket !== null); }
+    }
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];
@@ -941,6 +953,11 @@ function updateHud(realDt) {
       // In the beam, and it does something: say which key, or which button.
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? (heldLooseObject.kind.use.button || 'USE IT') + ' · ' : '[Q]  ') + (heldLooseObject.kind.use.promptFor ? heldLooseObject.kind.use.promptFor(heldLooseObject) : heldLooseObject.kind.use.prompt);
+      // ... and if it goes into a pocket, the key for that (on a phone the pockets are buttons of their own).
+      if (!input.isTouchDevice && canLooseObjectBePocketed(heldLooseObject)) prompt.textContent += '   \u00B7   [R]  Pocket it';
+    } else if (game.mode === 'playing' && heldLooseObject && !input.isTouchDevice && canLooseObjectBePocketed(heldLooseObject)) {
+      prompt.hidden = false;
+      prompt.textContent = '[R]  Pocket it';
     } else if (game.mode === 'playing' && !input.isPointerLocked && !input.useDragLook && !input.isTouchDevice) {
       prompt.hidden = false;
       prompt.textContent = 'Click to take control of the scanner';

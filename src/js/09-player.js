@@ -17,6 +17,8 @@ const input = {
   touchUseHeld: false,  // a finger is on USE: with something in the beam, holding it winds up a throw
   isGrabHeld: false,    // the right mouse button is down: it carries what you are looking at for as long as it is
   wantsUseCarried: false, // Q has been pressed: set off what the beam is carrying
+  wantsStow: false,       // R has been pressed: what the beam holds goes into a free pocket (08-pockets.js)
+  wantsPocket: -1,        // one of the pockets' keys has been pressed (4 to 7): which pocket, counted from 0; -1 for none
   moveStickX: 0,
   moveStickZ: 0,
   lookDeltaX: 0,
@@ -207,6 +209,8 @@ function initializeInput() {
       if (code === 'KeyE') input.wantsInteract = true;
       else if (code === 'KeyF') input.wantsSweep = true;
       else if (code === 'KeyQ') input.wantsUseCarried = true; // sets off what the beam is carrying, if it is something that does anything
+      else if (code === 'KeyR') input.wantsStow = true;       // into a pocket with it
+      else if (code === 'Digit4' || code === 'Digit5' || code === 'Digit6' || code === 'Digit7') input.wantsPocket = Number(code.charAt(5)) - 4;
       else if (code === 'Tab' || code === 'KeyM') toggleMapOverlay();
       else if (code === 'Digit1') setScannerSpread(5);
       else if (code === 'Digit2') setScannerSpread(TUNING.scannerSpreadDefaultDegrees);
@@ -383,6 +387,10 @@ function initializeTouchControls() {
   bindTapButton('touch-sweep', function () { input.wantsSweep = true; });
   bindTapButton('touch-use', function () { input.wantsInteract = true; });
   bindTapButton('touch-use-carried', function () { input.wantsUseCarried = true; }); // what Q is on a keyboard
+  // The pockets: a tap on one is its key on a keyboard (4 to 7).
+  for (let slot = 0; slot < TUNING.pocketCount; slot++) {
+    if (document.getElementById('touch-pocket-' + slot)) bindTapButton('touch-pocket-' + slot, function () { input.wantsPocket = slot; });
+  }
   bindTapButton('touch-map', function () { toggleMapOverlay(); });
   bindTapButton('touch-pause', function () { pauseGame(); });
   bindTapButton('touch-run', function (element) {
