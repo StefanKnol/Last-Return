@@ -139,14 +139,14 @@ function createLooters() {
 // ---------------------------------------------------------------------------
 
 // Is this a thing a looter carries off at all: small and light enough, and not the cover of a vent, the
-// scanner of somebody who fell (which has to lie where the others can find it), or a survey spool that
-// nobody has found yet.
+// scanner of somebody who fell (which has to lie where the others can find it), or a survey spool or core
+// sample that nobody has found yet.
 function isLootable(object) {
   if (object.isRemoved || object.looterIndex >= 0 || object.fallenPlayerId) return false;
   if (object.kindKey === 'ventCover') return false;
-  // A survey spool stays where the crew left it until one of you has had it in the beam: the deeper ones are
-  // behind keycard doors on purpose, and a looter's vents go round those doors. Once found, it is fair game.
-  if (object.kindKey === 'spool' && !object.wasFound) return false;
+  // A survey spool or a core sample stays where the crew left it until one of you has had it in the beam: they
+  // are behind doors on purpose, and a looter's vents go round those doors. Once found, it is fair game.
+  if ((object.kindKey === 'spool' || findQuestOfCarriedThing(object) !== null) && !object.wasFound) return false;
   return object.kind.mass <= TUNING.looterCarriesKilograms && object.prepared.boundsRadius <= TUNING.looterCarriesReach;
 }
 

@@ -1,10 +1,13 @@
 // Checks the survey spools as things you carry (LOOSE_OBJECT_KINDS.spool in src/js/08-loose-objects.js, and
-// noteSpoolFound, listSpoolsAtTheTerminal and loadSpoolsAtTheTerminal in src/js/11-game.js): that a spool lies
+// noteSpoolFound, listThingsForTheTerminal and loadThingsAtTheTerminal in src/js/11-game.js): that a spool lies
 // loose in its room, is found by whoever first has it in the beam (its log, Dispatch, the count on screen),
 // goes into a pocket, and is loaded by the lift terminal out of your pockets, out of your beam and off the
 // floor beside it; that the upload waits for every one of them; that one that is lost is back where it lay on
 // a Survey order and gone on any other; and that what you had in your pockets when you died can still be
 // brought in.
+//
+// And the core samples of a Recovery order, which are carried to the terminal the same way (a quest with
+// `carried`, src/js/09-quests.js) but are too long for a pocket: one in the beam at a time.
 //
 // (The other suites take a spool with a shortcut, `use`, which finds and loads it in one go. This is the one
 // place where the carrying itself is the point. That the host's game says which spools a terminal takes down
@@ -79,6 +82,15 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
     lab.setDown = function (object) {
       d.releaseHeldLooseObject(0);
       for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
+    };
+    // Takes what is in your beam along to a place. (For a thing that fits no pocket: it is put where the beam
+    // holds it once you stand there, as a walk would have brought it.)
+    lab.carryTo = function (x, z) {
+      const held = d.getHeldLooseObject();
+      lab.standBy(x, z);
+      if (held) { held.x = d.player.x; held.y = d.getPlayerEyeY() - 0.3; held.z = d.player.z; held.velocityX = 0; held.velocityY = 0; held.velocityZ = 0; }
+      d.simulate(0.3);
+      return d.getHeldLooseObject();
     };
     lab.pockets = function () { return d.getOwnPockets().map((object) => object ? object.kindKey : null); };
     lab.isInTheStation = function (object) { return d.looseObjects.indexOf(object) >= 0; };
@@ -189,7 +201,7 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
     result.pockets = lab.pockets(); result.held = d.getHeldLooseObject() === null; result.inTheStation = lab.isInTheStation(spool); result.mass = lab.round(d.getPocketMass());
     result.canRun = d.canSprintWhileCarrying();
     result.flags = lab.flags();
-    result.atTheTerminal = d.listSpoolsAtTheTerminal(0).length;
+    result.atTheTerminal = d.listThingsForTheTerminal(0).length;
     // No mains: the terminal refuses, and takes nothing.
     result.noMains = lab.pressTerminal();
     result.afterNoMains = { pockets: lab.pockets(), flags: lab.flags() };
@@ -226,12 +238,12 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
     let far = null;
     for (let turn = 0; turn < 16 && !far; turn++) {
       const spot = d.findWalkableSpotNear(terminal.x + Math.cos(turn * Math.PI / 8) * 5.5, terminal.z + Math.sin(turn * Math.PI / 8) * 5.5);
-      if (spot && Math.hypot(spot.x - terminal.x, spot.z - terminal.z) > d.tuning.terminalTakesSpoolsWithinMetres + 1.5) far = spot;
+      if (spot && Math.hypot(spot.x - terminal.x, spot.z - terminal.z) > d.tuning.terminalTakesWithinMetres + 1.5) far = spot;
     }
     lab.bringOutAt(far.x, far.z);
     lab.setDown(third);
     result.farMetres = lab.round(Math.hypot(third.x - terminal.x, third.z - terminal.z));
-    result.reach = d.tuning.terminalTakesSpoolsWithinMetres;
+    result.reach = d.tuning.terminalTakesWithinMetres;
     result.tooFarSaid = lab.pressTerminal();
     result.tooFar = { flags: lab.flags(), inTheStation: lab.isInTheStation(third) };
     // Set down beside the terminal, and pressed from a step away with nothing in the beam or a pocket.
@@ -248,11 +260,11 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
   });
   await drawFrames(page, 3);
   const loadedScreen = await inGame(() => ({ chip: document.getElementById('chip-spools').textContent, lit: document.getElementById('chip-spools').classList.contains('is-on') }));
-  check('with the mains on the terminal takes the spool out of your pocket: it is loaded and is no longer a thing anywhere, and the upload stays locked with the count it has',
+  check('with the mains on the terminal takes the spool out of your pocket: it is loaded and is no longer a thing anywhere, the terminal says what it took, and the upload stays locked with the count it has',
     loading.fromAPocket.pockets.every((thing) => thing === null) && loading.fromAPocket.flags.loaded === 1 && loading.fromAPocket.flags.found === 1 && !loading.fromAPocket.anywhere &&
-    !loading.fromAPocket.flags.uploadStarted && /Survey spools loaded: 1 of 3/.test(loading.fromAPocketSaid), [loading.fromAPocketSaid, loading.fromAPocket]);
+    !loading.fromAPocket.flags.uploadStarted && /LIFT CONTROL: loaded 1 survey spool\./.test(loading.fromAPocketSaid) && /Survey spools loaded: 1 of 3/.test(loading.fromAPocketSaid), [loading.fromAPocketSaid, loading.fromAPocket]);
   check('pressed again with nothing to give it, the terminal says the same and nothing changes',
-    /Survey spools loaded: 1 of 3/.test(loading.againSaid) && loading.again.loaded === 1 && loading.again.found === 1 && !loading.again.uploadStarted, [loading.againSaid, loading.again]);
+    /Survey spools loaded: 1 of 3/.test(loading.againSaid) && !/LIFT CONTROL: loaded/.test(loading.againSaid) && loading.again.loaded === 1 && loading.again.found === 1 && !loading.again.uploadStarted, [loading.againSaid, loading.again]);
   check('it takes one straight out of your beam as well',
     loading.secondFound.found === 2 && loading.secondFound.loaded === 1 && loading.secondInTheBeam && loading.fromTheBeam.held && loading.fromTheBeam.flags.loaded === 2 && !loading.fromTheBeam.anywhere &&
     /Survey spools loaded: 2 of 3/.test(loading.fromTheBeamSaid) && !loading.fromTheBeam.flags.uploadStarted, [loading.secondFound, loading.fromTheBeamSaid, loading.fromTheBeam]);
@@ -385,7 +397,7 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
       many.headings.filter((heading) => /unlabelled/.test(heading)).length === many.count - 3, many);
     check('your pockets hold four and your beam a fifth; the terminal takes what you bring, says how many it has of how many, and takes the rest at the next visit: then it has them all',
       many.fullWith && many.fullWith.pockets === 'spool,spool,spool,spool' && many.fullWith.inTheBeam && many.fullWith.found === many.pocketCount + 1 && many.afterFirstTrip.loaded === many.pocketCount &&
-      new RegExp('Survey spools loaded: ' + many.pocketCount + ' of ' + many.count).test(many.refusals[0]) && many.beforeLast.found === many.count && many.end.loaded === many.count && many.left === 0 &&
+      new RegExp('LIFT CONTROL: loaded ' + many.pocketCount + ' survey spools\\.').test(many.refusals[0]) && new RegExp('Survey spools loaded: ' + many.pocketCount + ' of ' + many.count).test(many.refusals[0]) && many.beforeLast.found === many.count && many.end.loaded === many.count && many.left === 0 &&
       many.pockets.every((thing) => thing === null) && !/Survey spools loaded/.test(many.lastSaid), many);
   }
 
@@ -398,9 +410,9 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
     lab.bringOutAt(terminal.x, terminal.z);
     lab.setDown(spool);
     result.lootable = d.isLootable(spool);
-    result.lyingThere = d.listSpoolsAtTheTerminal(0).length;
+    result.lyingThere = d.listThingsForTheTerminal(0).length;
     spool.looterIndex = 0; // in a looter's arms, beside the terminal
-    result.inItsArms = d.listSpoolsAtTheTerminal(0).length;
+    result.inItsArms = d.listThingsForTheTerminal(0).length;
     result.said = lab.pressTerminal();
     result.flags = lab.flags();
     spool.looterIndex = -1;
@@ -463,6 +475,118 @@ const OBJECT_LIFT_TERMINAL = 1, OBJECT_SPOOL_1 = 3, OBJECT_SPOOL_2 = 4, OBJECT_S
   check('a new descent puts every spool back in its room, found by nobody and loaded nowhere',
     again.before.flags.loaded === 2 && again.before.spools === 1 && again.flags.found === 0 && again.flags.loaded === 0 && again.spools.length === 3 && again.spools.every((spool) => spool[0] === false) &&
     again.pockets.every((thing) => thing === null), again);
+
+  // --- core samples: carried the same way, and too long for a pocket ---
+  const cores = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab;
+    for (let seed = 1; seed <= 60; seed++) {
+      if (!d.loadStation('generated', seed, 'large', 'mixed', 'one', undefined, ['recovery'])) continue;
+      const quest = d.findQuest('cores');
+      if (!quest || quest.isOptional || quest.total < 3 || d.findQuest('breaker')) continue;
+      lab.settle(); d.grantPower();
+      const result = { seed: seed, total: quest.total };
+      const kind = d.looseObjectKinds.coreSample;
+      result.kind = { label: kind.label, mass: kind.mass, value: kind.value, pocket: kind.pocket === true, bulky: kind.bulky };
+      const things = quest.objects.map((object) => d.findQuestItem(object.objectId));
+      result.lying = things.map((core) => core ? { kindKey: core.kindKey, asleep: core.isAsleep, found: core.wasFound, aboveTheFloor: lab.round(core.y - d.getFloorHeightAt(core.x, core.z)),
+        onTheMap: d.getLooseObjectMapMark(core), lootable: d.isLootable(core), fits: d.canLooseObjectBePocketed(core), pressable: d.findInteractable(core.questObjectId).isLoose === true } : null);
+      if (things.some((core) => !core)) return result;
+      const terminal = lab.terminal(), first = things[0], second = things[1], third = things[2];
+      const home = { x: first.x, y: first.y, z: first.z };
+      result.shareAtFirst = d.getWorkOrderProgressShare();
+      // The first: into the beam.
+      d.clearMessages();
+      lab.standBy(first.x, first.z);
+      result.taken = { taken: d.pickUpLooseObject(first, false), mode: d.game.mode };
+      d.simulate(0.2);
+      result.taken.said = lab.messages(); result.taken.found = first.wasFound; result.taken.done = quest.done;
+      result.taken.checkpointMetresFromYou = lab.round(Math.hypot(d.game.checkpoint.x - d.player.x, d.game.checkpoint.z - d.player.z));
+      result.taken.lootable = d.isLootable(first);
+      first.isKnownOnMap = true; result.taken.onTheMap = d.getLooseObjectMapMark(first);
+      result.shareWithOneFound = d.getWorkOrderProgressShare();
+      result.carrying = { speed: lab.round(d.getCarrySpeedFactor()), canRun: d.canSprintWhileCarrying() };
+      // It does not go into a pocket.
+      d.clearMessages();
+      lab.press('R');
+      result.pocket = { pockets: lab.pockets(), held: d.getHeldLooseObject() === first, said: lab.messages() };
+      // Down the shaft on the order that asks for it: back on its crate, still found.
+      result.carriedMetresFromHome = (function () { lab.carryTo(d.playerStart.x, d.playerStart.z); return lab.round(Math.hypot(first.x - home.x, first.z - home.z)); })();
+      d.clearMessages();
+      d.askToAct({ what: 'lose', id: first.id });
+      d.simulate(0.2);
+      result.lost = { inTheStation: lab.isInTheStation(first), metresFromHome: lab.round(Math.hypot(first.x - home.x, first.y - home.y, first.z - home.z)), said: lab.messages(), found: first.wasFound, done: quest.done };
+      // Taken up again and carried to the terminal: it is taken out of the beam.
+      d.clearMessages();
+      lab.standBy(first.x, first.z);
+      d.pickUpLooseObject(first, false); d.simulate(0.2);
+      result.takenAgainSaid = lab.messages();
+      result.inTheBeamAtTheTerminal = lab.carryTo(terminal.x, terminal.z) === first;
+      result.firstSaid = lab.pressTerminal();
+      result.afterFirst = { done: quest.done, anywhere: lab.isAnywhere(first), held: d.getHeldLooseObject() === null, chips: d.getQuestChips().join(' · '), uploadStarted: d.game.flags.uploadStarted };
+      // The second: set down five metres from the terminal, which does not count; then beside it, which does.
+      lab.standBy(second.x, second.z);
+      d.pickUpLooseObject(second, false); d.simulate(0.2);
+      let far = null;
+      for (let turn = 0; turn < 16 && !far; turn++) {
+        const spot = d.findWalkableSpotNear(terminal.x + Math.cos(turn * Math.PI / 8) * 5.5, terminal.z + Math.sin(turn * Math.PI / 8) * 5.5);
+        if (spot && Math.hypot(spot.x - terminal.x, spot.z - terminal.z) > d.tuning.terminalTakesWithinMetres + 1.5) far = spot;
+      }
+      lab.carryTo(far.x, far.z);
+      lab.setDown(second);
+      result.farMetres = lab.round(Math.hypot(second.x - terminal.x, second.z - terminal.z));
+      lab.pressTerminal();
+      result.tooFar = { done: quest.done, inTheStation: lab.isInTheStation(second) };
+      lab.standBy(second.x, second.z);
+      d.pickUpLooseObject(second, false); d.simulate(0.2);
+      lab.carryTo(terminal.x, terminal.z);
+      lab.setDown(second);
+      result.nearMetres = lab.round(Math.hypot(second.x - terminal.x, second.z - terminal.z));
+      result.reach = d.tuning.terminalTakesWithinMetres;
+      result.secondSaid = lab.pressTerminal();
+      result.afterSecond = { done: quest.done, anywhere: lab.isAnywhere(second) };
+      // The rest, the same way; and the badges and whatever else the station asks for, without the walking.
+      for (const core of things.slice(2)) {
+        lab.standBy(core.x, core.z);
+        d.pickUpLooseObject(core, false); d.simulate(0.2);
+        lab.carryTo(terminal.x, terminal.z);
+        lab.pressTerminal();
+      }
+      result.afterAll = { done: quest.done, left: d.looseObjects.filter((object) => object.kindKey === 'coreSample').length, chips: d.getQuestChips().join(' · '), uploadStarted: d.game.flags.uploadStarted };
+      for (const other of d.level.quests) if (!other.isOptional && other.key !== 'cores') d.doQuest(other.key);
+      result.lastSaid = lab.pressTerminal();
+      result.end = { uploadStarted: d.game.flags.uploadStarted, share: d.getWorkOrderProgressShare() };
+      // A new descent puts them back on their crates.
+      d.startOver();
+      result.again = { done: d.findQuest('cores').done, cores: d.looseObjects.filter((object) => object.kindKey === 'coreSample').map((core) => core.wasFound) };
+      return result;
+    }
+    return null;
+  });
+  check('there is a Recovery station with three core samples or more', cores !== null && cores.lying && cores.lying.every((core) => core !== null), cores);
+  if (cores && cores.end) {
+    check('a core sample is a kind of loose object: a few kilograms, worth nothing to Salvage, not bulky, and too long for a pocket',
+      cores.kind.label === 'core sample' && cores.kind.mass >= 1.5 && cores.kind.mass <= 4 && cores.kind.value === 0 && !cores.kind.pocket && cores.kind.bulky === false, cores.kind);
+    check('each lies loose on its crate, at rest: found by nobody, not on the map, not for a pocket, and not for a looter to take yet',
+      cores.lying.length === cores.total && cores.lying.every((core) => core.kindKey === 'coreSample' && core.asleep && !core.found && core.onTheMap === null && !core.lootable && !core.fits && core.pressable &&
+        core.aboveTheFloor > 0.4 && core.aboveTheFloor < 0.6), cores.lying);
+    check('taken into the beam it is found: the screen says where it goes, the place is your checkpoint, the map marks it as wanted, and the Hollow is pressed on; it is not counted yet, and from now a looter may take it',
+      cores.taken.taken && cores.taken.mode === 'playing' && /The lift terminal takes it/.test(cores.taken.said) && cores.taken.found && cores.taken.done === 0 && cores.taken.checkpointMetresFromYou < 0.5 &&
+      cores.taken.lootable && cores.taken.onTheMap !== null && cores.taken.onTheMap.label === 'CORE' && cores.taken.onTheMap.isWanted === true && cores.shareAtFirst === 0 && cores.shareWithOneFound > 0, cores);
+    check('it slows you a little, you can still run with it, and R does not put it in a pocket: the screen says it does not fit',
+      cores.carrying.speed < 1 && cores.carrying.speed > 0.85 && cores.carrying.canRun && cores.pocket.pockets.every((thing) => thing === null) && cores.pocket.held && /does not fit in a pocket/.test(cores.pocket.said), [cores.carrying, cores.pocket]);
+    check('down the shaft on a Recovery order it is back on its crate, and the screen says so; it stays found, and taking it again says nothing new',
+      cores.carriedMetresFromHome > 2 && cores.lost.inTheStation && cores.lost.metresFromHome < 0.05 && /back where it first stood/.test(cores.lost.said) && cores.lost.found && cores.lost.done === 0 &&
+      !/The lift terminal takes it/.test(cores.takenAgainSaid), [cores.carriedMetresFromHome, cores.lost, cores.takenAgainSaid]);
+    check('the lift terminal takes one out of your beam: the quest counts it, it is no longer a thing anywhere, and the terminal says what it took and that the manifest is still short',
+      cores.inTheBeamAtTheTerminal && cores.afterFirst.done === 1 && !cores.afterFirst.anywhere && cores.afterFirst.held && /LIFT CONTROL: loaded 1 core sample\./.test(cores.firstSaid) && /manifest incomplete/.test(cores.firstSaid) &&
+      cores.afterFirst.chips.indexOf('CORES 1/' + cores.total) >= 0 && !cores.afterFirst.uploadStarted, [cores.firstSaid, cores.afterFirst]);
+    check('one set down five metres off is not taken; set down beside the terminal it is taken off the floor',
+      cores.farMetres > cores.reach && cores.tooFar.done === 1 && cores.tooFar.inTheStation && cores.nearMetres <= cores.reach && cores.afterSecond.done === 2 && !cores.afterSecond.anywhere, cores);
+    check('with every core sample loaded the count is full, and with the rest of the work order done the terminal calls the lift',
+      cores.afterAll.done === cores.total && cores.afterAll.left === 0 && cores.afterAll.chips.indexOf('CORES ' + cores.total + '/' + cores.total) >= 0 && !cores.afterAll.uploadStarted &&
+      cores.end.uploadStarted && cores.end.share === 1, [cores.afterAll, cores.lastSaid, cores.end]);
+    check('a new descent puts every core sample back on its crate, found by nobody', cores.again.done === 0 && cores.again.cores.length === cores.total && cores.again.cores.every((found) => found === false), cores.again);
+  }
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();
