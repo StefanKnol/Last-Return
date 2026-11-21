@@ -9,7 +9,9 @@
 //
 // What a file cannot give an object is something of its own to do (`use`): that is code, and stays in
 // 08-loose-objects.js. What it can do is say that it works like a kind that has something to do, and so be a
-// better make of it: a mark ("Marks", 08-loose-objects.js). Such a file has three things more:
+// better make of it: a mark ("Marks", 08-loose-objects.js). (A mark of the scanner tripod scans out of its own
+// shape: its lens is the ball at its front, and its light is on top of the box behind that.) Such a file has
+// three things more:
 //   worksLike  the key of the kind it works like (one that has `markNumbers`): it does what that kind does
 //   mark       which mark it is, from 2: how rare it is where a station puts that kind out (TUNING.itemMarkWeights)
 //   numbers    the numbers of that kind that it has its own way: { "firstAidHeals": 25 }. What it leaves out
@@ -90,6 +92,9 @@ function createDesignedObjectKind(object) {
     kind.use = base.use;
     if (base.update) kind.update = base.update;
     if (base.pocket === true) kind.pocket = true;
+    // One that scans by itself (a tripod) scans as that does, out of its own shape: its lens and its light are
+    // where this shape has them (placeScannerOnParts, 08-loose-objects.js).
+    if (base.scans) kind.scans = placeScannerOnParts(base.scans, kind.parts);
   }
   // In a file, 0 means never; a kind that never shatters has no `shattersAt` at all.
   if (!(kind.shattersAt > 0)) delete kind.shattersAt;

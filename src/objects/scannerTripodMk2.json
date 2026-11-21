@@ -1,0 +1,27 @@
+{
+  "label": "scanner tripod MkII",
+  "mass": 2.4,
+  "value": 60,
+  "fragile": 0.4,
+  "shattersAt": 0,
+  "material": "metal",
+  "loud": 1,
+  "lies": "upright",
+  "bulky": false,
+  "bounce": 0.1,
+  "grip": 0.8,
+  "asLitter": 0,
+  "onTheFloor": 2,
+  "onASurface": 0,
+  "parts": [
+    { "shape": "capsule", "from": [0,0.4,0], "to": [0,0,0.28], "radius": 0.018 },
+    { "shape": "capsule", "from": [0,0.4,0], "to": [0.25,0,-0.17], "radius": 0.018 },
+    { "shape": "capsule", "from": [0,0.4,0], "to": [-0.25,0,-0.17], "radius": 0.018 },
+    { "shape": "box", "center": [0,1,0], "half": [0.075,0.065,0.1] },
+    { "shape": "ball", "center": [0,1,-0.105], "radius": 0.055 },
+    { "shape": "capsule", "from": [0,0.93,0], "to": [0,0.39,0], "radius": 0.03 }
+  ],
+  "worksLike": "scannerTripod",
+  "mark": 2,
+  "numbers": { "tripodBatterySeconds": 180, "tripodConeDegrees": 110, "tripodPulseRays": 3200 }
+}

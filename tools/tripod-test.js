@@ -444,6 +444,36 @@ const labSource = String(function () {
   check('a scan grenade of a better mark goes off as often as it says: after the first scan one that scans again is not spent yet, after the last it is',
     marked.every((grenade) => grenade.canBeArmed && grenade.afterTheFirst.done === 1 && grenade.afterTheFirst.isSpent === (grenade.bursts === 1) && grenade.atTheEnd.done === grenade.bursts && grenade.atTheEnd.isSpent), marked);
 
+  // --- a tripod of a better mark: it is a tripod (it stands, it is switched on, it scans), with the numbers its
+  //     file says, and it scans out of its own shape: its lens is on it, not where the plain one's is ---
+  const betterTripods = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, seen = [], plain = d.looseObjectKinds.scannerTripod;
+    for (const entry of d.looseObjectMarks.scannerTripod || []) {
+      lab.station();
+      d.clearLooseObjects();
+      const tripod = d.createLooseObject(entry[0], lab.place.x, lab.place.floorY + 0.05, lab.place.z, 0);
+      d.simulate(1.5);
+      const kind = tripod.kind, lens = kind.scans.lens;
+      // How far the lens is from the nearest of its parts: from the skin of a ball, or from a box.
+      let fromItsShape = Infinity;
+      for (const part of kind.parts) {
+        if (part.shape === 'ball') fromItsShape = Math.min(fromItsShape, Math.abs(Math.hypot(lens[0] - part.center[0], lens[1] - part.center[1], lens[2] - part.center[2]) - part.radius));
+        if (part.shape === 'box') fromItsShape = Math.min(fromItsShape, Math.max(Math.abs(lens[0] - part.center[0]) - part.half[0], Math.abs(lens[1] - part.center[1]) - part.half[1], Math.abs(lens[2] - part.center[2]) - part.half[2], 0));
+      }
+      const one = { key: entry[0], battery: tripod.batterySeconds, says: d.getLooseNumber(tripod, 'tripodBatterySeconds'), cone: d.getLooseNumber(tripod, 'tripodConeDegrees'),
+        lensFromItsShape: Math.round(fromItsShape * 1000) / 1000, lightAboveLens: kind.scans.light[1] > lens[1], looksForward: kind.scans.forward.join() === plain.scans.forward.join(),
+        standsUp: tripod.y - lab.place.floorY < 1.5 && d.getLooseObjectLabel(tripod).indexOf('100 % charged') >= 0 };
+      d.askToAct({ what: 'setOff', id: tripod.id });
+      d.simulate(d.getLooseNumber(tripod, 'tripodPulseEverySeconds') + 0.8);
+      one.on = { isOn: tripod.isOn, fired: tripod.pulsesFired, batteryRunsDown: tripod.batterySeconds < one.battery };
+      seen.push(one);
+    }
+    return { plainBattery: d.tuning.tripodBatterySeconds, tripods: seen };
+  });
+  check('a tripod of a better mark is a tripod with the numbers its file says: charged as long as it says, switched on it scans, and its lens and its light are on its own shape',
+    betterTripods.tripods.every((tripod) => tripod.battery === tripod.says && tripod.lensFromItsShape < 0.02 && tripod.lightAboveLens && tripod.looksForward && tripod.standsUp &&
+      tripod.on.isOn && tripod.on.fired > 100 && tripod.on.batteryRunsDown), betterTripods);
+
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();
 

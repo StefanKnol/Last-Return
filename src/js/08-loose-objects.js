@@ -116,7 +116,13 @@ const LOOSE_OBJECT_KINDS = {
     // Its lens is the ball on the front of its head, looking the way a thing faces that has not been turned.
     scans: { name: 'tripod', hasBattery: true, lens: [0, 0.46, -0.125], forward: [0, 0, -1], light: [0, 0.525, 0], gripInTheBeam: [0, 0, 0, 1] },
     use: { prompt: 'Switch the tripod on', promptFor: describeLooseScannerSwitch, button: 'SWITCH', activate: switchLooseScanner },
-    update: updateLooseScanner
+    update: updateLooseScanner,
+    markNumbers: {
+      tripodBatterySeconds: ['How long its battery lasts, switched on (seconds)', 60, 3600, 30],
+      tripodPulseEverySeconds: ['Seconds from one pulse to the next', 0.5, 6, 0.1],
+      tripodConeDegrees: ['How wide its light opens (degrees)', 30, 170, 2],
+      tripodPulseRays: ['How much light one pulse has (pulses of the scanner)', 500, 8000, 100]
+    }
   },
   // A scanner: what is left of a player who was caught, down there with others (11-together.js). Its light stays
   // on. Carried back to the lift, or into an open salvage bay, it is restarted and they are on their feet again.
@@ -606,7 +612,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
     // A scanner that scans by itself (a tripod, a fallen scanner): whether it is on, how much of its battery is left, the count to its next pulse, how much
     // of the pulse that is going out now is still to come, and what its light has fallen on since it was switched on.
-    isOn: false, batterySeconds: kindKey === 'scannerTripod' ? TUNING.tripodBatterySeconds : 0, pulseSeconds: 0, flashSeconds: 0, flashBudget: 0,
+    isOn: false, batterySeconds: kind.scans && kind.scans.hasBattery ? getLooseNumber({ kind: kind }, 'tripodBatterySeconds') : 0, pulseSeconds: 0, flashSeconds: 0, flashBudget: 0,
     pulsesFired: 0, pulsesOnCreatures: 0, lastLitPlayerTime: -999,
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
@@ -2705,7 +2711,7 @@ function planStationLooseObjects() {
   for (; tripods < tripodsWanted && nextTile < tiles.length; nextTile++) {
     if (tiles[nextTile][2] !== 1) continue;
     const index = tiles[nextTile][1];
-    addStationLooseObject('scannerTripod', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, tripodRandom() * TWO_PI, false, false, 'floor');
+    addStationLooseObject(chooseMarkedKind('scannerTripod', markRandom), index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, tripodRandom() * TWO_PI, false, false, 'floor');
     tripods++;
   }
   level.scannerTripodCount = tripods;
@@ -3339,11 +3345,38 @@ function flingLooseObjectFromHollow(object) {
 //
 // A kind with a `scans` is one: where its lens is and which way it looks (in the coordinates its parts are
 // given in), where the light on it is, how it is turned in the beam, and whether it has a battery. Both kinds
-// scan by the same numbers (TUNING.tripod...).
+// scan by the same numbers (TUNING.tripod...), each as its mark has them (getLooseNumber: a better tripod is a
+// mark of the tripod, with its own shape, and its lens and its light where that shape has them:
+// placeScannerOnParts).
 // ---------------------------------------------------------------------------
 
+// Where the lens and the light of a scanner are on a shape that is not the one its kind was written with: a
+// mark of the tripod, made in the workshop. The lens is the front of the ball that is furthest forward (forward
+// is -z, as a thing hangs in the beam), a little way out of it; the light is on top of the box nearest that
+// ball, which is its head. A shape with no ball looks out of the front of its highest box; one with neither
+// keeps the places its kind has. Everything else about how it scans is its kind's.
+function placeScannerOnParts(scans, parts) {
+  const placed = Object.assign({}, scans);
+  const boxes = parts.filter(function (part) { return part.shape === 'box'; });
+  let lensBall = null;
+  for (const part of parts) if (part.shape === 'ball' && (lensBall === null || part.center[2] - part.radius < lensBall.center[2] - lensBall.radius)) lensBall = part;
+  let head = null;
+  if (lensBall) {
+    placed.lens = [lensBall.center[0], lensBall.center[1], Math.round((lensBall.center[2] - lensBall.radius - 0.005) * 1000) / 1000];
+    for (const box of boxes) {
+      const away = Math.hypot(box.center[0] - lensBall.center[0], box.center[1] - lensBall.center[1], box.center[2] - lensBall.center[2]);
+      if (head === null || away < head.away) head = { box: box, away: away };
+    }
+  } else {
+    for (const box of boxes) if (head === null || box.center[1] + box.half[1] > head.box.center[1] + head.box.half[1]) head = { box: box, away: 0 };
+    if (head) placed.lens = [head.box.center[0], head.box.center[1], Math.round((head.box.center[2] - head.box.half[2] - 0.005) * 1000) / 1000];
+  }
+  if (head) placed.light = [head.box.center[0], Math.round((head.box.center[1] + head.box.half[1] + 0.02) * 1000) / 1000, head.box.center[2]];
+  return placed;
+}
+
 function describeLooseScannerSwitch(object) {
-  return 'Switch the ' + object.kind.scans.name + (object.isOn ? ' off' : ' on') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + '%' : '');
+  return 'Switch the ' + object.kind.scans.name + (object.isOn ? ' off' : ' on') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / getLooseNumber(object, 'tripodBatterySeconds') * 100)) + '%' : '');
 }
 
 // Q, with it in the beam ('setOff', carried out in every browser): on, or off again.
@@ -3399,20 +3432,20 @@ function updateLooseScanner(object, dt) {
       distanceBetweenPoints(hollow.figure.x, hollow.figure.z, object.x, object.z) < TUNING.hollowKnowsScannerMetres) letHollowKnowScanner(object);
   object.pulseSeconds -= dt;
   if (object.pulseSeconds <= 0) {
-    object.pulseSeconds += TUNING.tripodPulseEverySeconds;
+    object.pulseSeconds += getLooseNumber(object, 'tripodPulseEverySeconds');
     object.flashSeconds = TUNING.tripodFlashSeconds;
     playTripodSound('pulse', object.x, object.y, object.z);
     showCaption('tripodPulse', { x: object.x, z: object.z });
     if (!isLooseObjectAnothers(object)) emitNoise(object.x, object.z, TUNING.noiseRadiusTripodPulse);
   }
   if (object.flashSeconds <= 0) return;
-  object.flashBudget += TUNING.tripodPulseRays * Math.min(dt, object.flashSeconds) / TUNING.tripodFlashSeconds;
+  object.flashBudget += getLooseNumber(object, 'tripodPulseRays') * Math.min(dt, object.flashSeconds) / TUNING.tripodFlashSeconds;
   object.flashSeconds -= dt;
   const pulses = Math.min(4000, Math.floor(object.flashBudget));
   object.flashBudget -= pulses;
   if (pulses <= 0) return;
   const lens = getLooseScannerLens(object, looseScannerScratch);
-  const result = fireScanCone(lens.x, lens.y, lens.z, lens.directionX, lens.directionY, lens.directionZ, TUNING.tripodConeDegrees / 2, pulses, object);
+  const result = fireScanCone(lens.x, lens.y, lens.z, lens.directionX, lens.directionY, lens.directionZ, getLooseNumber(object, 'tripodConeDegrees') / 2, pulses, object);
   object.pulsesFired += result.fired;
   object.pulsesOnCreatures += result.onCreatures;
   if (result.litPlayers.length > 0) object.lastLitPlayerTime = game.time;
@@ -3549,7 +3582,7 @@ function sayNeededThingIsBack(object) {
 function getLooseObjectLabel(object) {
   if (object.kindKey === 'fuelCan' && object.fuel < 0.995) return object.kind.label + ', ' + Math.max(1, Math.round(object.fuel * 100)) + ' % full';
   if (object.isSpent) return 'spent ' + object.kind.label;
-  if (object.kind.scans) return object.kind.label + (object.isOn ? ', on' : '') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + ' % charged' : '');
+  if (object.kind.scans) return object.kind.label + (object.isOn ? ', on' : '') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / getLooseNumber(object, 'tripodBatterySeconds') * 100)) + ' % charged' : '');
   if (object.armedTime >= 0) return object.kind.label + ', armed';
   return object.kind.label;
 }

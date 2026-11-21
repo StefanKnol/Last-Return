@@ -293,7 +293,7 @@ const TUNING = {
   tripodFlashSeconds: 0.25,         // how long one pulse lasts
   tripodPulseRays: 2500,            // how many pulses of the scanner go into one of its own
   tripodConeDegrees: 86,            // how wide its light opens, edge to edge
-  tripodBatterySeconds: 480,        // how long it scans in all, counted while it is on. Then it is spent
+  tripodBatterySeconds: 120,        // how long it scans in all, counted while it is on. Then it is spent
   hollowKnowsScannerMetres: 1.6,    // the Hollow this near to one that is scanning finds out it is a thing: after that its light and its tick are nothing to it, until you handle it again
   hollowAtScannerSeconds: 2.5,      // ... and stands over it for this long, sniffing, before it goes back to its rounds
   noiseRadiusTripodPulse: 5,        // each pulse ticks. The Hollow hears that from a little way off; a looter close by is startled by it
@@ -408,13 +408,13 @@ const TUNING = {
   surveyorRoamSpeed: 1.2,           // walking its rounds, metres a second
   surveyorChaseSpeed: 3.5,          // after you: faster than you walk, slower than you run. Running is loud, and the Hollow hears that.
   surveyorFleeSpeed: 4.4,           // running off after it has struck
-  surveyorConeDegrees: 64,          // how wide its light opens, edge to edge
-  surveyorSweepDegrees: 55,         // on its rounds its light swings this far to either side of the way it faces ...
-  surveyorSweepSeconds: 4.5,        // ... once there and back in this long
-  surveyorRoamPulsesPerSecond: 1500,// how many pulses its light is on its rounds: fewer, so it takes it longer to make you out
-  surveyorHuntPulsesPerSecond: 5200,// ... and once it has seen you
-  surveyorSightMetres: 24,          // it makes nobody out from further off than this, however much of its light is on them
-  surveyorNoticeSeconds: 0.7,       // you have to be in its light for this long, in all, before it has seen you: a glance is not enough
+  surveyorConeDegrees: 76,          // how wide its light opens, edge to edge
+  surveyorSweepDegrees: 45,         // on its rounds its light swings this far to either side of the way it faces ...
+  surveyorSweepSeconds: 3.5,        // ... once there and back in this long
+  surveyorRoamPulsesPerSecond: 3200,// how many pulses its light is on its rounds: fewer, so it takes it longer to make you out
+  surveyorHuntPulsesPerSecond: 6200,// ... and once it has seen you
+  surveyorSightMetres: 32,          // it makes nobody out from further off than this, however much of its light is on them
+  surveyorNoticeSeconds: 0.2,       // you have to be in its light for this long, in all, before it has seen you: a glance is not enough
   surveyorForgetSeconds: 2.5,       // out of its light, that count runs down again over this long
   surveyorLoseSeconds: 4,           // chasing, with you out of its light for this long, it has lost you and goes to where it last saw you
   surveyorSearchSeconds: 7,         // ... and looks all round there for this long before it goes back to its rounds
@@ -423,7 +423,7 @@ const TUNING = {
   surveyorStrikeDistance: 0.75,     // this near to you and it strikes. Once.
   surveyorAfterStrikeSeconds: 10,   // after a strike it sees nobody for this long: it is running off
   surveyorLandingBlindSeconds: 1.5, // dropped out of a hatch, it sees nobody for this long
-  surveyorLightSeconds: 7,          // how long the points of its light stay before they fade (maximum 63)
+  surveyorLightSeconds: 5,          // how long the points of its light stay before they fade (maximum 63)
   surveyorDazzleHits: 2,            // this many pulses of somebody else's light on it in one frame count as light in its eye ...
   surveyorDazzleAfterSeconds: 0.45, // ... and after this long of that it is dazzled
   surveyorDazzledSeconds: 3.5,      // dazzled: it stands, its light is out and it sees nobody

@@ -251,12 +251,15 @@ function check(description, condition, detail) {
       for (let seed = 1; seed <= 30; seed++) {
         if (!d.loadStation('generated', seed, 'large', 'mixed', 'two')) continue;
         stations++;
-        for (const baseKey of ['firstAidKit', 'scanGrenade']) {
+        for (const baseKey of ['firstAidKit', 'scanGrenade', 'scannerTripod']) {
           const makes = [baseKey].concat((d.looseObjectMarks[baseKey] || []).map((entry) => entry[0]));
           let here = 0;
           for (const object of d.looseObjects) if (makes.indexOf(object.kindKey) >= 0) { found[object.kindKey] = (found[object.kindKey] || 0) + 1; here++; }
-          const said = baseKey === 'firstAidKit' ? d.level.firstAidKitCount : d.level.scanGrenadeCount;
-          if (here !== said) found['miscounted ' + baseKey] = (found['miscounted ' + baseKey] || 0) + 1;
+          const said = baseKey === 'firstAidKit' ? d.level.firstAidKitCount : (baseKey === 'scanGrenade' ? d.level.scanGrenadeCount : d.level.scannerTripodCount);
+          // (A mark whose file also has it lying about as a thing to carry, "In generated stations" above 0, is put out
+          // that way on top: then there may be more of that kind than the station put out as such, never fewer.)
+          const liesAboutToo = (d.looseObjectMarks[baseKey] || []).some((entry) => { const kind = d.looseObjectKinds[entry[0]]; return kind.asLitter > 0 || kind.onTheFloor > 0 || kind.onASurface > 0; });
+          if (liesAboutToo && isWithWorkshop ? here < said : here !== said) found['miscounted ' + baseKey] = (found['miscounted ' + baseKey] || 0) + 1;
         }
       }
       return { stations: stations, found: found };
@@ -275,7 +278,7 @@ function check(description, condition, detail) {
   check('a station puts out marks in place of some of the plain ones, never more things for it, and the plain one most often; a station built from the code alone has only plain ones',
     marks.withWorkshop.stations >= 20 && !Object.keys(marks.withWorkshop.found).some((key) => key.indexOf('miscounted') === 0) &&
     (marks.kinds.length === 0 || (markedKits > 0 && plainKits > markedKits)) &&
-    Object.keys(marks.fromCodeAlone.found).sort().join() === 'firstAidKit,scanGrenade', { withWorkshop: marks.withWorkshop.found, fromCodeAlone: marks.fromCodeAlone.found });
+    Object.keys(marks.fromCodeAlone.found).sort().join() === 'firstAidKit,scanGrenade,scannerTripod', { withWorkshop: marks.withWorkshop.found, fromCodeAlone: marks.fromCodeAlone.found });
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();
