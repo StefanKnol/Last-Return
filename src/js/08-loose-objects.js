@@ -2660,8 +2660,9 @@ function planStationLooseObjects() {
     tripods++;
   }
   level.scannerTripodCount = tripods;
-  // Scanner tripods: one or two to a station, standing on bare floor that is in nobody's way. Numbers of their own again.
-  const grenadeRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0x7217d0);
+  // Scan grenades: a few to a station (TUNING.scanGrenadePerRoom, never fewer than one), lying on bare floor that
+  // is in nobody's way. Numbers of their own again.
+  const grenadeRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0x96e4ad);
   const grenadesWanted = Math.max(1, Math.round(rooms * TUNING.scanGrenadePerRoom));
   let grenades = 0;
   for (; grenades < grenadesWanted && nextTile < tiles.length; nextTile++) {
@@ -2670,7 +2671,7 @@ function planStationLooseObjects() {
     addStationLooseObject('scanGrenade', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, grenadeRandom() * TWO_PI, false, false, 'floor');
     grenades++;
   }
-  level.scannerGrenadeCount = grenades;
+  level.scanGrenadeCount = grenades;
   level.looseObjectCount = stationLooseObjects.length;
 }
 

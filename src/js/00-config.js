@@ -207,7 +207,7 @@ const TUNING = {
   // Being caught is being hit. What a hit takes off is one of these times the threat level's damageFactor, and
   // you die of the hit that takes the last of it. Nothing gives it back but a first aid kit.
   playerMaxHealth: 100,
-  hollowHitDamage: 35,              // two hits at damageFactor 1, three at 0.75, one at 2
+  hollowHitDamage: 35,              // of playerMaxHealth 100: three hits at damageFactor 1 (Standard), four at 0.75 (Survey only), two at 2 (Nightmare)
   stillHitDamage: 25,
   playerHurtGraceSeconds: 2,        // after a hit nothing can hit you again for this long
   hollowAfterHitSeconds: 3,         // the Hollow stands where it struck for this long before it comes on again: your chance to get away
@@ -282,8 +282,8 @@ const TUNING = {
   hollowKnowsScannerMetres: 1.6,    // the Hollow this near to one that is scanning finds out it is a thing: after that its light and its tick are nothing to it, until you handle it again
   hollowAtScannerSeconds: 2.5,      // ... and stands over it for this long, sniffing, before it goes back to its rounds
   noiseRadiusTripodPulse: 5,        // each pulse ticks. The Hollow hears that from a little way off; a looter close by is startled by it
-  scannerTripodsPerRoom: 0.07,      // how many of scanner tripods a station has, for each of its rooms
-  scanGrenadePerRoom: 0.05,         // how many of scan grenades a station has, for each of its rooms
+  scannerTripodsPerRoom: 0.07,      // how many scanner tripods a station has, for each of its rooms (never fewer than one)
+  scanGrenadePerRoom: 0.05,         // how many scan grenades a station has lying about, for each of its rooms (never fewer than one)
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts

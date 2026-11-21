@@ -1983,6 +1983,57 @@ function measureVents() {
   return measured;
 }
 
+// How near your eye can get to a thing at (x, y, z). That is what the game goes by when it decides what you can
+// press or take: the distance from your eye (updateInteractionFocus, 09-player.js; findLooseObjectInFocus,
+// 08-loose-objects.js).
+// Found by walking up to it, with the same test of where a body fits that moves you in play
+// (resolveBodyCollision, 02-world.js): from the middle of each walkable tile next to the thing (or the nearest
+// one, if none is next to it), straight at it in short steps until something stops you, once standing up and
+// once crouched. The nearest your eye came on any of those walks is the answer.
+function getNearestEyeDistanceTo(x, y, z) {
+  let best = Infinity;
+  const postures = [[TUNING.playerHeight, TUNING.playerEyeHeightToBody], [TUNING.playerHeightCrouching, TUNING.playerEyeHeightToCrouchedBody]];
+  const walkFrom = function (index) {
+    for (const posture of postures) {
+      let atX = index % GRID_WIDTH + 0.5, atZ = Math.floor(index / GRID_WIDTH) + 0.5;
+      for (let step = 0; step < 30; step++) {
+        const floorY = getFloorHeightAt(atX, atZ), eyeY = floorY + posture[0] * posture[1];
+        const deltaX = x - atX, deltaZ = z - atZ, across = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        best = Math.min(best, Math.sqrt(across * across + (y - eyeY) * (y - eyeY)));
+        if (across < 0.05) break; // standing on it
+        const stride = Math.min(0.08, across);
+        const resolved = resolveBodyCollision(atX + deltaX / across * stride, atZ + deltaZ / across * stride, TUNING.playerRadius, posture[0], floorY);
+        const movedX = resolved.x - atX, movedZ = resolved.z - atZ;
+        if (movedX * movedX + movedZ * movedZ < 0.00002) break; // something has stopped you
+        atX = resolved.x; atZ = resolved.z;
+      }
+    }
+  };
+  const ownX = Math.floor(x), ownZ = Math.floor(z);
+  let hasNeighbour = false;
+  for (let tileZ = ownZ - 1; tileZ <= ownZ + 1; tileZ++) {
+    for (let tileX = ownX - 1; tileX <= ownX + 1; tileX++) {
+      if (isWalkableAt(tileX, tileZ)) { hasNeighbour = true; walkFrom(tileIndexAt(tileX, tileZ)); }
+    }
+  }
+  if (!hasNeighbour) {
+    const index = findNearestWalkableTileIndex(x, z);
+    if (index >= 0) walkFrom(index);
+  }
+  return best;
+}
+
+// For the audits: '' if a thing at (x, y, z) can be reached from somewhere you can stand, or what is wrong with
+// it. A thing to press has to be within your arm's reach (TUNING.interactionReach), a thing that lies loose
+// within the beam's (TUNING.looseBeamReach), each with a tenth of a metre to spare. Both are numbers to tune:
+// this follows them, so a reach set too short for a station's furniture shows up here as it would in play.
+function describeIfOutOfReach(x, y, z, isLoose) {
+  const reach = isLoose ? TUNING.looseBeamReach : TUNING.interactionReach;
+  const distance = getNearestEyeDistanceTo(x, y, z);
+  if (distance <= reach - 0.1) return '';
+  return 'is out of reach: your eye gets no nearer to it than ' + distance.toFixed(2) + ' m, and ' + (isLoose ? 'the beam takes hold' : 'your arm reaches') + ' from ' + reach.toFixed(2) + ' m';
+}
+
 function auditLevelProgression() {
   const problems = [];
   const field = borrowTileField('auditProgression');
@@ -2043,13 +2094,14 @@ function auditLevelProgression() {
   // The quests: each thing they need must exist, and be where its quest says it is (09-quests.js).
   auditQuests(problems, reach, canReach, mustExistOnce, canReachSpot);
   if (!level.storeZone) problems.push('there is no calibration store');
-  // Everything you must use has to be within arm's reach of somewhere you can stand.
+  // Everything you must use has to be within reach of somewhere you can stand: your arm's reach for a thing to
+  // press, the beam's for a thing that lies loose (a survey spool).
   for (const objectId of mustExistOnce) {
-    const interactable = findPlaceOf(objectId);
-    if (!interactable) continue;
-    const index = findNearestWalkableTileIndex(interactable.x, interactable.z);
-    const distance = index < 0 ? Infinity : distanceBetweenPoints(interactable.x, interactable.z, index % GRID_WIDTH + 0.5, Math.floor(index / GRID_WIDTH) + 0.5);
-    if (distance > TUNING.interactionReach - 0.4) problems.push('object ' + objectId + ' is out of reach: ' + distance.toFixed(2) + ' m from the nearest standing spot');
+    const place = findPlaceOf(objectId);
+    if (!place) continue;
+    const isLoose = place.kindKey !== undefined; // (an entry of roomLooseObjects or questLooseObjects, not a thing to press)
+    const problem = describeIfOutOfReach(place.x, place.y, place.z, isLoose);
+    if (problem) problems.push('object ' + objectId + ' ' + problem);
   }
   // A door with furniture or rock straight behind it is a door nobody can use.
   for (const door of doors) {
