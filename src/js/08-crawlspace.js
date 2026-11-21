@@ -21,7 +21,7 @@
 // when walking is much further, or impossible. The numbers are in 00-config.js under "The crawlspace".
 //
 // Which doors are shut to it at this moment, and the path finding itself, are not the Hollow's alone: they are
-// its way of getting around (HOLLOW_WAY, 08-entities.js), and the code for a way is in 08-creatures.js. Another
+// its way of getting around (HOLLOW_WAY, 08-hollow.js), and the code for a way is in 08-creatures.js. Another
 // creature can be given a way that uses these same hatches.
 // ---------------------------------------------------------------------------
 
@@ -209,7 +209,7 @@ function updateHollowInCrawlspace(dt) {
   updateCreatureInCrawlspace(hollow, dt);
 }
 
-// A noise from the station has reached it above the ceiling (hearNoiseFromAnotherSpace, 08-entities.js): it
+// A noise from the station has reached it above the ceiling (hearNoiseFromAnotherSpace, 08-hollow.js): it
 // stops where it is and listens. Once in a crawl, so that noise cannot be used to keep it up there.
 function listenFromTheCrawlspace() {
   const crawl = hollow.crawlspace;

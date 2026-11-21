@@ -3455,7 +3455,7 @@ function updateLooseScanner(object, dt) {
     }
   }
   // The Hollow, right up to it where it stands or lies: it finds out that this is a thing and not one of you,
-  // and from then on pays it no heed (letHollowKnowScanner, 08-entities.js). In somebody's beam it is theirs.
+  // and from then on pays it no heed (letHollowKnowScanner, 08-hollow.js). In somebody's beam it is theirs.
   if (!object.isIgnoredByHollow && !isLooseObjectInABeam(object) && !isWorldTheHosts() && hollow.isActive && !isHollowInCrawlspace() &&
       distanceBetweenPoints(hollow.figure.x, hollow.figure.z, object.x, object.z) < TUNING.hollowKnowsScannerMetres) letHollowKnowScanner(object);
   object.pulseSeconds -= dt;

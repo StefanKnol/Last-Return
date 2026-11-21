@@ -202,8 +202,9 @@ const labSource = String(function () {
   });
   // (The director is the first thing in the list: it is run before the creatures it paces, so that what it
   // decides in a frame is what they go by in that frame. src/js/08-director.js)
-  check('a creature added to the list of kinds is one of them, after the ones the game has; the director comes first, then the Hollow and the Stills',
-    lifecycle.kinds.indexOf('director') === 0 && lifecycle.kinds.indexOf('hollow') === 1 && lifecycle.kinds.indexOf('stills') === 2 && lifecycle.kinds.indexOf('testWalker') === lifecycle.kinds.length - 1, lifecycle.kinds);
+  // (The others are in the order of their files: the Stills of 08-entities.js, the Hollow of 08-hollow.js, and so on.)
+  check('a creature added to the list of kinds is one of them, after the ones the game has: the director first, then the creatures it has, the Stills and the Hollow among them',
+    lifecycle.kinds.indexOf('director') === 0 && lifecycle.kinds.indexOf('stills') > 0 && lifecycle.kinds.indexOf('hollow') > 0 && lifecycle.kinds.indexOf('testWalker') === lifecycle.kinds.length - 1, lifecycle.kinds);
   check('the game runs it without knowing it: reset once for a new descent, updated every frame with the time that has passed, told of a noise with where it was and how far it carries',
     lifecycle.resetsOnANewDescent === 1 && lifecycle.updatesInASecond >= 29 && lifecycle.updatesInASecond <= 31 && Math.abs(lifecycle.secondsGiven - 1) < 0.05 &&
     JSON.stringify(lifecycle.heard) === '[[41.5,47.25,9]]', lifecycle);

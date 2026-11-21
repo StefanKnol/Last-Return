@@ -307,6 +307,65 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('a typed number is used as the seed, a typed word always gives the same seed, an empty box a new one',
     repeat.numberSeed === 4471 && repeat.wordSeed && repeat.emptySeedsDiffer, repeat);
 
+  // --- the Hollow's body: one of the bodies there are for it (hollowBodies, 00-config.js), by the station's seed ---
+  // (src/js/08-hollow.js. A body from the workshop is only in a station that is built with what the workshop
+  // made, so the stations of the checks further down, which are from the code alone, all have the one written as code.)
+  const hollowBodies = await inGame(() => {
+    const debug = window.lastReturnDebug, hollow = debug.hollow, figure = hollow.figure, kinds = debug.figureKinds;
+    const thereAre = debug.tuning.hollowBodies.filter((key) => Boolean(kinds[key]) && kinds[key].bodyPlan === 'hollow');
+    const seen = { thereAre: thereAre, fromTheWorkshop: thereAre.filter((key) => kinds[key].isDesigned === true), fromCodeAlone: {}, stations: [], drawn: {}, inAVent: [] };
+    debug.setWorkshopContentUsed(false);
+    for (let seed = 1; seed <= 12; seed++) { if (debug.loadStation('generated', seed, 'small', 'mixed', 'one')) seen.fromCodeAlone[hollow.bodyKey] = true; }
+    debug.setWorkshopContentUsed(true);
+    for (let seed = 1; seed <= 40; seed++) {
+      if (!debug.loadStation('generated', seed, 'small', 'mixed', 'one')) continue;
+      const has = hollow.bodyKey, isOfThatKind = figure.proportions === kinds[has].proportions && figure.surfaceClass === kinds[has].surfaceClass;
+      // (Every apparition but a Still that is not one is made as this station's Hollow is.)
+      const apparitionsAreMadeAsIt = debug.phantoms.every((phantom) => phantom.kind === 'dummy' || phantom.figure.proportions === figure.proportions);
+      debug.startOver();
+      const hasOnANewDescent = hollow.bodyKey;
+      debug.loadStation('generated', seed, 'small', 'mixed', 'one');
+      seen.drawn[has] = (seen.drawn[has] || 0) + 1;
+      seen.stations.push({ seed: seed, has: has, isOfThatKind: isOfThatKind, apparitionsAreMadeAsIt: apparitionsAreMadeAsIt,
+        sameAgain: hasOnANewDescent === has && hollow.bodyKey === has, isOneOfThem: thereAre.indexOf(has) >= 0 });
+    }
+    seen.isTheSameFigure = debug.hollow.figure === figure; // there is one Hollow: everything that knows its figure goes on knowing it
+    // Kessel-9 has no seed: it has the first body of the list, whichever that is. Its apparitions stand at their
+    // places from the start, and are made as its Hollow is.
+    const usualBodies = debug.tuning.hollowBodies;
+    seen.kessel = [];
+    for (const bodies of [usualBodies, usualBodies.slice().reverse()]) {
+      debug.tuning.hollowBodies = bodies;
+      debug.loadStation('classic', 0);
+      seen.kessel.push({ first: bodies[0], has: hollow.bodyKey, apparitions: debug.phantoms.length,
+        apparitionsAreMadeAsIt: debug.phantoms.every((phantom) => phantom.figure.proportions === kinds[hollow.bodyKey].proportions) });
+    }
+    // Each body as the Hollow holds it: it is made of something, and on knees and hands it is lower than a vent
+    // is high, with everything that is fixed to its bones.
+    for (const key of thereAre) {
+      debug.tuning.hollowBodies = [key];
+      debug.startOver();
+      const pose = figure.pose;
+      pose.stretch = 0; pose.stoop = 0; pose.crawl = 1; pose.legSwing = 0;
+      debug.updateFigureCapsules(figure);
+      seen.inAVent.push({ body: key, has: hollow.bodyKey, shapes: figure.capsuleCount + figure.rodCount + figure.boxCount, top: Math.round((debug.getFigureTop(figure) - figure.y) * 100) / 100 });
+    }
+    debug.tuning.hollowBodies = usualBodies;
+    debug.startOver();
+    seen.ventHeight = debug.ventHeight;
+    return seen;
+  });
+  check('there are bodies for the Hollow, the one written as code among them; a station built from the code alone has no body from the workshop',
+    hollowBodies.thereAre.length >= 1 && hollowBodies.thereAre.length > hollowBodies.fromTheWorkshop.length &&
+    Object.keys(hollowBodies.fromCodeAlone).length >= 1 && Object.keys(hollowBodies.fromCodeAlone).every((key) => hollowBodies.fromTheWorkshop.indexOf(key) < 0), hollowBodies);
+  check('the Hollow of a station has one of the bodies there are for it, and the same station has the same one again, on a new descent and built anew; over forty stations every body turns up; it is one figure all along, and the apparitions are made as it is',
+    hollowBodies.stations.length >= 30 && hollowBodies.stations.every((station) => station.isOneOfThem && station.isOfThatKind && station.sameAgain && station.apparitionsAreMadeAsIt) &&
+    Object.keys(hollowBodies.drawn).length === hollowBodies.thereAre.length && hollowBodies.isTheSameFigure, { drawn: hollowBodies.drawn, stations: hollowBodies.stations.filter((station) => !(station.isOneOfThem && station.isOfThatKind && station.sameAgain && station.apparitionsAreMadeAsIt)) });
+  check('Kessel-9 has the first body of the list, and its apparitions are made as its Hollow is',
+    hollowBodies.kessel.length === 2 && hollowBodies.kessel.every((descent) => descent.has === descent.first && descent.apparitions > 0 && descent.apparitionsAreMadeAsIt), hollowBodies.kessel);
+  check('every body there is for the Hollow is lower than a vent is high when it is down on knees and hands, with what is fixed to its bones',
+    hollowBodies.inAVent.length === hollowBodies.thereAre.length && hollowBodies.inAVent.every((body) => body.has === body.body && body.shapes > 0 && body.top < hollowBodies.ventHeight), { inAVent: hollowBodies.inAVent, ventHeight: hollowBodies.ventHeight });
+
   await inGame(() => window.lastReturnDebug.setWorkshopContentUsed(false)); // one particular station from here on: from the code alone
 
   // --- choose the station for the lift-to-lift run below ---

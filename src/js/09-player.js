@@ -656,7 +656,7 @@ function recordScanHit(drawBeam) {
     // (Its own light on its own body: that is no light on it, and leaves the points it leaves on anything.)
   } else if (figure !== null) {
     // The light of a scanner that the Hollow has been up to, and knows for a thing, is nothing to it any more
-    // (letHollowKnowScanner, 08-entities.js). It still leaves its points.
+    // (letHollowKnowScanner, 08-hollow.js). It still leaves its points.
     if (!(figure === hollow.figure && scanSource.object !== null && scanSource.object.isIgnoredByHollow)) {
       figure.beamSourceX = scanSource.x; figure.beamSourceZ = scanSource.z;
       figure.beamSourceObject = scanSource.object;

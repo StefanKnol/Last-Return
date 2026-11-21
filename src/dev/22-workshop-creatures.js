@@ -2,7 +2,7 @@
 // Workshop, creature tool: change a creature's proportions and watch its body change.
 //
 // The body on screen is built by the game's own code (04-figures.js) and posed by the game's own code
-// (poseHollow and poseAdvancingStill in 08-entities.js, placeOtherPlayerFigure in 11-together.js), so it stands,
+// (poseHollow in 08-hollow.js, poseAdvancingStill in 08-entities.js, placeOtherPlayerFigure in 11-together.js), so it stands,
 // walks and reaches as it will in play. A player is one of the creatures here: the body the others see of you
 // when you are down there together, with the scanner in its hand.
 // It can be shown as a solid body, or the way the game shows it: as nothing but the points a scan leaves.
@@ -608,7 +608,7 @@ function renderCreatureWorkshopPanel(body) {
     addWorkshopNumber(body, 'Looking up or down (radians: the scanner points there)', state.playerPitch, -1.45, 1.45, 0.01, function (value) { state.playerPitch = value; markWorkshopStateChanged(); }).element.id = 'workshop-creature-pitch';
     addWorkshopNote(body, 'The pose is the game\'s own, from 11-together.js: what the others see of you down there. How tall you are is said once, in 00-config.js: playerHeight standing, playerHeightCrouching crouched (and playerEyeHeightToBody and playerEyeHeightToCrouchedBody for how far up those your eyes are). The body is made to fit both. Standing, all of it is made larger or smaller until it is playerHeight tall, so the sliders below give it its shape and not its height. Crouched, it goes down on its haunches as far as it takes. Red and teal on the pole are where you bump your head and where you see from. Choose "Posed by hand" to set every joint yourself.');
   } else {
-    addWorkshopNote(body, 'The pose is the game\'s own, from 08-entities.js. Choose "Posed by hand" to set every joint yourself.');
+    addWorkshopNote(body, 'The pose is the game\'s own, from ' + (kind.actsLike === 'hollow' ? '08-hollow.js' : '08-entities.js') + '. Choose "Posed by hand" to set every joint yourself.');
   }
 
   // A creature made here: what is on its bones, and what it is.

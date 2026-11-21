@@ -90,8 +90,13 @@ const hollow = Object.assign(createCreatureLegs(HOLLOW_WAY), {
 // same station has the same Hollow every time, and every game that shows a station (yours, and those of
 // whoever is down there with you) gives it the same body without being told. Kessel-9 has no seed, and is the
 // descent as it was written: the first body of the list.
+// (A body from the workshop is passed over in a station that is built from the code alone, like the rooms and
+// the loose things from there: isWorkshopContentUsed, 03-levelgen.js. That is how the checks in tools/ have it.)
 function chooseHollowBody() {
-  const bodies = TUNING.hollowBodies.filter(function (key) { return Boolean(FIGURE_KINDS[key]) && FIGURE_KINDS[key].bodyPlan === 'hollow'; });
+  const bodies = TUNING.hollowBodies.filter(function (key) {
+    const kind = FIGURE_KINDS[key];
+    return Boolean(kind) && kind.bodyPlan === 'hollow' && (isWorkshopContentUsed || kind.isDesigned !== true);
+  });
   if (bodies.length === 0) return 'hollow';
   if (level.kind !== 'generated') return bodies[0];
   return bodies[Math.floor(createNamedRandomGenerator(level.seed, 'the body of the Hollow')() * bodies.length)];

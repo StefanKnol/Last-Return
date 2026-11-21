@@ -621,7 +621,7 @@ function buildDebugReadout() {
   }
   if (hollow.isActive) {
     const distance = distanceBetweenPoints(hollow.figure.x, hollow.figure.z, player.x, player.z);
-    lines.push('HOLLOW      ' + (hollow.enragedTimer > 0 ? 'ENRAGED' : HOLLOW_STATE_NAMES[hollow.state]));
+    lines.push('HOLLOW      ' + (hollow.enragedTimer > 0 ? 'ENRAGED' : HOLLOW_STATE_NAMES[hollow.state]) + (hollow.bodyKey !== 'hollow' ? '   (body: ' + hollow.bodyKey + ')' : ''));
     lines.push('  distance  ' + distance.toFixed(1) + ' m   speed ' + hollow.currentSpeed.toFixed(1) + ' m/s');
     lines.push('  in beam   ' + (hollow.wasInBeam ? 'yes' : 'no') + '   anger ' + hollow.anger.toFixed(2) + ' (notices at ' + TUNING.hollowAngerNoticeLevel + ')');
     if (hollow.doubleBackTimer > 0) lines.push('  feint     doubling back in ' + hollow.doubleBackTimer.toFixed(1) + ' s');

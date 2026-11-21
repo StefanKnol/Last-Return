@@ -278,7 +278,7 @@ function check(description, condition, detail) {
     result.foundAgain = { state: d.hollow.state, found: count('hollowFound') - foundBefore, roar: count('hollowRoar') - roarBefore };
     // Hunting, its growl is the louder one, it snarls, and your heart pounds.
     const snarlBefore = count('hollowSnarl'), heartBefore = count('heartbeat'), loudGrowlBefore = count('hollowGrowlHunting');
-    // Hunting, it snarls every 2.2 to 4 seconds (4.0 is the longest gap, written in src/js/08-entities.js, not on
+    // Hunting, it snarls every 2.2 to 4 seconds (4.0 is the longest gap, written in src/js/08-hollow.js, not on
     // the test hook), but a snarl that comes while "it roars" still has the line is not put up (the roar says
     // more). So the first snarl on screen comes at most the roar's time plus the longest gap after the hunt
     // begins, and half a second is allowed for the steps. Six seconds at least, then on until a snarl is up.
