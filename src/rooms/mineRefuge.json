@@ -1,0 +1,28 @@
+{
+  "name": "REFUGE CHAMBER",
+  "width": 7,
+  "depth": 5,
+  "ceiling": 2.4,
+  "tiers": [0,1,2],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "",
+  "doors": [
+    { "wall": "north", "at": 3 },
+    { "wall": "west", "at": 2 }
+  ],
+  "itemSpot": { "x": 5.2, "y": 0.77, "z": 3.2 },
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "south", "along": 3.5, "centerY": 2.1, "width": 2.2, "height": 0.24, "isScrawled": false },
+    { "type": "sign", "text": "WAIT HERE. KEEP QUIET", "wall": "east", "along": 2.5, "centerY": 1.5, "width": 2.8, "height": 0.4, "isScrawled": true },
+    { "type": "table", "x": 5.2, "z": 3.2, "angle": 90, "lengthX": 1.6, "lengthZ": 0.7, "height": 0.76 },
+    { "type": "table", "x": 2.2, "z": 4.55, "angle": 0, "lengthX": 2.4, "lengthZ": 0.4, "height": 0.45 },
+    { "type": "chair", "x": 4.3, "z": 3.6, "angle": 250, "isToppled": true },
+    { "type": "locker", "x": 1.65, "z": 0.3, "angle": 180, "isDoorOpen": false },
+    { "type": "locker", "x": 1, "z": 0.3, "angle": 180, "isDoorOpen": false },
+    { "type": "barrel", "x": 6.5, "z": 0.5 },
+    { "type": "gurney", "x": 5.6, "z": 1.2, "angle": 0, "hasCoveredShape": false },
+    { "type": "hangingLamp", "x": 3.5, "z": 2.5, "drop": 0.3 }
+  ]
+}

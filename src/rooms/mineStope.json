@@ -1,0 +1,45 @@
+{
+  "name": "STOPE 4",
+  "width": 14,
+  "depth": 11,
+  "ceiling": 4.2,
+  "tiers": [1,2],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "south", "at": 6 },
+    { "wall": "west", "at": 5 }
+  ],
+  "tiles": [
+    "##############",
+    "####......####",
+    "###...aa...###",
+    "##...aabb...##",
+    "#....abb.....#",
+    ".............#",
+    "#.....##.....#",
+    "##....##....##",
+    "###........###",
+    "#####....#####",
+    "######.#######"
+  ],
+  "tileKinds": { "a": {"floor":0.35}, "b": {"floor":0.7} },
+  "itemSpot": { "x": 11.3, "y": 0.81, "z": 5.5 },
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "north", "along": 6.5, "centerY": 2.6, "width": 1.8, "height": 0.34, "isScrawled": false },
+    { "type": "sign", "text": "DO NOT DIG HERE", "wall": "east", "along": 4.5, "centerY": 1.5, "width": 3.2, "height": 0.45, "isScrawled": true },
+    { "type": "crate", "x": 11.3, "z": 5.5, "angle": 20, "size": 0.8, "baseHeight": 0 },
+    { "type": "rockPile", "x": 3.4, "z": 4.5, "size": 1.2 },
+    { "type": "rockPile", "x": 10.4, "z": 7.6, "size": 0.9 },
+    { "type": "rockPile", "x": 9.6, "z": 2.4, "size": 0.7 },
+    { "type": "timberProp", "x": 4.5, "z": 8.3 },
+    { "type": "timberProp", "x": 2.5, "z": 6.6 },
+    { "type": "timberProp", "x": 9.5, "z": 8.4 },
+    { "type": "mineCart", "x": 10.6, "z": 3.6, "angle": 40, "isTipped": true },
+    { "type": "ladder", "x": 8.3, "z": 4.4, "angle": 270, "height": 2.2 },
+    { "type": "hangingLamp", "x": 6.5, "z": 5.2, "drop": 0.6 },
+    { "type": "hangingLamp", "x": 3.5, "z": 3.5, "drop": 0.5 }
+  ]
+}

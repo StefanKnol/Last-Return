@@ -43,6 +43,8 @@ const player = {
   isInVent: false,
   health: TUNING.playerMaxHealth, // what is left of you: 0 is dead (09-health.js)
   hurtGraceSeconds: 0,            // just hit: nothing can hit you again until this has run out
+  hurtFlash: 0,                   // just hit: how red the screen is, from 1 down to 0. (It has to be a number before the
+                                  // first descent too: the title screen and the workshop draw with it, and without one they drew black.)
   isSprinting: false,
   isMoving: false,
   audibleRadius: 2.6,
@@ -79,6 +81,7 @@ const settings = {
   stationSize: 'medium',    // a key of GENERATED_SIZE_PRESETS
   stationLayout: 'mixed',   // a key of GENERATED_LAYOUT_PRESETS
   stationLevels: 'two',     // a key of GENERATED_LEVEL_PRESETS
+  stationLocation: ANY_LOCATION_KEY, // where a generated station is: a key of LOCATIONS (03-locations.js), or any of them, the seed says which
   seedText: '',             // what is typed in the seed box; empty means a new random station each descent
   hud: 'quiet',             // 'quiet' shows instruments only while they matter; 'full' shows everything all the time
   captions: 'tells',        // the lines in square brackets: 'off', 'tells' (what the Hollow has just done) or 'all' (every sound, with where it comes from)
@@ -129,6 +132,7 @@ function loadSettings() {
       if (GENERATED_SIZE_PRESETS[stored.stationSize]) settings.stationSize = stored.stationSize;
       if (GENERATED_LAYOUT_PRESETS[stored.stationLayout]) settings.stationLayout = stored.stationLayout;
       if (GENERATED_LEVEL_PRESETS[stored.stationLevels]) settings.stationLevels = stored.stationLevels;
+      settings.stationLocation = resolvePlaceSetting(stored.stationLocation);
       if (typeof stored.seedText === 'string') settings.seedText = stored.seedText.slice(0, 24);
       if (stored.hud === 'quiet' || stored.hud === 'full') settings.hud = stored.hud;
       if (stored.captions === 'off' || stored.captions === 'tells' || stored.captions === 'all') settings.captions = stored.captions;

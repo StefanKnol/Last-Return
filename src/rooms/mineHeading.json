@@ -1,0 +1,32 @@
+{
+  "name": "DEAD HEADING",
+  "width": 12,
+  "depth": 4,
+  "ceiling": 2.4,
+  "tiers": [0,1,2],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "west", "at": 1 }
+  ],
+  "tiles": [
+    "############",
+    "..........##",
+    "#.........##",
+    "############"
+  ],
+  "tileKinds": {  },
+  "itemSpot": null,
+  "items": [
+    { "type": "sign", "text": "IT IS BEHIND THE FACE", "wall": "east", "along": 2, "centerY": 1.4, "width": 1.9, "height": 0.36, "isScrawled": true },
+    { "type": "railTrack", "x": 5, "z": 1.5, "angle": 90, "length": 9.4 },
+    { "type": "mineCart", "x": 8.2, "z": 1.5, "angle": 90, "isTipped": false, "chance": 0.7 },
+    { "type": "rockPile", "x": 9.3, "z": 2.4, "size": 0.9 },
+    { "type": "rockPile", "x": 9.4, "z": 1.3, "size": 0.6, "chance": 0.6 },
+    { "type": "timberSet", "x": 3, "z": 2, "angle": 90, "span": 2, "height": 2.3 },
+    { "type": "timberSet", "x": 6.5, "z": 2, "angle": 90, "span": 2, "height": 2.3, "chance": 0.7 },
+    { "type": "hangingLamp", "x": 5, "z": 2, "drop": 0.3 }
+  ]
+}

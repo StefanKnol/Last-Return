@@ -301,6 +301,8 @@ function prepareWorkshopWorld(description) {
   liftDoor = null;
   level.kind = 'generated';
   level.seed = 0;
+  level.locationKey = DEFAULT_LOCATION_KEY; // (the room tool shows a room as it is in a place of its choosing)
+  level.signTexts = null;
   level.description = description;
   level.storeZone = 0;
   level.stillZones.length = 0;

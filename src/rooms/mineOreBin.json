@@ -1,0 +1,37 @@
+{
+  "name": "ORE BIN",
+  "width": 9,
+  "depth": 7,
+  "ceiling": 3.6,
+  "tiers": [0,1],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "west", "at": 3 },
+    { "wall": "south", "at": 6 }
+  ],
+  "tiles": [
+    "#########",
+    "##.....##",
+    "#..ccc..#",
+    "...ccc..#",
+    "#..ccc..#",
+    "##......#",
+    "######.##"
+  ],
+  "tileKinds": { "c": {"floor":-0.4} },
+  "itemSpot": null,
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "north", "along": 4.5, "centerY": 2.7, "width": 1.8, "height": 0.32, "isScrawled": false },
+    { "type": "box", "x": 4.5, "z": 1.35, "angle": 0, "sizeX": 1.8, "sizeZ": 0.6, "sizeY": 0.3, "bottom": 2.3, "surface": "metal", "isSolid": false },
+    { "type": "box", "x": 4.5, "z": 1.9, "angle": 0, "sizeX": 1.2, "sizeZ": 0.9, "sizeY": 0.08, "bottom": 1.9, "surface": "metal", "isSolid": false },
+    { "type": "rockPile", "x": 4.5, "z": 3.5, "size": 1.1, "chance": 0.75 },
+    { "type": "rockPile", "x": 3.8, "z": 2.6, "size": 0.7, "chance": 0.5 },
+    { "type": "mineCart", "x": 6.6, "z": 4.5, "angle": 20, "isTipped": false, "chance": 0.6 },
+    { "type": "timberProp", "x": 6.5, "z": 1.5 },
+    { "type": "timberProp", "x": 1.5, "z": 4.5, "chance": 0.6 },
+    { "type": "hangingLamp", "x": 4.5, "z": 3.5, "drop": 0.8 }
+  ]
+}

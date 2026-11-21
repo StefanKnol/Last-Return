@@ -251,7 +251,7 @@ function leaveDescentTogether() {
 
 // ---- What the host has chosen on the title screen, for the others to see ----
 
-const LOBBY_CHOICES = ['station', 'stationSize', 'stationLayout', 'stationLevels', 'seedText', 'workOrders', 'difficulty', 'customDifficulty'];
+const LOBBY_CHOICES = ['station', 'stationSize', 'stationLayout', 'stationLevels', 'stationLocation', 'seedText', 'workOrders', 'difficulty', 'customDifficulty'];
 
 function refreshChoiceControls() {
   interfaceState.refreshSettingControls();
@@ -264,7 +264,7 @@ function refreshChoiceControls() {
 function tellLobbyWhatIsChosen() {
   if (together.code === '' || !isLobbyHost()) return;
   sayToOthers({ k: 'chosen', on: together.isInDescent ? 1 : 0, station: settings.station, stationSize: settings.stationSize, stationLayout: settings.stationLayout,
-    stationLevels: settings.stationLevels, seedText: settings.seedText, workOrders: getAllowedWorkOrders(), difficulty: settings.difficulty, customDifficulty: settings.customDifficulty });
+    stationLevels: settings.stationLevels, stationLocation: settings.stationLocation, seedText: settings.seedText, workOrders: getAllowedWorkOrders(), difficulty: settings.difficulty, customDifficulty: settings.customDifficulty });
 }
 
 // As anyone else: the title screen shows it. It comes from somebody else's browser, so it is checked; anything
@@ -280,6 +280,7 @@ function hearLobbyChoices(data) {
   if (has(GENERATED_SIZE_PRESETS, data.stationSize)) settings.stationSize = data.stationSize;
   if (has(GENERATED_LAYOUT_PRESETS, data.stationLayout)) settings.stationLayout = data.stationLayout;
   if (has(GENERATED_LEVEL_PRESETS, data.stationLevels)) settings.stationLevels = data.stationLevels;
+  if (has(LOCATIONS, data.stationLocation) || data.stationLocation === ANY_LOCATION_KEY) settings.stationLocation = data.stationLocation;
   if (typeof data.seedText === 'string') settings.seedText = data.seedText.slice(0, 24);
   if (Array.isArray(data.workOrders)) {
     settings.workOrders = {};
@@ -357,7 +358,7 @@ function hearRelay(message) {
 function readSharedDescent(data) {
   if (!data || typeof data !== 'object') return null;
   const has = function (table, key) { return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key); };
-  const descent = { kind: data.kind === 'generated' ? 'generated' : 'classic', seed: 0, sizeKey: '', layoutKey: '', levelsKey: '', workOrders: [],
+  const descent = { kind: data.kind === 'generated' ? 'generated' : 'classic', seed: 0, sizeKey: '', layoutKey: '', levelsKey: '', locationKey: DEFAULT_LOCATION_KEY, workOrders: [],
     difficultyKey: 'standard', customDifficulty: sanitizeCustomDifficultyValues(data.customDifficulty) };
   if (data.difficultyKey === 'custom' || has(DIFFICULTY_PRESETS, data.difficultyKey)) descent.difficultyKey = data.difficultyKey;
   else return null;
@@ -366,6 +367,9 @@ function readSharedDescent(data) {
     if (!has(GENERATED_SIZE_PRESETS, data.sizeKey) || !has(GENERATED_LAYOUT_PRESETS, data.layoutKey) || !has(GENERATED_LEVEL_PRESETS, data.levelsKey)) return null;
     if (!Array.isArray(data.workOrders)) return null;
     descent.seed = data.seed; descent.sizeKey = data.sizeKey; descent.layoutKey = data.layoutKey; descent.levelsKey = data.levelsKey;
+    // Where it is: a place this game has, or it cannot be built here. (Said by nobody: the annex, as before there were others.)
+    if (data.locationKey !== undefined && !has(LOCATIONS, data.locationKey)) return null;
+    if (data.locationKey !== undefined) descent.locationKey = data.locationKey;
     descent.workOrders = data.workOrders.filter(function (key) { return findWorkOrder(key) !== null; });
     if (descent.workOrders.length === 0) return null;
   }

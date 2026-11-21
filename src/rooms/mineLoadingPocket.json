@@ -1,0 +1,40 @@
+{
+  "name": "LOADING POCKET",
+  "width": 12,
+  "depth": 8,
+  "ceiling": 3.4,
+  "tiers": [0,1],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "west", "at": 3 },
+    { "wall": "east", "at": 3 },
+    { "wall": "north", "at": 9 }
+  ],
+  "tiles": [
+    "#########.##",
+    "###........#",
+    "#..........#",
+    "............",
+    "............",
+    "#....cccc..#",
+    "##...cccc.##",
+    "############"
+  ],
+  "tileKinds": { "c": {"floor":-0.4} },
+  "itemSpot": null,
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "north", "along": 5.5, "centerY": 2.6, "width": 2.4, "height": 0.3, "isScrawled": false },
+    { "type": "railTrack", "x": 6, "z": 3.5, "angle": 90, "length": 11.4 },
+    { "type": "mineCart", "x": 3.6, "z": 3.5, "angle": 90, "isTipped": false },
+    { "type": "mineCart", "x": 5, "z": 3.5, "angle": 90, "isTipped": false },
+    { "type": "mineCart", "x": 6.6, "z": 5.9, "angle": 30, "isTipped": true },
+    { "type": "timberSet", "x": 2.5, "z": 4.5, "angle": 90, "span": 5, "height": 3.2 },
+    { "type": "timberProp", "x": 8.5, "z": 1.5 },
+    { "type": "timberProp", "x": 4.5, "z": 1.5 },
+    { "type": "rockPile", "x": 9.5, "z": 5.7, "size": 1 },
+    { "type": "hangingLamp", "x": 6, "z": 2.5, "drop": 0.5 }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "WINZE HEAD",
+  "width": 8,
+  "depth": 8,
+  "ceiling": 3,
+  "tiers": [1,2],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "north", "at": 3 },
+    { "wall": "east", "at": 2 }
+  ],
+  "tiles": [
+    "###.####",
+    "##....##",
+    "#.......",
+    "#..aa..#",
+    "#.abba.#",
+    "#.abba.#",
+    "#..aa..#",
+    "########"
+  ],
+  "tileKinds": { "a": {"floor":-0.4}, "b": {"floor":-0.8} },
+  "itemSpot": null,
+  "items": [
+    { "type": "sign", "text": "No. 3 WINZE · 60 m", "wall": "south", "along": 4, "centerY": 2, "width": 1.8, "height": 0.26, "isScrawled": false },
+    { "type": "sign", "text": "DO NOT LOOK DOWN", "wall": "west", "along": 4.5, "centerY": 1.4, "width": 2.8, "height": 0.42, "isScrawled": true },
+    { "type": "timberProp", "x": 1.5, "z": 3.5 },
+    { "type": "timberProp", "x": 6.5, "z": 6.4, "chance": 0.6 },
+    { "type": "ladder", "x": 4, "z": 4.2, "angle": 180, "height": 2 },
+    { "type": "rockPile", "x": 4.4, "z": 5.3, "size": 0.7, "chance": 0.6 },
+    { "type": "hangingLamp", "x": 4, "z": 4.5, "drop": 1.2 },
+    { "type": "mineCart", "x": 1.6, "z": 5.4, "angle": 60, "isTipped": true, "chance": 0.5 }
+  ]
+}

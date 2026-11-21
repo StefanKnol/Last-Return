@@ -11,8 +11,8 @@
   "bounce": 0.15,
   "grip": 0.6,
   "asLitter": 0,
-  "onTheFloor": 2,
-  "onASurface": 1,
+  "onTheFloor": 3,
+  "onASurface": 2,
   "parts": [
     { "shape": "box", "center": [0.325,0,0], "half": [0.025,0.2,0.3] },
     { "shape": "box", "center": [-0.325,0,0], "half": [0.025,0.2,0.3] },

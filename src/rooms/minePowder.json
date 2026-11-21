@@ -1,0 +1,28 @@
+{
+  "name": "POWDER MAGAZINE",
+  "width": 6,
+  "depth": 5,
+  "ceiling": 2.6,
+  "tiers": [1,2],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "",
+  "doors": [
+    { "wall": "south", "at": 2 }
+  ],
+  "itemSpot": { "x": 4.5, "y": 0.77, "z": 0.6 },
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "north", "along": 2, "centerY": 2.2, "width": 2.2, "height": 0.26, "isScrawled": false },
+    { "type": "sign", "text": "NO NAKED LIGHTS", "wall": "east", "along": 2.5, "centerY": 1.9, "width": 2.2, "height": 0.22, "isScrawled": false },
+    { "type": "table", "x": 4.5, "z": 0.6, "angle": 0, "lengthX": 1.4, "lengthZ": 0.7, "height": 0.76 },
+    { "type": "barrel", "x": 0.45, "z": 0.45 },
+    { "type": "barrel", "x": 0.45, "z": 1.15 },
+    { "type": "barrel", "x": 0.45, "z": 1.85 },
+    { "type": "barrel", "x": 1.15, "z": 0.45 },
+    { "type": "crateStack", "x": 0.6, "z": 3.9 },
+    { "type": "crate", "x": 5.3, "z": 3.2, "angle": 10, "size": 0.7, "baseHeight": 0 },
+    { "type": "crate", "x": 5.3, "z": 4.1, "angle": 80, "size": 0.6, "baseHeight": 0 },
+    { "type": "hangingLamp", "x": 3, "z": 2.5, "drop": 0.35 }
+  ]
+}

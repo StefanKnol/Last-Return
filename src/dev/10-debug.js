@@ -568,7 +568,7 @@ function debugPutLooseObjectAhead(kindKey) {
 function debugLoadOtherQuests() {
   if (level.kind !== 'generated') { showMessage('Kessel-9 has its own quests and no others.', 3, 'info'); return; }
   const mapBefore = level.mapFingerprint, questSeed = 1 + Math.floor(Math.random() * 999999);
-  loadStation('generated', level.seed, level.sizeKey, level.layoutKey, level.levelsKey, questSeed);
+  loadStation('generated', level.seed, level.sizeKey, level.layoutKey, level.levelsKey, questSeed, undefined, level.locationKey);
   resetWorldState();
   showMessage((level.mapFingerprint === mapBefore ? 'The same station' : 'NOT the same station') + ', other quests (numbers ' + questSeed + '): ' + describeQuestsForDebug() + '.', 7, level.mapFingerprint === mapBefore ? 'info' : 'warning');
 }
@@ -585,7 +585,7 @@ function debugLoadNextWorkOrder() {
   if (level.kind !== 'generated') { showMessage('Kessel-9 is always a Survey order.', 3, 'info'); return; }
   const mapBefore = level.mapFingerprint;
   const next = WORK_ORDERS[(WORK_ORDERS.indexOf(findWorkOrder(level.workOrder)) + 1) % WORK_ORDERS.length];
-  loadStation('generated', level.seed, level.sizeKey, level.layoutKey, level.levelsKey, level.questSeed, [next.key]);
+  loadStation('generated', level.seed, level.sizeKey, level.layoutKey, level.levelsKey, level.questSeed, [next.key], level.locationKey);
   resetWorldState();
   showMessage((level.mapFingerprint === mapBefore ? 'The same station' : 'NOT the same station') + ', ' + describeQuestsForDebug() + '.', 7, level.mapFingerprint === mapBefore ? 'info' : 'warning');
 }

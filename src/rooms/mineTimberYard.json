@@ -1,0 +1,37 @@
+{
+  "name": "TIMBER YARD",
+  "width": 11,
+  "depth": 6,
+  "ceiling": 3,
+  "tiers": [0,1],
+  "isFlooded": false,
+  "useInStations": true,
+  "locations": ["mine"],
+  "look": "rock",
+  "doors": [
+    { "wall": "west", "at": 2 },
+    { "wall": "south", "at": 8 }
+  ],
+  "tiles": [
+    "###########",
+    "#.........#",
+    "..........#",
+    "#.........#",
+    "##........#",
+    "########.##"
+  ],
+  "tileKinds": {  },
+  "itemSpot": { "x": 3.5, "y": 0.46, "z": 1.6 },
+  "items": [
+    { "type": "sign", "text": "{name}", "wall": "north", "along": 5.5, "centerY": 2.3, "width": 2, "height": 0.28, "isScrawled": false },
+    { "type": "box", "x": 3.5, "z": 1.6, "angle": 0, "sizeX": 3.2, "sizeZ": 0.5, "sizeY": 0.45, "bottom": 0, "surface": "plain", "isSolid": true },
+    { "type": "box", "x": 7.2, "z": 1.5, "angle": 3, "sizeX": 3, "sizeZ": 0.6, "sizeY": 0.6, "bottom": 0, "surface": "plain", "isSolid": true, "chance": 0.8 },
+    { "type": "box", "x": 7.2, "z": 1.5, "angle": 357, "sizeX": 2.8, "sizeZ": 0.4, "sizeY": 0.3, "bottom": 0.6, "surface": "plain", "isSolid": false, "chance": 0.5 },
+    { "type": "railTrack", "x": 5.5, "z": 3.3, "angle": 90, "length": 8 },
+    { "type": "mineCart", "x": 4, "z": 3.3, "angle": 90, "isTipped": false, "chance": 0.5 },
+    { "type": "timberProp", "x": 9.4, "z": 4.4 },
+    { "type": "timberProp", "x": 2.5, "z": 4.5, "chance": 0.7 },
+    { "type": "ladder", "x": 9.6, "z": 1.3, "angle": 0, "height": 2.4, "chance": 0.6 },
+    { "type": "hangingLamp", "x": 5.5, "z": 2.6, "drop": 0.5 }
+  ]
+}

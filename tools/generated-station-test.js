@@ -113,6 +113,177 @@ const SEEDS_PER_SIZE = Number(process.env.GENERATED_SEEDS || 40);
   check('across those stations every kind of extra job turns up (fuel, core samples, winch breaker, more generators)',
     jobTotals.fuel > 5 && jobTotals.cores > 5 && jobTotals.breaker > 5 && jobTotals.generators > 5, jobTotals);
 
+  // --- another place: the same job, somewhere that is not the pumping annex ---
+  // Every location the game has but the annex is tried (src/js/03-locations.js). What is asked of each is what
+  // its own entry there says of it, not what any one of them happens to be.
+  const otherPlaces = await inGame(() => Object.keys(window.lastReturnDebug.locations).filter((key) => key !== 'annex'));
+  check('there is somewhere to go down besides the pumping annex', otherPlaces.length > 0, otherPlaces);
+  for (const placeKey of otherPlaces) {
+    const place = await inGame(([locationKey, seedCount]) => {
+      const debug = window.lastReturnDebug, location = debug.locations[locationKey], annex = debug.locations.annex;
+      const layouts = ['tight', 'mixed', 'sprawling'], sizes = ['small', 'medium', 'large'];
+      // What the tiles of the station that is loaded are made of: how many of each, corridors apart from the rest.
+      const countLooks = function () {
+        const counts = { corridor: {}, other: {} };
+        for (let z = debug.level.boundsMinimumZ; z < debug.level.boundsMaximumZ; z++) for (let x = debug.level.boundsMinimumX; x < debug.level.boundsMaximumX; x++) {
+          const look = debug.getLookAt(x + 0.5, z + 0.5);
+          if (look === '') continue;
+          const zoneName = debug.zoneNames[debug.getZoneAt(x + 0.5, z + 0.5)] || '';
+          const group = zoneName.indexOf(location.corridorName + ' ') === 0 || zoneName.indexOf(annex.corridorName + ' ') === 0 ? counts.corridor : counts.other;
+          group[look] = (group[look] || 0) + 1;
+        }
+        return counts;
+      };
+      const bad = [], annexBad = [];
+      let sameMapAsAnnex = 0, renamedRooms = 0;
+      for (let seed = 1; seed <= seedCount; seed++) {
+        const size = sizes[seed % 3], layout = layouts[seed % 3], levels = seed % 2 === 0 ? 'two' : 'one';
+        // The annex first, for this seed: nothing of the other place may have got into it.
+        debug.loadStation('generated', seed, size, layout, levels);
+        const annexPrint = debug.level.mapFingerprint, annexLooks = countLooks();
+        const strangers = debug.getStationRooms().filter((room) => room.isExtra && !debug.isRoomOfLocation(room.key, 'annex')).map((room) => room.name);
+        if (debug.level.locationKey !== 'annex' || strangers.length > 0 || Object.keys(annexLooks.corridor).join() !== annex.corridorLook) annexBad.push({ seed: seed, strangers: strangers, corridors: annexLooks.corridor });
+        // Then the same seed there.
+        const wasBuilt = debug.loadStation('generated', seed, size, layout, levels, undefined, undefined, locationKey);
+        const found = wasBuilt ? debug.auditLayout().concat(debug.auditProgression()).concat(debug.auditHollowRoutes()).concat(debug.auditNoisyFloor()).concat(debug.auditVents()) : ['no plan could be made'];
+        if (wasBuilt) {
+          if (debug.level.locationKey !== locationKey) found.push('it was built in ' + debug.level.locationKey);
+          if (debug.level.mapFingerprint === annexPrint) sameMapAsAnnex++;
+          const rooms = debug.getStationRooms();
+          for (const room of rooms) {
+            if (room.isExtra && !debug.isRoomOfLocation(room.key, locationKey)) found.push(room.name + ' does not belong there');
+            const ownName = location.roomNames[room.key];
+            if (ownName) { renamedRooms++; if (room.name.indexOf(ownName) !== 0) found.push(room.key + ' is called ' + room.name + ', not ' + ownName); }
+            if (room.key === 'corridor' && room.name.indexOf(location.corridorName + ' ') !== 0) found.push('a corridor is called ' + room.name);
+          }
+          const looks = countLooks();
+          if (Object.keys(looks.corridor).join() !== location.corridorLook) found.push('its corridors are made of ' + Object.keys(looks.corridor).join(' and '));
+          if (debug.getIntroLines().join(' ').indexOf(String(seed)) < 0 || (location.introLines && debug.getIntroLines()[0] !== location.introLines[0])) found.push('the lines before the descent are ' + debug.getIntroLines().join(' / '));
+        }
+        if (found.length > 0) bad.push({ seed: seed, size: size, layout: layout, levels: levels, problems: found.slice(0, 4) });
+      }
+      return { label: location.label, bad: bad, annexBad: annexBad, sameMapAsAnnex: sameMapAsAnnex, renamedRooms: renamedRooms, hasOtherNames: Object.keys(location.roomNames).length > 0 };
+    }, [placeKey, Math.max(12, Math.round(SEEDS_PER_SIZE * 0.75))]);
+    check(place.label + ': stations there can be built, walked and finished in order, with the rooms, the names, the corridors and the first lines that belong there',
+      place.bad.length === 0 && (!place.hasOtherNames || place.renamedRooms > 0), { bad: place.bad.slice(0, 3), renamedRooms: place.renamedRooms });
+    check(place.label + ': the same seed is another station there than in the annex, and the annex has nothing of it', place.sameMapAsAnnex === 0 && place.annexBad.length === 0,
+      { sameMapAsAnnex: place.sameMapAsAnnex, annexBad: place.annexBad.slice(0, 3) });
+  }
+
+  // --- what is grown instead of drawn (src/js/04-caverns.js) ---
+  // A cavern: grown from a number, the same from the same number, another from another; and whatever grows, a
+  // room that keeps the rules a painted one keeps (every door of it can be walked to, all of its floor is built).
+  const grown = await inGame(() => {
+    const debug = window.lastReturnDebug;
+    const doors = [{ wall: 'west', at: 5 }, { wall: 'east', at: 4 }, { wall: 'south', at: 6 }, { wall: 'north', at: 2 }];
+    const bad = [], seen = {};
+    let boxes = 0, least = 1;
+    for (let number = 1; number <= 150; number++) {
+      const room = debug.growCavernRoom(12, 10, 3, doors, number, { fill: 0.4 + (number % 5) * 0.03 });
+      if (!room.tiles) { boxes++; continue; }
+      const shape = debug.resolveDesignedRoomShape(room), text = room.tiles.join('');
+      const openShare = 1 - (text.split('#').length - 1) / text.length;
+      least = Math.min(least, openShare);
+      if (shape.cutOffDoors.length > 0 || shape.sealedCount > 0 || room.tiles.length !== 10 || room.tiles.some((row) => row.length !== 12)) bad.push({ number: number, cutOff: shape.cutOffDoors, sealed: shape.sealedCount });
+      for (const door of [[0, 5], [11, 4], [6, 9], [2, 0]]) if (room.tiles[door[1]].charAt(door[0]) !== '.') bad.push({ number: number, door: door, is: room.tiles[door[1]].charAt(door[0]) });
+      seen[text] = true;
+    }
+    const again = debug.growCavernRoom(12, 10, 3, doors, 7, { fill: 0.44 }), same = debug.growCavernRoom(12, 10, 3, doors, 7, { fill: 0.44 });
+    return { bad: bad.slice(0, 3), boxes: boxes, different: Object.keys(seen).length, least: Math.round(least * 100) / 100, sameFromSameNumber: JSON.stringify(again) === JSON.stringify(same) };
+  });
+  check('a cavern grown from a number is the same from the same number and another from another, and every one is a room that can be walked: all doors, all of its floor',
+    grown.bad.length === 0 && grown.boxes <= 3 && grown.different >= 140 && grown.least >= 0.3 && grown.sameFromSameNumber, grown);
+
+  // A passage that winds: in a place whose corridors are passages, a corridor is not the rectangle it was planned
+  // as (rock is left standing in it), no two stations wind alike, and the same seed winds the same way twice.
+  const windingPlaces = await inGame(() => Object.keys(window.lastReturnDebug.locations).filter((key) => window.lastReturnDebug.locations[key].corridorStyle === 'passage'));
+  for (const placeKey of windingPlaces) {
+    const winding = await inGame((locationKey) => {
+      const debug = window.lastReturnDebug, location = debug.locations[locationKey];
+      // The corridors of the station that is loaded, as text: a line a row of the map, '+' where a corridor's floor is.
+      const drawCorridors = function () {
+        const rows = [];
+        let floor = 0;
+        for (let z = debug.level.boundsMinimumZ; z < debug.level.boundsMaximumZ; z++) {
+          let row = '';
+          for (let x = debug.level.boundsMinimumX; x < debug.level.boundsMaximumX; x++) {
+            const isCorridor = debug.getLookAt(x + 0.5, z + 0.5) !== '' && (debug.zoneNames[debug.getZoneAt(x + 0.5, z + 0.5)] || '').indexOf(location.corridorName + ' ') === 0;
+            row += isCorridor ? '+' : ' ';
+            if (isCorridor) floor++;
+          }
+          rows.push(row);
+        }
+        return { text: rows.join('\n'), floor: floor };
+      };
+      let planned = 0, plannedTiles = 0, dug = 0, differentKinds = 0;
+      const drawings = [];
+      for (let seed = 1; seed <= 6; seed++) {
+        debug.loadStation('generated', seed, 'medium', 'mixed', seed % 2 === 0 ? 'two' : 'one', undefined, undefined, locationKey);
+        const first = drawCorridors();
+        drawings.push(first.text);
+        dug += first.floor;
+        const rooms = debug.getStationRooms();
+        planned += rooms.filter((room) => room.key === 'corridor').length;
+        plannedTiles += rooms.filter((room) => room.key === 'corridor').reduce((sum, room) => sum + room.plannedTiles, 0);
+        // Two caverns of one kind in the same station are not the same cavern.
+        differentKinds += debug.getGrownShapes().filter((shape, index, all) => all.some((other, otherIndex) => otherIndex !== index && other.key === shape.key && other.tiles !== shape.tiles)).length;
+      }
+      debug.loadStation('generated', 3, 'medium', 'mixed', 'one', undefined, undefined, locationKey);
+      const again = drawCorridors().text;
+      // (How much of what was planned as corridor is floor. The doorways count as the corridor's here, so a little over what was dug.)
+      return { corridors: planned, shareDug: Math.round(dug / Math.max(1, plannedTiles) * 100) / 100, sameAgain: again === drawings[2], allDifferent: new Set(drawings).size === drawings.length,
+        differentKinds: differentKinds, width: location.corridorWidth || 2 };
+    }, placeKey);
+    check('in a place with passages for corridors, they wind: narrower than they were planned, no two stations alike, the same seed the same way twice; and two caverns of a kind in one station are two different caverns',
+      winding.corridors > 0 && winding.shareDug > 0.35 && winding.shareDug < 0.92 && winding.sameAgain && winding.allDifferent && winding.differentKinds > 0, winding);
+  }
+
+  // Where a descent is goes with it: from the title screen into what is built, and to whoever goes down with you
+  // (what the host says of the descent is read on the other side as something from a stranger: 11-together.js).
+  const carried = await inGame((place) => {
+    const debug = window.lastReturnDebug, before = { station: debug.settings.station, place: debug.settings.stationLocation, seed: debug.settings.seedText };
+    debug.settings.station = 'generated'; debug.settings.stationLocation = place; debug.settings.seedText = '77';
+    const said = JSON.parse(JSON.stringify(debug.describeChosenDescent()));
+    const heard = debug.readSharedDescent(said);
+    const fromBefore = debug.readSharedDescent(Object.assign({}, said, { locationKey: undefined }));
+    const nowhere = debug.readSharedDescent(Object.assign({}, said, { locationKey: 'atlantis' }));
+    debug.settings.station = before.station; debug.settings.stationLocation = before.place; debug.settings.seedText = before.seed;
+    return { said: said.locationKey, heard: heard && heard.locationKey, fromBefore: fromBefore && fromBefore.locationKey, nowhere: nowhere };
+  }, otherPlaces[0]);
+  check('the place chosen on the title screen is part of the descent, reaches whoever goes down with you, and a place this game does not have is refused',
+    carried.said === otherPlaces[0] && carried.heard === otherPlaces[0] && carried.fromBefore === 'annex' && carried.nowhere === null, carried);
+
+  // Left alone, the title screen leaves the place to the seed. On a page of its own, as the game comes up (the
+  // page the other checks use has "Place" set to the annex: browser-harness.js).
+  const untouched = await openGame({ anyPlace: true });
+  const anywhere = await untouched.page.evaluate(() => {
+    const debug = window.lastReturnDebug, control = document.getElementById('title-station-location');
+    const asItComesUp = { setting: debug.settings.stationLocation, shown: control.value, choices: Array.from(control.options).map((option) => option.value) };
+    debug.settings.station = 'generated';
+    // What each of a run of seeds is in, asked twice; and what a seed is in once a place is chosen.
+    const places = {}, changed = [];
+    for (let seed = 1; seed <= 120; seed++) {
+      debug.settings.seedText = String(seed);
+      const first = debug.describeChosenDescent().locationKey, second = debug.describeChosenDescent().locationKey;
+      places[first] = (places[first] || 0) + 1;
+      if (first !== second) changed.push(seed);
+    }
+    const chosen = Object.keys(debug.locations).map((place) => { debug.settings.stationLocation = place; return debug.describeChosenDescent().locationKey; });
+    debug.settings.stationLocation = asItComesUp.setting; debug.settings.seedText = '41';
+    return { asItComesUp: asItComesUp, places: places, changed: changed, chosen: chosen, all: Object.keys(debug.locations), promised: debug.describeChosenDescent().locationKey };
+  });
+  check('left alone, "Place" is anywhere: the seed says where, every place turns up, none of them most of the time, and a seed is in the same place every time; a place that is chosen is the place',
+    anywhere.asItComesUp.setting === 'random' && anywhere.asItComesUp.shown === 'random' && anywhere.asItComesUp.choices.join() === ['random'].concat(anywhere.all).join() &&
+    anywhere.all.every((place) => anywhere.places[place] >= 120 / anywhere.all.length / 2) && anywhere.changed.length === 0 && anywhere.chosen.join() === anywhere.all.join(), anywhere);
+  await untouched.page.click('#station-generated');
+  await untouched.page.fill('#title-seed', '41');
+  await untouched.page.click('#button-begin');
+  await untouched.page.waitForFunction(() => window.lastReturnDebug.game.mode !== 'title');
+  const wentDown = await untouched.page.evaluate(() => ({ place: window.lastReturnDebug.level.locationKey, seed: window.lastReturnDebug.level.seed, firstLine: window.lastReturnDebug.getIntroLines()[0] }));
+  check('and "Begin descent" goes down into that seed in that place', wentDown.seed === 41 && wentDown.place === anywhere.promised, { wentDown: wentDown, promised: anywhere.promised });
+  check('no script errors on that page', untouched.problems.length === 0, untouched.problems);
+  await untouched.browser.close();
+
   // --- a seed is a promise: the same seed must give the same station, a different seed a different one ---
   const repeat = await inGame(() => {
     const debug = window.lastReturnDebug;
