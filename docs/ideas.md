@@ -82,6 +82,9 @@
   - kidnapping monster that moves a player somewhere else
 
 - more cave like rooms for deeper levels (or different locations)
+  - ~~rooms that are not a box~~ (in: "Paint tiles" in the workshop's room tool. Rock, and a floor and a ceiling for every tile; `src/js/03-workshop-rooms.js`)
+    - still open: floor you can see and not walk to (a ledge, a hollow), which a station would have to know to leave nothing on; real pits in a room; a crawl that is not a vent; slanted and round walls
+  - locations with a theme of their own (mine, cave, medieval, playground): which rooms, what stands in them, what the walls look like, what dispatch says. Same job in each: power, cards, the last room
   - caves
   - bones and fossils
   - mineshafts with deadly drops

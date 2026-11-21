@@ -1670,9 +1670,9 @@ function buildGeneratedStation(seed, sizeKey, layoutKey, levelsKey) {
   }
   clearPlacement();
 
-  // Beams in the larger rooms.
+  // Beams in the larger rooms. (Not in a room with a shape of its own: its ceiling is not one flat rectangle.)
   for (const room of plan.rooms) {
-    if (room.isCorridor || room.key === 'liftLobby') continue;
+    if (room.isCorridor || room.key === 'liftLobby' || ROOM_CATALOGUE[room.key].shape) continue;
     placement.offsetY = room.floorY;
     addBeamsToLargeRoom(room);
   }

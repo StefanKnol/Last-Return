@@ -6,7 +6,9 @@
 //
 // Two kinds of room can be opened:
 //   rooms made here   lists of things from ROOM_ITEM_TYPES (03-workshop-rooms.js), saved to src/rooms/<key>.json.
-//                     These can be changed in every way.
+//                     These can be changed in every way, their shape too: "Paint tiles" turns the mouse into a
+//                     brush that fills tiles in with rock, digs them out again, and sets the floor and the
+//                     ceiling of each ("The shape of a room" in 03-workshop-rooms.js says what the file holds).
 //   rooms written as code (03-layout.js, 03-levelgen.js). These can only be looked at here. Change the
 //                     numbers in the source and save: with `npm run dev` this view reloads by itself.
 // ---------------------------------------------------------------------------
@@ -31,8 +33,20 @@ const roomWorkshop = {
   selectedSetters: {},   // setValue functions of the selected thing's position fields
   undoStack: [], redoStack: [], lastEditLabel: '', lastEditTime: -9999,
   drag: null,
+  // Painting the room's shape, tile by tile.
+  isPainting: false,     // the mouse is a brush: a click paints a tile instead of selecting a thing
+  brush: 'rock',         // a key of ROOM_WORKSHOP_BRUSHES
+  brushFloor: 0.4,       // what the "floor height" brush sets, in metres above the room's own floor
+  brushCeiling: 2,       // what the "ceiling height" brush sets
+  brushSize: 1,          // tiles across
+  hoverTile: null,       // [tileX, tileZ] of the tile under the mouse, while painting
+  stroke: null,          // the mouse button is down: { lastTileX, lastTileZ, skippedDoor, outOfLetters }
+  tileInfoElement: null,
   distanceField: new Int16Array(TILE_COUNT)
 };
+
+// What the brush can do to a tile.
+const ROOM_WORKSHOP_BRUSHES = [['rock', 'Fill in with rock'], ['plain', 'Dig out: plain floor'], ['floor', 'Set the floor height'], ['ceiling', 'Set the ceiling height']];
 
 // ---------------------------------------------------------------------------
 // Which room
@@ -62,6 +76,7 @@ function resetRoomWorkshopEditing() {
   state.undoStack.length = 0; state.redoStack.length = 0;
   state.lastEditLabel = '';
   state.drag = null;
+  state.stroke = null; state.hoverTile = null;
   state.needsRebuild = true;
 }
 
@@ -81,6 +96,7 @@ function openRoomInWorkshop(key, draft, savedKey) {
     state.room = null;
     state.savedKey = null;
     state.isDirty = false;
+    state.isPainting = false; // a room written as code has no tiles to paint
   }
   resetRoomWorkshopEditing();
   rebuildRoomWorkshopWorld();
@@ -117,22 +133,25 @@ function getRoomWorkshopSize() {
   return { width: rect[2] - rect[0], depth: rect[3] - rect[1], ceiling: roomWorkshop.definition.ceiling };
 }
 
-// The tile just inside a doorway of a workshop room, in the room's own coordinates.
-function getDesignedDoorInsideTile(room, door) {
-  if (door.wall === 'north') return [door.at, 0];
-  if (door.wall === 'south') return [door.at, room.depth - 1];
-  if (door.wall === 'west') return [0, door.at];
-  return [room.width - 1, door.at];
+// The room's shape as it is built: what resolveDesignedRoomShape made of it, or null for a plain box (and for
+// a room written as code).
+function getRoomWorkshopShape() {
+  return (roomWorkshop.definition && roomWorkshop.definition.shape) || null;
 }
 
 function createRoomWorkshopSignShape(room, item) {
-  const spot = getDesignedSignSpot(room, item);
-  const halfWidth = item.width / 2, bottom = item.centerY - item.height / 2, top = item.centerY + item.height / 2;
-  const originX = WORKSHOP_ORIGIN_X, originZ = WORKSHOP_ORIGIN_Z, thickness = 0.04;
-  if (spot.wall === WALL_NORTH) return createWorkshopBoxShape(originX + spot.along - halfWidth, bottom, originZ, originX + spot.along + halfWidth, top, originZ + thickness);
-  if (spot.wall === WALL_SOUTH) return createWorkshopBoxShape(originX + spot.along - halfWidth, bottom, originZ + room.depth - thickness, originX + spot.along + halfWidth, top, originZ + room.depth);
-  if (spot.wall === WALL_WEST) return createWorkshopBoxShape(originX, bottom, originZ + spot.along - halfWidth, originX + thickness, top, originZ + spot.along + halfWidth);
-  return createWorkshopBoxShape(originX + room.width - thickness, bottom, originZ + spot.along - halfWidth, originX + room.width, top, originZ + spot.along + halfWidth);
+  const shape = getRoomWorkshopShape();
+  const spot = getDesignedSignSpot(room, item, shape);
+  // Lettering is on a wall of one tile, and its height is measured from that tile's floor.
+  const tile = spot.tileZ * room.width + spot.tileX;
+  const floor = shape && shape.isOpen[tile] ? shape.floor[tile] : 0;
+  const halfWidth = item.width / 2, bottom = floor + item.centerY - item.height / 2, top = floor + item.centerY + item.height / 2;
+  const tileX = WORKSHOP_ORIGIN_X + spot.tileX, tileZ = WORKSHOP_ORIGIN_Z + spot.tileZ, thickness = 0.04;
+  const alongX = WORKSHOP_ORIGIN_X + spot.along, alongZ = WORKSHOP_ORIGIN_Z + spot.along;
+  if (spot.wall === WALL_NORTH) return createWorkshopBoxShape(alongX - halfWidth, bottom, tileZ, alongX + halfWidth, top, tileZ + thickness);
+  if (spot.wall === WALL_SOUTH) return createWorkshopBoxShape(alongX - halfWidth, bottom, tileZ + 1 - thickness, alongX + halfWidth, top, tileZ + 1);
+  if (spot.wall === WALL_WEST) return createWorkshopBoxShape(tileX, bottom, alongZ - halfWidth, tileX + thickness, top, alongZ + halfWidth);
+  return createWorkshopBoxShape(tileX + 1 - thickness, bottom, alongZ - halfWidth, tileX + 1, top, alongZ + halfWidth);
 }
 
 function rebuildRoomWorkshopWorld() {
@@ -174,14 +193,14 @@ function rebuildRoomWorkshopWorld() {
   const random = createSeededRandomGenerator(state.seed);
   state.itemRanges.length = 0;
   if (state.room) {
-    furnishDesignedRoom(state.room, random, name, state.itemRanges);
+    furnishDesignedRoom(state.room, random, name, state.itemRanges, definition.shape);
     // Show what a spool looks like on the spot it may be left on.
-    if (state.room.itemSpot) addSurveySpool(OBJECT_SPOOL_1, state.room.itemSpot.x, state.room.itemSpot.y, state.room.itemSpot.z, 'SPOOL');
+    if (definition.itemSpot) addSurveySpool(OBJECT_SPOOL_1, definition.itemSpot[0], definition.itemSpot[1], definition.itemSpot[2], 'SPOOL');
   } else {
     definition.furnish(random, name);
   }
   clearPlacement();
-  if (state.key !== 'liftLobby') {
+  if (state.key !== 'liftLobby' && !definition.shape) {
     addBeamsToLargeRoom({ startX: WORKSHOP_ORIGIN_X, startZ: WORKSHOP_ORIGIN_Z, endX: WORKSHOP_ORIGIN_X + rect[2] - rect[0], endZ: WORKSHOP_ORIGIN_Z + rect[3] - rect[1], ceiling: definition.ceiling });
   }
   finishWorkshopWorld();
@@ -236,9 +255,16 @@ function findRoomWorkshopProblems() {
     const tile = getDesignedDoorInsideTile(room, door);
     return tileIndexAt(WORKSHOP_ORIGIN_X + tile[0], WORKSHOP_ORIGIN_Z + tile[1]);
   });
+  // The shape: floor that is drawn but cannot be walked to is not built, and a door behind it is no doorway.
+  const shape = getRoomWorkshopShape();
+  if (shape && shape.sealedCount > 0) {
+    problems.push(shape.sealedCount + (shape.sealedCount === 1 ? ' tile of floor' : ' tiles of floor') + ' cannot be walked to from the first door (rock in between, or a step taller than ' +
+      formatWorkshopNumber(DESIGNED_TALLEST_STEP) + ' m). Until it can, it stays solid rock.');
+  }
   let firstFreeDoor = -1;
   room.doors.forEach(function (door, doorIndex) {
-    if (!tileIsWalkable[doorIndexes[doorIndex]]) problems.push('Something stands just inside the door in the ' + door.wall + ' wall. Nothing could get through it.');
+    if (shape && shape.cutOffDoors.indexOf(doorIndex) >= 0) problems.push('The door in the ' + door.wall + ' wall cannot be walked to from the first door. No station will use it.');
+    else if (!tileIsWalkable[doorIndexes[doorIndex]]) problems.push('Something stands just inside the door in the ' + door.wall + ' wall. Nothing could get through it.');
     else if (firstFreeDoor < 0) firstFreeDoor = doorIndex;
   });
   if (firstFreeDoor >= 0) {
@@ -251,17 +277,21 @@ function findRoomWorkshopProblems() {
     });
   }
 
-  // Things poking through a wall or the ceiling.
+  // Things poking through a wall or the ceiling, or standing in the rock.
   room.items.forEach(function (item, itemIndex) {
     if (ROOM_ITEM_TYPES[item.type].placement !== 'floor') return;
     const bounds = getRoomWorkshopItemBounds(itemIndex);
     if (!bounds) return;
     const slack = 0.03;
-    if (bounds.minimumX < WORKSHOP_ORIGIN_X - slack || bounds.minimumZ < WORKSHOP_ORIGIN_Z - slack ||
+    // In a room with a shape, a thing stands on the tile its middle is over, under that tile's ceiling.
+    const tile = shape ? findDesignedShapeTile(shape, item.x, item.z) : -1;
+    const ceiling = tile >= 0 ? shape.ceiling[tile] : room.ceiling;
+    if (shape && tile < 0) problems.push(describeRoomWorkshopItem(item, itemIndex) + ' stands in solid rock.');
+    else if (bounds.minimumX < WORKSHOP_ORIGIN_X - slack || bounds.minimumZ < WORKSHOP_ORIGIN_Z - slack ||
         bounds.maximumX > WORKSHOP_ORIGIN_X + room.width + slack || bounds.maximumZ > WORKSHOP_ORIGIN_Z + room.depth + slack) {
       problems.push(describeRoomWorkshopItem(item, itemIndex) + ' pokes through a wall.');
-    } else if (bounds.maximumY > room.ceiling + slack) {
-      problems.push(describeRoomWorkshopItem(item, itemIndex) + ' is taller than the ceiling (' + formatWorkshopNumber(room.ceiling) + ' m).');
+    } else if (bounds.maximumY > ceiling + slack) {
+      problems.push(describeRoomWorkshopItem(item, itemIndex) + ' is taller than the ceiling (' + formatWorkshopNumber(tile >= 0 ? ceiling - shape.floor[tile] : ceiling) + ' m).');
     }
   });
 
@@ -415,12 +445,14 @@ function moveSelectedRoomWorkshopItem(x, z, editLabel) {
   if (state.selectedSetters.z) state.selectedSetters.z.setValue(z);
 }
 
-// The highest thing under a point of the room that a spool could lie on, in metres above the floor.
+// The highest thing under a point of the room that a spool could lie on, in metres above the floor there.
 function findRoomWorkshopSurfaceBelow(x, z) {
   const worldX = WORKSHOP_ORIGIN_X + x, worldZ = WORKSHOP_ORIGIN_Z + z;
-  let highest = 0;
+  const shape = getRoomWorkshopShape(), tile = shape ? findDesignedShapeTile(shape, x, z) : -1;
+  const floor = tile >= 0 ? shape.floor[tile] : 0;
+  let highest = floor;
   for (const prop of worldProps) {
-    if (prop.isDynamic || prop.maximumY > 1.7 || prop.maximumY <= highest) continue;
+    if (prop.isDynamic || prop.maximumY > floor + 1.7 || prop.maximumY <= highest) continue;
     const offsetX = worldX - prop.centerX, offsetZ = worldZ - prop.centerZ;
     let isOver;
     if (prop.kind === PROP_KIND_BOX) {
@@ -430,7 +462,167 @@ function findRoomWorkshopSurfaceBelow(x, z) {
     } else isOver = offsetX * offsetX + offsetZ * offsetZ <= prop.radius * prop.radius;
     if (isOver) highest = prop.maximumY;
   }
-  return highest;
+  return highest - floor;
+}
+
+// ---------------------------------------------------------------------------
+// The room's shape: painting tiles
+// ---------------------------------------------------------------------------
+
+function setRoomWorkshopPainting(isPainting) {
+  const state = roomWorkshop;
+  state.isPainting = isPainting && state.room !== null;
+  state.stroke = null; state.hoverTile = null; state.drag = null;
+  refreshRoomWorkshopTileInfo();
+  markWorkshopStateChanged();
+}
+
+// The character of room.tiles for one tile.
+function getRoomWorkshopTileCharacter(tileX, tileZ) {
+  const room = roomWorkshop.room;
+  return room.tiles ? room.tiles[tileZ].charAt(tileX) : DESIGNED_TILE_FLOOR;
+}
+
+// How high the top of a tile is, for pointing at it: its floor, or the room's own floor level if it is rock.
+function getRoomWorkshopTileSurface(tileX, tileZ) {
+  const kind = getDesignedTileKind(roomWorkshop.room, getRoomWorkshopTileCharacter(tileX, tileZ));
+  return kind ? kind.floor : 0;
+}
+
+// The tile of the room the mouse points at: [tileX, tileZ], or null if it points at none.
+// Floors are at different heights, so the ray is followed down through each height there is, highest first
+// (lowest first, looking up): the tile it is over at a height counts if that tile's floor is at that height.
+function findRoomWorkshopTileUnderRay(ray) {
+  const room = roomWorkshop.room;
+  if (Math.abs(ray.directionY) < 0.02) return null;
+  const tileAtHeight = function (height) {
+    const distance = (height - ray.originY) / ray.directionY;
+    if (distance <= 0 || distance > 200) return null;
+    const tileX = Math.floor(ray.originX + ray.directionX * distance - WORKSHOP_ORIGIN_X), tileZ = Math.floor(ray.originZ + ray.directionZ * distance - WORKSHOP_ORIGIN_Z);
+    return tileX >= 0 && tileZ >= 0 && tileX < room.width && tileZ < room.depth ? [tileX, tileZ] : null;
+  };
+  const heights = [0];
+  for (const letter in room.tileKinds) if (heights.indexOf(room.tileKinds[letter].floor) < 0) heights.push(room.tileKinds[letter].floor);
+  heights.sort(function (a, b) { return ray.directionY < 0 ? b - a : a - b; });
+  for (const height of heights) {
+    const tile = tileAtHeight(height);
+    if (tile && getRoomWorkshopTileSurface(tile[0], tile[1]) === height) return tile;
+  }
+  return tileAtHeight(0);
+}
+
+// The tiles the brush covers when its middle is on (tileX, tileZ), those of them that are in the room.
+function getRoomWorkshopBrushTiles(tileX, tileZ) {
+  const state = roomWorkshop, room = state.room, tiles = [];
+  const first = -Math.floor((state.brushSize - 1) / 2);
+  for (let offsetZ = first; offsetZ < first + state.brushSize; offsetZ++) {
+    for (let offsetX = first; offsetX < first + state.brushSize; offsetX++) {
+      const x = tileX + offsetX, z = tileZ + offsetZ;
+      if (x >= 0 && z >= 0 && x < room.width && z < room.depth) tiles.push([x, z]);
+    }
+  }
+  return tiles;
+}
+
+// Paints the tiles under the brush. The first change of a stroke is where undo goes back to.
+function paintRoomWorkshopTiles(tileX, tileZ) {
+  const state = roomWorkshop, room = state.room, stroke = state.stroke;
+  const rows = [];
+  for (let z = 0; z < room.depth; z++) rows.push((room.tiles ? room.tiles[z] : DESIGNED_TILE_FLOOR.repeat(room.width)).split(''));
+  // The kinds are worked out on a copy: the room is not touched until it is known that something changes.
+  const draft = { tileKinds: JSON.parse(JSON.stringify(room.tileKinds)) };
+  const doorTiles = room.doors.map(function (door) { return getDesignedDoorInsideTile(room, door); });
+  let hasChanged = false;
+  for (const tile of getRoomWorkshopBrushTiles(tileX, tileZ)) {
+    const current = rows[tile[1]][tile[0]];
+    let wanted = current;
+    if (state.brush === 'plain') wanted = DESIGNED_TILE_FLOOR;
+    else if (doorTiles.some(function (doorTile) { return doorTile[0] === tile[0] && doorTile[1] === tile[1]; })) { stroke.skippedDoor = true; continue; }
+    else if (state.brush === 'rock') wanted = DESIGNED_TILE_ROCK;
+    else {
+      const kind = getDesignedTileKind(room, current);
+      // The floor brush digs rock out as it goes; the ceiling brush leaves rock alone (rock has no ceiling).
+      if (state.brush === 'floor') wanted = findDesignedTileCharacter(draft, state.brushFloor, kind ? kind.ceiling : undefined);
+      else if (kind) wanted = findDesignedTileCharacter(draft, kind.floor, state.brushCeiling === room.ceiling ? undefined : state.brushCeiling);
+      if (wanted === '') { stroke.outOfLetters = true; continue; }
+    }
+    if (wanted !== current) { rows[tile[1]][tile[0]] = wanted; hasChanged = true; }
+  }
+  if (!hasChanged) return;
+  if (!stroke.hasBegun) { state.lastEditLabel = ''; beginRoomWorkshopEdit('paint'); stroke.hasBegun = true; }
+  room.tiles = rows.map(function (row) { return row.join(''); });
+  room.tileKinds = draft.tileKinds;
+  finishRoomWorkshopEdit();
+}
+
+function finishRoomWorkshopStroke() {
+  const state = roomWorkshop, stroke = state.stroke;
+  state.stroke = null;
+  state.lastEditLabel = ''; // the next stroke is its own step to undo
+  if (!stroke) return;
+  if (stroke.hasBegun) {
+    // Tidies up: kinds no tile has any more go, and a room that is all plain floor again is a box again.
+    state.room = normalizeDesignedRoom(state.room, state.key);
+    state.needsRebuild = true;
+  }
+  if (stroke.outOfLetters) setWorkshopStatus('A room can have ' + DESIGNED_TILE_KIND_LETTERS.length + ' different kinds of tile, and this one has them all. Some tiles were left as they were.', 'warning');
+  else if (stroke.skippedDoor) setWorkshopStatus('The tile just inside a door is always plain floor: the brush left it alone.', 'info');
+}
+
+// Back to a plain box.
+function clearRoomWorkshopShape() {
+  const state = roomWorkshop;
+  if (!state.room || !state.room.tiles) return;
+  beginRoomWorkshopEdit('clear shape');
+  state.room.tiles = null; state.room.tileKinds = {};
+  finishRoomWorkshopEdit();
+  renderWorkshopPanel();
+}
+
+// Says what the tile under the mouse is.
+function refreshRoomWorkshopTileInfo() {
+  const state = roomWorkshop, element = state.tileInfoElement;
+  if (!element) return;
+  if (!state.isPainting) { element.textContent = ''; return; }
+  if (!state.hoverTile) { element.textContent = 'Point at a tile of the room.'; return; }
+  const tileX = state.hoverTile[0], tileZ = state.hoverTile[1], room = state.room;
+  const kind = getDesignedTileKind(room, getRoomWorkshopTileCharacter(tileX, tileZ));
+  const shape = getRoomWorkshopShape();
+  let text = 'Tile ' + tileX + ', ' + tileZ + ': ';
+  if (!kind) text += 'rock';
+  else {
+    const ceiling = Math.max(kind.ceiling === undefined ? room.ceiling : kind.ceiling, kind.floor + DESIGNED_ROOM_LIMITS.minimumHeadroom);
+    text += 'floor ' + formatWorkshopNumber(kind.floor) + ' m, ceiling ' + formatWorkshopNumber(ceiling) + ' m' + (kind.ceiling === undefined ? ' (the room\'s)' : '');
+    if (shape && !state.needsRebuild && shape.isSealed[tileZ * room.width + tileX]) text += '. Not built: it cannot be walked to';
+  }
+  element.textContent = text;
+}
+
+function renderRoomWorkshopShape(body) {
+  const state = roomWorkshop, room = state.room, limits = DESIGNED_ROOM_LIMITS;
+  addWorkshopHeading(body, 'The shape of the room');
+  addWorkshopCheckbox(body, 'Paint tiles (P): click and drag in the view', state.isPainting, function (isOn) { setRoomWorkshopPainting(isOn); renderWorkshopPanel(); },
+    'The mouse becomes a brush. Things in the room cannot be selected while it is one.').id = 'workshop-paint';
+  if (!state.isPainting) {
+    addWorkshopNote(body, room.tiles ? 'This room has a shape of its own.' : 'A plain box. Paint tiles to fill parts of it in with rock, or to give them a floor or a ceiling of their own.');
+    return;
+  }
+  addWorkshopSelect(body, 'Brush', state.brush, ROOM_WORKSHOP_BRUSHES, function (brush) { state.brush = brush; markWorkshopStateChanged(); renderWorkshopPanel(); }).id = 'workshop-brush';
+  if (state.brush === 'floor') {
+    addWorkshopNumber(body, 'Floor height (m above the room\'s floor)', state.brushFloor, limits.lowestFloor, limits.highestFloor, 0.05,
+      function (value) { state.brushFloor = roundDesignedHeight(value); markWorkshopStateChanged(); }).element.id = 'workshop-brush-floor';
+  }
+  if (state.brush === 'ceiling') {
+    addWorkshopNumber(body, 'Ceiling height (m above the room\'s floor)', state.brushCeiling, limits.minimumHeadroom, limits.highestTileCeiling, 0.05,
+      function (value) { state.brushCeiling = roundDesignedHeight(value); markWorkshopStateChanged(); }).element.id = 'workshop-brush-ceiling';
+  }
+  addWorkshopNumber(body, 'Brush size (tiles across)', state.brushSize, 1, 5, 1, function (value) { state.brushSize = value; markWorkshopStateChanged(); }).element.id = 'workshop-brush-size';
+  state.tileInfoElement = addWorkshopNote(body, '');
+  state.tileInfoElement.id = 'workshop-tile-info';
+  refreshRoomWorkshopTileInfo();
+  addWorkshopNote(body, 'A step of ' + formatWorkshopNumber(DESIGNED_TALLEST_STEP) + ' m or less can be walked, a taller one is a wall. Floor that cannot be walked to from the first door is not built ' +
+    '(red crosses): it stays rock until it has a way up. A ceiling is never lower than ' + formatWorkshopNumber(limits.minimumHeadroom) + ' m over its floor. "From above" (T) is the view to paint in.');
+  if (room.tiles) addWorkshopButton(addWorkshopRow(body), 'A plain box again', clearRoomWorkshopShape, 'Takes the shape away: every tile is plain floor again').id = 'workshop-clear-shape';
 }
 
 // ---------------------------------------------------------------------------
@@ -441,6 +633,8 @@ function findRoomWorkshopSurfaceBelow(x, z) {
 function getRoomWorkshopFileContent() {
   const content = JSON.parse(JSON.stringify(roomWorkshop.room));
   delete content.key;
+  // A plain box says nothing about its tiles, as before rooms had shapes.
+  if (!content.tiles) { delete content.tiles; delete content.tileKinds; }
   return content;
 }
 
@@ -580,7 +774,7 @@ function renderRoomWorkshopSelection(body) {
 
 function renderRoomWorkshopPanel(body) {
   const state = roomWorkshop, room = state.room;
-  state.problemsElement = null; state.saveButton = null;
+  state.problemsElement = null; state.saveButton = null; state.tileInfoElement = null;
 
   addWorkshopSelect(body, 'Room', state.key, getRoomWorkshopChoices(), function (key) {
     if (key !== state.key && mayDiscardRoomWorkshopChanges()) openRoomInWorkshop(key);
@@ -618,9 +812,10 @@ function renderRoomWorkshopPanel(body) {
   addWorkshopButton(row, 'From above', showRoomWorkshopTopView, 'T');
   addWorkshopButton(row, 'From the door', showRoomWorkshopFromDoor, 'On foot, just inside the first door');
   addWorkshopNote(body, 'Hold the right mouse button to look. W A S D fly, E up, Q down, Shift faster. Space scans, F sweeps.' +
-    (room ? ' Click a thing to select it, drag it to move it (Ctrl: half-metre steps), R turns it, arrow keys nudge it.' : ''));
+    (room ? ' Click a thing to select it, drag it to move it (Ctrl: half-metre steps), R turns it, arrow keys nudge it. P paints the room\'s shape.' : ''));
   if (!room) return;
 
+  renderRoomWorkshopShape(body);
   renderRoomWorkshopSelection(body);
 
   addWorkshopHeading(body, 'Things in the room (' + room.items.length + ')');
@@ -706,6 +901,7 @@ function renderRoomWorkshopPanel(body) {
     addWorkshopNumber(body, door.wall === 'north' || door.wall === 'south' ? 'Tiles from the west corner' : 'Tiles from the north corner', door.at, 0, wallLength - 1, 1, function (value) {
       beginRoomWorkshopEdit('door at ' + doorIndex);
       state.room.doors[doorIndex].at = value;
+      if (state.room.tiles) state.room = normalizeDesignedRoom(state.room, state.key); // the tile inside it is plain floor now
       finishRoomWorkshopEdit();
     });
   });
@@ -717,6 +913,7 @@ function renderRoomWorkshopPanel(body) {
       if (state.room.doors.some(function (door) { return door.wall === wall && door.at === at; })) continue;
       beginRoomWorkshopEdit('door add');
       state.room.doors.push({ wall: wall, at: at });
+      if (state.room.tiles) state.room = normalizeDesignedRoom(state.room, state.key);
       finishRoomWorkshopEdit();
       renderWorkshopPanel();
       return;
@@ -768,6 +965,13 @@ function onRoomWorkshopPointerDown(event) {
   if (event.button !== 0 || !state.room) return;
   if (state.needsRebuild) rebuildRoomWorkshopWorld();
   const ray = computeWorkshopMouseRay(event);
+  if (state.isPainting) {
+    state.stroke = { hasBegun: false, skippedDoor: false, outOfLetters: false };
+    state.hoverTile = findRoomWorkshopTileUnderRay(ray);
+    if (state.hoverTile) paintRoomWorkshopTiles(state.hoverTile[0], state.hoverTile[1]);
+    refreshRoomWorkshopTileInfo();
+    return;
+  }
   const hit = pickRoomWorkshopItem(ray);
   if (!hit) { if (state.selectedIndex !== -1) selectRoomWorkshopItem(-1); return; }
   if (hit.index !== state.selectedIndex) selectRoomWorkshopItem(hit.index, true);
@@ -789,6 +993,15 @@ function onRoomWorkshopPointerMove(event) {
     input.lookDeltaY += event.movementY || 0;
     return;
   }
+  if (state.isPainting && state.room) {
+    // The brush follows the mouse while it is over the view (and wherever it goes, with the button held).
+    const tile = state.stroke || event.target === renderer.canvas ? findRoomWorkshopTileUnderRay(computeWorkshopMouseRay(event)) : null;
+    const hasMoved = (tile === null) !== (state.hoverTile === null) || (tile !== null && (tile[0] !== state.hoverTile[0] || tile[1] !== state.hoverTile[1]));
+    state.hoverTile = tile;
+    if (hasMoved && tile && state.stroke) paintRoomWorkshopTiles(tile[0], tile[1]);
+    if (hasMoved) refreshRoomWorkshopTileInfo();
+    return;
+  }
   const drag = state.drag;
   if (!drag) return;
   // A click that wobbles a pixel or two is still a click.
@@ -807,6 +1020,7 @@ function onRoomWorkshopPointerMove(event) {
 function onRoomWorkshopPointerUp(event) {
   const state = roomWorkshop;
   if (event.button === 2) workshop.isLooking = false;
+  if (event.button === 0 && state.stroke) finishRoomWorkshopStroke();
   if (event.button === 0 && state.drag) {
     const wasMoving = state.drag.isMoving;
     state.drag = null;
@@ -843,7 +1057,9 @@ function onRoomWorkshopKey(event) {
   if (hasSelection && event.code === 'KeyR') { turnSelectedRoomWorkshopItem(event.shiftKey ? -1 : 1); return true; }
   if (event.repeat) return false;
   if (hasSelection && (event.code === 'Delete' || event.code === 'Backspace')) { deleteSelectedRoomWorkshopItem(); return true; }
+  if (state.isPainting && event.code === 'Escape') { setRoomWorkshopPainting(false); renderWorkshopPanel(); return true; }
   if (hasSelection && event.code === 'Escape') { selectRoomWorkshopItem(-1); return true; }
+  if (state.room !== null && event.code === 'KeyP') { setRoomWorkshopPainting(!state.isPainting); renderWorkshopPanel(); return true; }
   if (event.code === 'KeyT') { showRoomWorkshopTopView(); renderWorkshopPanel(); return true; }
   if (event.code === 'KeyH') { showRoomWorkshopOverview(); renderWorkshopPanel(); return true; }
   if (event.code === 'KeyG') { setWorkshopWalking(!workshop.isWalking); renderWorkshopPanel(); return true; }
@@ -882,6 +1098,7 @@ function addRoomWorkshopOverlays(data) {
     }
   }
   if (!room) return;
+  if (state.isPainting) addRoomWorkshopShapeOverlays();
   room.items.forEach(function (item, itemIndex) {
     const bounds = getRoomWorkshopItemBounds(itemIndex);
     if (!bounds) return;
@@ -899,6 +1116,50 @@ function addRoomWorkshopOverlays(data) {
   }
 }
 
+// While painting: what every tile is, drawn on the tile, and the brush.
+//   grey cross      rock
+//   red cross       floor that is drawn but not built, because it cannot be walked to
+//   amber square    a floor above the room's own; blue: below it
+//   small cyan one  a ceiling of its own
+//   green corners   the tile just inside a door, which stays plain floor
+//   white           the brush
+function addRoomWorkshopShapeOverlays() {
+  const state = roomWorkshop, room = state.room, shape = getRoomWorkshopShape();
+  const square = function (tileX, tileZ, y, inset, red, green, blue) {
+    const x = WORKSHOP_ORIGIN_X + tileX, z = WORKSHOP_ORIGIN_Z + tileZ;
+    pushDebugLine(x + inset, y, z + inset, x + 1 - inset, y, z + inset, red, green, blue);
+    pushDebugLine(x + 1 - inset, y, z + inset, x + 1 - inset, y, z + 1 - inset, red, green, blue);
+    pushDebugLine(x + 1 - inset, y, z + 1 - inset, x + inset, y, z + 1 - inset, red, green, blue);
+    pushDebugLine(x + inset, y, z + 1 - inset, x + inset, y, z + inset, red, green, blue);
+  };
+  const cross = function (tileX, tileZ, y, red, green, blue) {
+    const x = WORKSHOP_ORIGIN_X + tileX, z = WORKSHOP_ORIGIN_Z + tileZ;
+    pushDebugLine(x + 0.15, y, z + 0.15, x + 0.85, y, z + 0.85, red, green, blue);
+    pushDebugLine(x + 0.85, y, z + 0.15, x + 0.15, y, z + 0.85, red, green, blue);
+  };
+  pushWorkshopBoxLines(WORKSHOP_ORIGIN_X, 0.02, WORKSHOP_ORIGIN_Z, WORKSHOP_ORIGIN_X + room.width, 0.02, WORKSHOP_ORIGIN_Z + room.depth, 0.45, 0.45, 0.5);
+  for (let tileZ = 0; tileZ < room.depth; tileZ++) {
+    for (let tileX = 0; tileX < room.width; tileX++) {
+      const kind = getDesignedTileKind(room, getRoomWorkshopTileCharacter(tileX, tileZ));
+      if (!kind) { cross(tileX, tileZ, 0.03, 0.5, 0.5, 0.55); continue; }
+      const y = kind.floor + 0.03;
+      if (shape && !state.needsRebuild && shape.isSealed[tileZ * room.width + tileX]) cross(tileX, tileZ, y, 1.0, 0.25, 0.2);
+      if (kind.floor !== 0) square(tileX, tileZ, y, 0.06, kind.floor > 0 ? 1.0 : 0.3, kind.floor > 0 ? 0.75 : 0.55, kind.floor > 0 ? 0.2 : 1.0);
+      if (kind.ceiling !== undefined) square(tileX, tileZ, y, 0.3, 0.3, 0.9, 0.9);
+    }
+  }
+  for (const door of room.doors) {
+    const tile = getDesignedDoorInsideTile(room, door);
+    square(tile[0], tile[1], 0.03, 0.2, 0.3, 0.9, 0.4);
+  }
+  if (state.hoverTile) {
+    for (const tile of getRoomWorkshopBrushTiles(state.hoverTile[0], state.hoverTile[1])) {
+      const y = getRoomWorkshopTileSurface(tile[0], tile[1]);
+      pushWorkshopBoxLines(WORKSHOP_ORIGIN_X + tile[0] + 0.02, y + 0.02, WORKSHOP_ORIGIN_Z + tile[1] + 0.02, WORKSHOP_ORIGIN_X + tile[0] + 0.98, y + 0.12, WORKSHOP_ORIGIN_Z + tile[1] + 0.98, 1.0, 1.0, 1.0);
+    }
+  }
+}
+
 workshop.tools.rooms = {
   label: 'Rooms',
   initialize: function () { /* nothing to prepare */ },
@@ -906,6 +1167,10 @@ workshop.tools.rooms = {
     const state = roomWorkshop;
     state.seed = Number.isFinite(stored.seed) ? clampNumber(Math.round(stored.seed), 1, 99) : 1;
     state.showUnwalkable = stored.showUnwalkable === true;
+    if (ROOM_WORKSHOP_BRUSHES.some(function (brush) { return brush[0] === stored.brush; })) state.brush = stored.brush;
+    if (Number.isFinite(stored.brushFloor)) state.brushFloor = roundDesignedHeight(clampNumber(stored.brushFloor, DESIGNED_ROOM_LIMITS.lowestFloor, DESIGNED_ROOM_LIMITS.highestFloor));
+    if (Number.isFinite(stored.brushCeiling)) state.brushCeiling = roundDesignedHeight(clampNumber(stored.brushCeiling, DESIGNED_ROOM_LIMITS.minimumHeadroom, DESIGNED_ROOM_LIMITS.highestTileCeiling));
+    if (Number.isFinite(stored.brushSize)) state.brushSize = clampNumber(Math.round(stored.brushSize), 1, 5);
     let hasDraft = stored.draft && typeof stored.draft === 'object' && typeof stored.key === 'string';
     // Work in progress that is the same as the file is not work in progress (it was saved just before a reload).
     if (hasDraft && stored.savedKey === stored.key && designedRooms[stored.key] &&
@@ -915,8 +1180,9 @@ workshop.tools.rooms = {
     if (state.room && Number.isInteger(stored.selectedIndex)) state.selectedIndex = clampNumber(stored.selectedIndex, -1, state.room.items.length - 1);
     // Back where the camera was, if this is the room it was looking at.
     if (stored.cameraKey === state.key) restoreWorkshopCamera('rooms');
+    state.isPainting = stored.isPainting === true && state.room !== null;
   },
-  close: function () { roomWorkshop.drag = null; },
+  close: function () { roomWorkshop.drag = null; roomWorkshop.stroke = null; roomWorkshop.hoverTile = null; },
   storeState: function (stored) {
     const state = roomWorkshop;
     stored.key = state.key;
@@ -926,6 +1192,8 @@ workshop.tools.rooms = {
     stored.selectedIndex = state.selectedIndex;
     stored.seed = state.seed;
     stored.showUnwalkable = state.showUnwalkable;
+    stored.isPainting = state.isPainting;
+    stored.brush = state.brush; stored.brushFloor = state.brushFloor; stored.brushCeiling = state.brushCeiling; stored.brushSize = state.brushSize;
   },
   save: saveRoomWorkshop,
   moveCameraInside: function () {

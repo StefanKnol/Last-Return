@@ -74,6 +74,8 @@ function patchObjectNumbers(source, constantName, values) {
 
 // A room file is ordinary JSON, laid out with one door and one item per line so changes read well in a diff.
 // An object file is laid out the same way: one part per line. So is a creature file: one shape on its bones per line.
+// A room's `tiles` (its shape, one string for every row of tiles) are laid out one row per line, each under the
+// last, so that the file shows the room as a map.
 function formatRoomFile(room) {
   const oneLine = function (value) {
     return '{ ' + Object.keys(value).map((key) => JSON.stringify(key) + ': ' + JSON.stringify(value[key])).join(', ') + ' }';
@@ -82,7 +84,9 @@ function formatRoomFile(room) {
   for (const key of Object.keys(room)) {
     if (key === 'key') continue; // the file name is the key
     const value = room[key];
-    if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
+    if (key === 'tiles' && Array.isArray(value) && value.length > 0) {
+      lines.push('  ' + JSON.stringify(key) + ': [\n' + value.map((row) => '    ' + JSON.stringify(row)).join(',\n') + '\n  ]');
+    } else if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'object') {
       lines.push('  ' + JSON.stringify(key) + ': [\n' + value.map((entry) => '    ' + oneLine(entry)).join(',\n') + '\n  ]');
     } else if (value && typeof value === 'object' && !Array.isArray(value)) {
       lines.push('  ' + JSON.stringify(key) + ': ' + oneLine(value));

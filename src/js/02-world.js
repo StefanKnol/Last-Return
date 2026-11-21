@@ -251,6 +251,17 @@ function carveRoom(startX, startZ, endX, endZ, ceilingHeight, zone) {
   }
 }
 
+// Carves one tile out of solid rock, with a floor and a ceiling of its own. Both heights are measured from the
+// floor of the room being built. This is how a room that is not a plain box is made (03-workshop-rooms.js).
+function carveTile(tileX, tileZ, floorHeight, ceilingHeight, zone) {
+  const placed = placeTile(tileX, tileZ);
+  const index = tileIndexAt(placed[0], placed[1]);
+  tileIsOpen[index] = 1;
+  tileFloorHeight[index] = placement.offsetY + floorHeight;
+  tileCeilingHeight[index] = placement.offsetY + ceilingHeight;
+  tileZone[index] = resolveZone(zone);
+}
+
 function setTileFlagInRectangle(startX, startZ, endX, endZ, flag) {
   for (let tileZ = startZ; tileZ < endZ; tileZ++) {
     for (let tileX = startX; tileX < endX; tileX++) {

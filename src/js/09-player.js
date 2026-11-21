@@ -43,6 +43,8 @@ const player = {
   isInVent: false,
   health: TUNING.playerMaxHealth, // what is left of you: 0 is dead (09-health.js)
   hurtGraceSeconds: 0,            // just hit: nothing can hit you again until this has run out
+  hurtFlash: 0,                   // just hit: how red the screen is, from 1 down to 0. (It has to be a number before the
+                                  // first descent too: the title screen and the workshop draw with it, and without one they drew black.)
   isSprinting: false,
   isMoving: false,
   audibleRadius: 2.6,
