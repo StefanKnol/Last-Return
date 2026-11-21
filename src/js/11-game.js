@@ -1460,7 +1460,7 @@ function startApplication() {
     },
     awakenStills: awakenStills,
     emitNoise: emitNoise,
-    looseObjects: looseObjects, looseObjectKinds: LOOSE_OBJECT_KINDS, looseState: looseState,
+    looseObjects: looseObjects, looseObjectKinds: LOOSE_OBJECT_KINDS, looseObjectMarks: LOOSE_OBJECT_MARKS, getLooseNumber: getLooseNumber, looseState: looseState,
     designedObjectLimits: DESIGNED_OBJECT_LIMITS, // what the workshop allows an object to be: how many parts, how far out, how thin and how thick
     input: input, debugHooks: debugHooks, findLooseObjectInFocus: findLooseObjectInFocus, getThrowWindUp: getThrowWindUp,
     noteLooseObjectScanned: noteLooseObjectScanned, stunHollow: stunHollow, getLooseObjectLabel: getLooseObjectLabel, getLooseShoveResistance: getLooseShoveResistance,

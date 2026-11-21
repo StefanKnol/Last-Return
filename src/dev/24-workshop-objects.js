@@ -639,6 +639,36 @@ function renderObjectWorkshopPanel(body) {
   keyBox.addEventListener('change', renderWorkshopPanel); // the list of objects at the top shows the new name
   addObjectWorkshopFields(body, DESIGNED_OBJECT_FIELDS);
 
+  // A mark: a better make of a thing that does something. It does what that thing does, with the numbers below its own way.
+  addWorkshopHeading(body, 'What it does');
+  const markable = getMarkableKinds();
+  addWorkshopSelect(body, 'Works like', object.worksLike || '', [['', 'Nothing: it is a thing to carry']].concat(markable.map(function (key) { return [key, 'A ' + LOOSE_OBJECT_KINDS[key].label]; })), function (key) {
+    beginObjectWorkshopEdit('works like');
+    if (key === '') { delete state.object.worksLike; delete state.object.mark; delete state.object.numbers; }
+    else { state.object.worksLike = key; state.object.mark = state.object.mark || 2; state.object.numbers = {}; }
+    finishObjectWorkshopEdit();
+    renderWorkshopPanel();
+  }).id = 'workshop-object-works-like';
+  if (object.worksLike && LOOSE_OBJECT_KINDS[object.worksLike]) {
+    const base = LOOSE_OBJECT_KINDS[object.worksLike];
+    addWorkshopNumber(body, 'Mark (2 is mk II: the higher, the rarer in a station)', object.mark || 2, 2, TUNING.itemMarkWeights.length - 1, 1, function (value) {
+      beginObjectWorkshopEdit('mark'); state.object.mark = value; finishObjectWorkshopEdit();
+    }).element.id = 'workshop-object-mark';
+    addWorkshopNote(body, 'It does what a ' + base.label + ' does, and goes where one goes. These are the numbers it may have its own way; set to what the plain one has (' +
+      'shown beside each), a number is left to the plain one, also when that is tuned later. A station puts out marks in place of some of the plain ones (itemMarkWeights in 00-config.js): ' +
+      'leave "In generated stations" below at 0, or it lies about as a thing to carry as well.');
+    for (const numberKey in base.markNumbers) {
+      const range = base.markNumbers[numberKey];
+      const own = object.numbers && object.numbers[numberKey] !== undefined ? object.numbers[numberKey] : TUNING[numberKey];
+      addWorkshopNumber(body, range[0] + ' · plain: ' + formatWorkshopNumber(TUNING[numberKey]), own, range[1], range[2], range[3], function (value) {
+        beginObjectWorkshopEdit('number ' + numberKey);
+        state.object.numbers = state.object.numbers || {};
+        if (Math.abs(value - TUNING[numberKey]) < 1e-9) delete state.object.numbers[numberKey]; else state.object.numbers[numberKey] = value;
+        finishObjectWorkshopEdit();
+      }).element.id = 'workshop-object-number-' + numberKey;
+    }
+  }
+
   addWorkshopHeading(body, 'In generated stations');
   addWorkshopNote(body, 'How often a station has one lying about, among the other things of its sort. All three at 0: it is kept, and in no station. ' +
     'Anything above 0 changes what existing seeds produce.');

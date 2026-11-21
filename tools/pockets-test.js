@@ -51,10 +51,13 @@ function check(description, condition, detail) {
   // --- which kinds go into a pocket ---
   const kinds = await inGame(() => {
     const d = window.lastReturnDebug;
-    return { pocketed: Object.keys(d.looseObjectKinds).filter((key) => d.looseObjectKinds[key].pocket === true).sort(), count: d.tuning.pocketCount, all: Object.keys(d.looseObjectKinds).length };
+    const pocketed = Object.keys(d.looseObjectKinds).filter((key) => d.looseObjectKinds[key].pocket === true).sort();
+    // (A better mark of one of them, made in the workshop, goes where the plain one goes: those are told apart here.)
+    return { pocketed: pocketed.filter((key) => !d.looseObjectKinds[key].isDesigned), count: d.tuning.pocketCount, all: Object.keys(d.looseObjectKinds).length,
+      marks: pocketed.filter((key) => d.looseObjectKinds[key].isDesigned).map((key) => [key, d.looseObjectKinds[key].worksLike, d.looseObjectKinds[d.looseObjectKinds[key].worksLike].pocket === true]) };
   });
-  check('three kinds of thing go into a pocket, the scan grenade, the first aid kit and the survey spool, and you have four pockets',
-    kinds.pocketed.join() === 'firstAidKit,scanGrenade,spool' && kinds.count === 4 && kinds.all > 10, kinds);
+  check('three kinds of thing go into a pocket, the scan grenade, the first aid kit and the survey spool (and whatever is a better mark of one of them), and you have four pockets',
+    kinds.pocketed.join() === 'firstAidKit,scanGrenade,spool' && kinds.marks.every((mark) => mark[2]) && kinds.count === 4 && kinds.all > 10, kinds);
 
   // --- in and out ---
   const inAndOut = await inGame(() => {

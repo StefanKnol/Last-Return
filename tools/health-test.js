@@ -220,6 +220,66 @@ function check(description, condition, detail) {
   check('it never gives more than all of your health; and the bar on the HUD is red when little is left, and only then',
     kit.toTheBrim.health === kit.of && kit.toTheBrim.isSpent && Math.abs(kit.bar.width - 100) < 0.2 && kit.barWhenLow && !kit.barWhenNotSoLow, kit);
 
+  // --- marks: a better make of a thing does what the plain one does, with some of its numbers its own way ---
+  // (Which marks there are is whatever src/objects/ holds: what is asked of them is what each file says of itself.)
+  await prepare();
+  const marks = await inGame(() => {
+    const d = window.lastReturnDebug, p = d.player, seen = { plainHeals: d.tuning.firstAidHeals, weights: d.tuning.itemMarkWeights, kinds: [], kits: [] };
+    for (const baseKey in d.looseObjectMarks) {
+      for (const entry of d.looseObjectMarks[baseKey]) {
+        const kind = d.looseObjectKinds[entry[0]], base = d.looseObjectKinds[baseKey];
+        seen.kinds.push({ key: entry[0], mark: entry[1], isOfACodedKind: kind.worksLike === baseKey && kind.isDesigned === true && !base.isDesigned,
+          doesWhatItDoes: kind.use === base.use && kind.update === base.update && kind.pocket === base.pocket,
+          onlyItsNumbers: Object.keys(kind.numbers).every((key) => Boolean(base.markNumbers[key])), hasANameOfItsOwn: kind.label !== base.label, isAMark: entry[1] >= 2 && entry[1] === kind.mark });
+      }
+    }
+    // Every make of first aid kit, used at the same health: each gives back what it says it gives, and is used up.
+    for (const entry of [['firstAidKit', 1]].concat(d.looseObjectMarks.firstAidKit || [])) {
+      const kit = d.createLooseObject(entry[0], p.x, p.floorY + 0.4, p.z - 0.8, 0);
+      d.pickUpLooseObject(kit, false); d.simulate(0.3);
+      p.health = 20;
+      d.input.wantsUseCarried = true; d.simulate(0.15);
+      seen.kits.push({ key: entry[0], mark: entry[1], says: d.getLooseNumber(kit, 'firstAidHeals'), gave: p.health - 20, isSpent: kit.isSpent, told: document.getElementById('hud-messages').textContent.indexOf(kit.kind.label.slice(1)) >= 0 });
+      d.releaseHeldLooseObject(0); d.simulate(0.3);
+      d.clearLooseObjects();
+    }
+    // What stations put out, with what the workshop made and without: a kit is a kit of some mark, the plain one most often.
+    const count = function (isWithWorkshop) {
+      d.setWorkshopContentUsed(isWithWorkshop);
+      const found = {};
+      let stations = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        if (!d.loadStation('generated', seed, 'large', 'mixed', 'two')) continue;
+        stations++;
+        for (const baseKey of ['firstAidKit', 'scanGrenade', 'scannerTripod']) {
+          const makes = [baseKey].concat((d.looseObjectMarks[baseKey] || []).map((entry) => entry[0]));
+          let here = 0;
+          for (const object of d.looseObjects) if (makes.indexOf(object.kindKey) >= 0) { found[object.kindKey] = (found[object.kindKey] || 0) + 1; here++; }
+          const said = baseKey === 'firstAidKit' ? d.level.firstAidKitCount : (baseKey === 'scanGrenade' ? d.level.scanGrenadeCount : d.level.scannerTripodCount);
+          // (A mark whose file also has it lying about as a thing to carry, "In generated stations" above 0, is put out
+          // that way on top: then there may be more of that kind than the station put out as such, never fewer.)
+          const liesAboutToo = (d.looseObjectMarks[baseKey] || []).some((entry) => { const kind = d.looseObjectKinds[entry[0]]; return kind.asLitter > 0 || kind.onTheFloor > 0 || kind.onASurface > 0; });
+          if (liesAboutToo && isWithWorkshop ? here < said : here !== said) found['miscounted ' + baseKey] = (found['miscounted ' + baseKey] || 0) + 1;
+        }
+      }
+      return { stations: stations, found: found };
+    };
+    seen.withWorkshop = count(true);
+    seen.fromCodeAlone = count(false);
+    return seen;
+  });
+  check('every mark there is works like a kind that is written as code: it does what that does and goes where that goes, changes only numbers that kind lets a mark change, and has a name of its own',
+    marks.kinds.every((kind) => kind.isOfACodedKind && kind.doesWhatItDoes && kind.onlyItsNumbers && kind.hasANameOfItsOwn && kind.isAMark), marks.kinds);
+  check('every make of first aid kit gives back what it says it gives and is used up; a higher mark gives more',
+    marks.kits.every((kit) => kit.gave === kit.says && kit.isSpent && kit.told) && marks.kits[0].says === marks.plainHeals &&
+    marks.kits.slice().sort((first, second) => first.mark - second.mark).every((kit, index, all) => index === 0 || kit.says > all[index - 1].says), marks.kits);
+  const makesOf = (found, baseKey) => Object.keys(found).filter((key) => key === baseKey || marks.kinds.some((kind) => kind.key === key && kind.isOfACodedKind && key.indexOf(baseKey) === 0));
+  const plainKits = marks.withWorkshop.found.firstAidKit || 0, markedKits = makesOf(marks.withWorkshop.found, 'firstAidKit').reduce((sum, key) => sum + (key === 'firstAidKit' ? 0 : marks.withWorkshop.found[key]), 0);
+  check('a station puts out marks in place of some of the plain ones, never more things for it, and the plain one most often; a station built from the code alone has only plain ones',
+    marks.withWorkshop.stations >= 20 && !Object.keys(marks.withWorkshop.found).some((key) => key.indexOf('miscounted') === 0) &&
+    (marks.kinds.length === 0 || (markedKits > 0 && plainKits > markedKits)) &&
+    Object.keys(marks.fromCodeAlone.found).sort().join() === 'firstAidKit,scanGrenade,scannerTripod', { withWorkshop: marks.withWorkshop.found, fromCodeAlone: marks.fromCodeAlone.found });
+
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();
 

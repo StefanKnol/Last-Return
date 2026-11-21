@@ -7,7 +7,15 @@
 // each of them into an ordinary kind of loose object, and puts it among a station's litter or its valuables
 // if the file asks for that.
 //
-// What a file cannot give an object is something to do (`use`): that is code, and stays in 08-loose-objects.js.
+// What a file cannot give an object is something of its own to do (`use`): that is code, and stays in
+// 08-loose-objects.js. What it can do is say that it works like a kind that has something to do, and so be a
+// better make of it: a mark ("Marks", 08-loose-objects.js). (A mark of the scanner tripod scans out of its own
+// shape: its lens is the ball at its front, and its light is on top of the box behind that.) Such a file has
+// three things more:
+//   worksLike  the key of the kind it works like (one that has `markNumbers`): it does what that kind does
+//   mark       which mark it is, from 2: how rare it is where a station puts that kind out (TUNING.itemMarkWeights)
+//   numbers    the numbers of that kind that it has its own way: { "firstAidHeals": 25 }. What it leaves out
+//              is as the plain one has it, also when that is tuned later.
 //
 // In an object file, as in LOOSE_OBJECT_KINDS, a part's numbers are metres as the object hangs in the beam:
 // x to your right, y up, z towards you.
@@ -53,13 +61,41 @@ function normalizeDesignedObject(source, key) {
     if (part && object.parts.length < DESIGNED_OBJECT_LIMITS.maximumParts) object.parts.push(part);
   }
   if (object.parts.length === 0) object.parts.push(normalizeDesignedPart({ shape: 'box' }, DESIGNED_OBJECT_LIMITS));
+  // A mark: only of a kind that comes in marks, and only that kind's numbers, each within what it may be set to.
+  // (A file that is no mark says nothing of any of this, as every file did before there were marks.)
+  const base = getMarkableKinds().indexOf(source.worksLike) >= 0 ? LOOSE_OBJECT_KINDS[source.worksLike] : null;
+  if (base) {
+    object.worksLike = source.worksLike;
+    object.mark = Math.round(normalizeDesignedNumber(source.mark, 2, 2, TUNING.itemMarkWeights.length - 1));
+    object.numbers = {};
+    for (const numberKey in base.markNumbers) {
+      const range = base.markNumbers[numberKey];
+      const value = normalizeDesignedNumber(source.numbers && typeof source.numbers === 'object' ? source.numbers[numberKey] : undefined, NaN, range[1], range[2]);
+      if (Number.isFinite(value)) object.numbers[numberKey] = Math.round(Math.round(value / range[3]) * range[3] * 10000) / 10000;
+    }
+  }
   return object;
+}
+
+// The kinds an object file can be a mark of: those written as code that say which of their numbers a mark may change.
+function getMarkableKinds() {
+  return Object.keys(LOOSE_OBJECT_KINDS).filter(function (key) { return !LOOSE_OBJECT_KINDS[key].isDesigned && Boolean(LOOSE_OBJECT_KINDS[key].markNumbers); });
 }
 
 // The LOOSE_OBJECT_KINDS entry for a workshop object.
 function createDesignedObjectKind(object) {
   const kind = JSON.parse(JSON.stringify(object));
   kind.isDesigned = true;
+  // A mark does what the kind it works like does, and goes where that goes.
+  if (kind.worksLike) {
+    const base = LOOSE_OBJECT_KINDS[kind.worksLike];
+    kind.use = base.use;
+    if (base.update) kind.update = base.update;
+    if (base.pocket === true) kind.pocket = true;
+    // One that scans by itself (a tripod) scans as that does, out of its own shape: its lens and its light are
+    // where this shape has them (placeScannerOnParts, 08-loose-objects.js).
+    if (base.scans) kind.scans = placeScannerOnParts(base.scans, kind.parts);
+  }
   // In a file, 0 means never; a kind that never shatters has no `shattersAt` at all.
   if (!(kind.shattersAt > 0)) delete kind.shattersAt;
   // Something thin (a plate, a wire) is stepped as if it were a shelf board thick, as the steel plate is:
@@ -83,4 +119,5 @@ for (const key in DESIGNED_OBJECTS) {
   if (kind.asLitter > 0) STATION_LITTER.push([key, kind.asLitter]);
   if (kind.onTheFloor > 0) STATION_VALUABLES_ON_THE_FLOOR.push([key, kind.onTheFloor]);
   if (kind.onASurface > 0) STATION_VALUABLES_ON_A_SURFACE.push([key, kind.onASurface]);
+  if (kind.worksLike) (LOOSE_OBJECT_MARKS[kind.worksLike] = LOOSE_OBJECT_MARKS[kind.worksLike] || []).push([key, kind.mark]);
 }

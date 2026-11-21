@@ -1011,6 +1011,35 @@ function checkSourcePatching() {
     const objectAfterReload = await objectState();
     check('a reload keeps the tool and the unsaved object', objectAfterReload.key === 'testThing' && objectAfterReload.isDirty && objectAfterReload.label === 'changed thing', objectAfterReload);
 
+    // --- a mark: the object is made a better make of a thing that does something, and saved as one ---
+    // (Of the first kind the game lets a mark be made of, with the first number that kind lets a mark change:
+    // which those are is read from the game, not assumed.)
+    const markable = await inPage(() => {
+      const debug = window.lastReturnDebug, key = Object.keys(debug.looseObjectKinds).filter((kindKey) => !debug.looseObjectKinds[kindKey].isDesigned && debug.looseObjectKinds[kindKey].markNumbers)[0];
+      const numberKey = Object.keys(debug.looseObjectKinds[key].markNumbers)[0], range = debug.looseObjectKinds[key].markNumbers[numberKey];
+      return { key: key, numberKey: numberKey, plain: debug.tuning[numberKey], other: debug.tuning[numberKey] === range[2] ? range[1] : range[2] };
+    });
+    await page.selectOption('#workshop-object-works-like', markable.key);
+    await setNumber('workshop-object-mark', 3);
+    await setNumber('workshop-object-number-' + markable.numberKey, markable.other);
+    const asAMark = await inPage(() => { const object = window.lastReturnDebug.objectWorkshop.object; return { worksLike: object.worksLike, mark: object.mark, numbers: object.numbers }; });
+    await setNumber('workshop-object-number-' + markable.numberKey, markable.plain);
+    const leftToThePlainOne = await inPage(() => Object.keys(window.lastReturnDebug.objectWorkshop.object.numbers).length);
+    await setNumber('workshop-object-number-' + markable.numberKey, markable.other);
+    await waitForReload(() => page.click('#workshop-save-object'));
+    await frames();
+    const markFile = JSON.parse(fs.readFileSync(objectPath, 'utf8'));
+    const markInTheGame = await inPage((made) => {
+      const debug = window.lastReturnDebug, kind = debug.looseObjectKinds.testThing, base = debug.looseObjectKinds[made.key];
+      return { does: kind.use === base.use && kind.update === base.update && kind.pocket === base.pocket, isListed: (debug.looseObjectMarks[made.key] || []).some((entry) => entry[0] === 'testThing' && entry[1] === 3),
+        itsNumber: debug.getLooseNumber({ kind: kind }, made.numberKey), plainNumber: debug.getLooseNumber({ kind: base }, made.numberKey) };
+    }, markable);
+    check('"Works like" makes the object a mark of a thing that does something: which mark, and that thing\'s numbers its own way; a number set to what the plain one has is left to the plain one',
+      asAMark.worksLike === markable.key && asAMark.mark === 3 && asAMark.numbers[markable.numberKey] === markable.other && leftToThePlainOne === 0, { asAMark: asAMark, leftToThePlainOne: leftToThePlainOne });
+    check('saved, the file says so, and the game has a kind that does what the plain one does with that number its own way',
+      markFile.worksLike === markable.key && markFile.mark === 3 && markFile.numbers[markable.numberKey] === markable.other &&
+      markInTheGame.does && markInTheGame.isListed && markInTheGame.itsNumber === markable.other && markInTheGame.plainNumber === markable.plain, { file: { worksLike: markFile.worksLike, mark: markFile.mark, numbers: markFile.numbers }, game: markInTheGame });
+
     // --- leaving ---
     await waitForReload(() => page.click('#workshop-leave'));
     await frames();

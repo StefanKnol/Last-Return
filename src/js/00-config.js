@@ -224,6 +224,11 @@ const TUNING = {
   stillAfterHitSeconds: 5,          // a Still that has struck does not move, or strike, again for this long
   playerRetryHealth: 25,            // back from a checkpoint, or on your feet again where the others restarted your scanner: at least this much
   firstAidHeals: 10,                // what a first aid kit gives back
+  // Marks. A thing that does something (a scan grenade, a first aid kit) can come in better makes: mk II, mk III.
+  // Each is an object made in the workshop that "works like" the plain one and has some of its numbers its own
+  // way (08-workshop-objects.js). Where a station puts out one of a kind, this is how likely each mark is, by its
+  // number: the plain one (mark 1) counts for 1, and the others for these. A mark nothing is made for is not there.
+  itemMarkWeights: [0, 1, 0.3, 0.1, 0.04, 0.02],
   firstAidKitsPerRoom: 0.12,        // how many of them a station has, for each of its rooms (never fewer than one)
   healthCriticalShare: 0.3,         // at or below this share of your health the bar on the HUD goes red
   noiseRadiusDropLanding: 18,   // landing at the foot of a drop in a vent (per metre fallen it is no louder: it is the sheet metal that rings)
@@ -271,6 +276,7 @@ const TUNING = {
   looseHoldSlipDegrees: 22,         // knocked this far round against something, the beam gives and holds it as the knock left it
   looseHoldFastestSpeed: 7,         // it never chases your hands faster than this (m/s), however far behind it is
   looseHoldSagPerKilogram: 0.002,   // metres it hangs below the line the scanner points along, per kilogram
+  looseHoldClearance: 0.02,         // the beam holds a thing no nearer the floor or the ceiling than this (metres): it does not push it into them
   looseHoldShortestDistance: 0.12,  // pressed against something ahead, the beam holds a thing as near as this (from the lens to its nearest side); then it can give no more
   looseHoldGiveSlack: 0.04,         // the thing has to be this far short of where the beam wants it before the beam gives
   looseHoldLetOutSpeed: 1.6,        // how fast the beam lets it out again when there is room (m/s)
@@ -288,7 +294,7 @@ const TUNING = {
   tripodFlashSeconds: 0.25,         // how long one pulse lasts
   tripodPulseRays: 2500,            // how many pulses of the scanner go into one of its own
   tripodConeDegrees: 86,            // how wide its light opens, edge to edge
-  tripodBatterySeconds: 480,        // how long it scans in all, counted while it is on. Then it is spent
+  tripodBatterySeconds: 120,        // how long it scans in all, counted while it is on. Then it is spent
   hollowKnowsScannerMetres: 1.6,    // the Hollow this near to one that is scanning finds out it is a thing: after that its light and its tick are nothing to it, until you handle it again
   hollowAtScannerSeconds: 2.5,      // ... and stands over it for this long, sniffing, before it goes back to its rounds
   noiseRadiusTripodPulse: 5,        // each pulse ticks. The Hollow hears that from a little way off; a looter close by is startled by it
@@ -297,6 +303,8 @@ const TUNING = {
   scanGrenadeFuseSeconds: 6,        // armed and not yet landed anywhere, it goes off after this long, wherever it is
   scanGrenadeLandingSeconds: 0.35,  // armed and thrown, it goes off this long after it first hits something
   scanGrenadeBurstSeconds: 1.2,     // how long its scan lasts
+  scanGrenadeBursts: 1,             // how many times it scans, one after the other (a mark II: twice)
+  scanGrenadeBurstGapSeconds: 1.5,  // ... and how long it is dark between two of them
   scanGrenadeSweeps: 1.7,           // how many pulses it fires in all, in full sweeps of the scanner (a sweep is 20,000). This was 2.5 while a third of them went into the floor under it; 1.6 puts as many on the room as 2.5 did then.
   scanGrenadePatchMetres: 0.25,     // it wastes no light on anything it is up against: a pulse that would land on floor, wall or ceiling nearer than this is aimed somewhere else instead. (Lying on the floor, 35 of every 100 pulses of an all-round burst landed within a hand of it.)
   scanGrenadeStunHits: 25,          // pulses that must land on the Hollow for it to be stunned
@@ -401,13 +409,13 @@ const TUNING = {
   surveyorRoamSpeed: 1.2,           // walking its rounds, metres a second
   surveyorChaseSpeed: 3.5,          // after you: faster than you walk, slower than you run. Running is loud, and the Hollow hears that.
   surveyorFleeSpeed: 4.4,           // running off after it has struck
-  surveyorConeDegrees: 64,          // how wide its light opens, edge to edge
-  surveyorSweepDegrees: 55,         // on its rounds its light swings this far to either side of the way it faces ...
-  surveyorSweepSeconds: 4.5,        // ... once there and back in this long
-  surveyorRoamPulsesPerSecond: 1500,// how many pulses its light is on its rounds: fewer, so it takes it longer to make you out
-  surveyorHuntPulsesPerSecond: 5200,// ... and once it has seen you
-  surveyorSightMetres: 24,          // it makes nobody out from further off than this, however much of its light is on them
-  surveyorNoticeSeconds: 0.7,       // you have to be in its light for this long, in all, before it has seen you: a glance is not enough
+  surveyorConeDegrees: 76,          // how wide its light opens, edge to edge
+  surveyorSweepDegrees: 45,         // on its rounds its light swings this far to either side of the way it faces ...
+  surveyorSweepSeconds: 3.5,        // ... once there and back in this long
+  surveyorRoamPulsesPerSecond: 3200,// how many pulses its light is on its rounds: fewer, so it takes it longer to make you out
+  surveyorHuntPulsesPerSecond: 6200,// ... and once it has seen you
+  surveyorSightMetres: 32,          // it makes nobody out from further off than this, however much of its light is on them
+  surveyorNoticeSeconds: 0.2,       // you have to be in its light for this long, in all, before it has seen you: a glance is not enough
   surveyorForgetSeconds: 2.5,       // out of its light, that count runs down again over this long
   surveyorLoseSeconds: 4,           // chasing, with you out of its light for this long, it has lost you and goes to where it last saw you
   surveyorSearchSeconds: 7,         // ... and looks all round there for this long before it goes back to its rounds
@@ -416,7 +424,7 @@ const TUNING = {
   surveyorStrikeDistance: 0.75,     // this near to you and it strikes. Once.
   surveyorAfterStrikeSeconds: 10,   // after a strike it sees nobody for this long: it is running off
   surveyorLandingBlindSeconds: 1.5, // dropped out of a hatch, it sees nobody for this long
-  surveyorLightSeconds: 7,          // how long the points of its light stay before they fade (maximum 63)
+  surveyorLightSeconds: 5,          // how long the points of its light stay before they fade (maximum 63)
   surveyorDazzleHits: 2,            // this many pulses of somebody else's light on it in one frame count as light in its eye ...
   surveyorDazzleAfterSeconds: 0.45, // ... and after this long of that it is dazzled
   surveyorDazzledSeconds: 3.5,      // dazzled: it stands, its light is out and it sees nobody

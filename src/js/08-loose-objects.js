@@ -51,6 +51,9 @@
 //              { prompt: 'Arm the scan grenade', button: 'ARM', activate: function (object) { ... } }
 //              (`button` is what the phone's button for it says)
 //              What it then does over time is `update(object, dt)`, called every frame for every object of the kind.
+//   markNumbers  for an object that comes in marks (mk II, mk III: see "Marks" below): which of the numbers in
+//              TUNING (00-config.js) a mark may have its own way, each with what the workshop calls it and the
+//              least, the most and the step it may be set to: { firstAidHeals: ['What it gives back', 1, 100, 1] }
 // Where it hangs is the same for all of them: straight out from the scanner's lens, `looseHoldDistance` (in
 // 00-config.js) beyond its own size. How much of the beam it takes follows from how big it is.
 const FUEL_CAN_PARTS = [
@@ -85,7 +88,14 @@ const LOOSE_OBJECT_KINDS = {
       { shape: 'box', center: [0.05, 0.02, 0], half: [0.02, 0.05, 0.02] }
     ],
     use: { prompt: 'Arm the scan grenade', button: 'ARM', activate: armScanGrenade },
-    update: updateScanGrenade
+    update: updateScanGrenade,
+    markNumbers: {
+      scanGrenadeBursts: ['How many times it scans', 1, 4, 1],
+      scanGrenadeSweeps: ['How much light each scan has (in sweeps of the scanner)', 0.5, 6, 0.1],
+      scanGrenadeBurstSeconds: ['How long each scan lasts (seconds)', 0.4, 4, 0.1],
+      scanGrenadeStunSeconds: ['How long it stuns the Hollow (seconds)', 0, 12, 0.5],
+      scanGrenadeFuseSeconds: ['Its fuse, if it lands nowhere (seconds)', 2, 15, 0.5]
+    }
   },
   // A scanner tripod: a scanner on three legs. Q with it in the beam switches it on or off; on, it scans what
   // is in front of it, a pulse of light every second and a half, from wherever it is and whichever way it has
@@ -106,7 +116,13 @@ const LOOSE_OBJECT_KINDS = {
     // Its lens is the ball on the front of its head, looking the way a thing faces that has not been turned.
     scans: { name: 'tripod', hasBattery: true, lens: [0, 0.46, -0.125], forward: [0, 0, -1], light: [0, 0.525, 0], gripInTheBeam: [0, 0, 0, 1] },
     use: { prompt: 'Switch the tripod on', promptFor: describeLooseScannerSwitch, button: 'SWITCH', activate: switchLooseScanner },
-    update: updateLooseScanner
+    update: updateLooseScanner,
+    markNumbers: {
+      tripodBatterySeconds: ['How long its battery lasts, switched on (seconds)', 60, 3600, 30],
+      tripodPulseEverySeconds: ['Seconds from one pulse to the next', 0.5, 6, 0.1],
+      tripodConeDegrees: ['How wide its light opens (degrees)', 30, 170, 2],
+      tripodPulseRays: ['How much light one pulse has (pulses of the scanner)', 500, 8000, 100]
+    }
   },
   // A scanner: what is left of a player who was caught, down there with others (11-together.js). Its light stays
   // on. Carried back to the lift, or into an open salvage bay, it is restarted and they are on their feet again.
@@ -164,7 +180,8 @@ const LOOSE_OBJECT_KINDS = {
   firstAidKit: {
     label: 'first aid kit', mass: 1.2, value: 20, fragile: 0.3, material: 'case', loud: 0.8, lies: 'onItsSide', bulky: false, bounce: 0.15, grip: 0.6, pocket: true,
     parts: [{ shape: 'box', center: [0, 0, 0], half: [0.13, 0.09, 0.045] }, { shape: 'capsule', from: [-0.04, 0.1, 0], to: [0.04, 0.1, 0], radius: 0.012 }],
-    use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit }
+    use: { prompt: 'Use the first aid kit', button: 'USE', activate: useFirstAidKit, canUse: canUseFirstAidKit },
+    markNumbers: { firstAidHeals: ['What it gives back (of 100)', 1, 100, 1] }
   },
   // ... and what is left when it has run out: the same can, a sixth of the weight, and as loud as an empty can
   // is. Nothing needs it any more. It is worth a little to Salvage, and it is something to throw.
@@ -516,6 +533,42 @@ function updateLooseObjectMatrix(object) {
   matrix[6] = 2 * (x * z - w * y); matrix[7] = 2 * (y * z + w * x); matrix[8] = 1 - 2 * (x * x + y * y);
 }
 
+// ---------------------------------------------------------------------------
+// Marks
+//
+// A thing that does something can come in better makes. A mark is a kind of its own, made in the workshop (a
+// file in src/objects/, so it has its own shape, name, weight and worth), that says which kind it works like:
+// it then does what that kind does (`use`, `update`), goes where that kind goes (a pocket), and has the numbers
+// of that kind its own way where its file says so. So nothing here knows about marks but two things:
+//   getLooseNumber   whatever a thing does, it reads its numbers through this, and not from TUNING itself
+//   chooseMarkedKind  wherever a station puts out a thing that comes in marks, this says which mark it is
+// To let another kind come in marks: give it `markNumbers`, and have its code read those through getLooseNumber.
+// ---------------------------------------------------------------------------
+
+// The marks there are of each kind that has any, by the key of the kind they work like: [[kindKey, mark], ...].
+// (Filled in from the object files: 08-workshop-objects.js.)
+const LOOSE_OBJECT_MARKS = {};
+
+// A number of TUNING as this thing has it: its mark's own, if its mark says so.
+function getLooseNumber(object, key) {
+  const own = object.kind.numbers;
+  return own && own[key] !== undefined ? own[key] : TUNING[key];
+}
+
+// Which kind a station puts out where it puts out a `baseKey`: that kind itself, or one of its marks, by the
+// weights in TUNING.itemMarkWeights. `random` is only asked for a number if there is a mark to choose: so a
+// station that has none (one built from the code alone) is not changed by this at all.
+function chooseMarkedKind(baseKey, random) {
+  const marks = (LOOSE_OBJECT_MARKS[baseKey] || []).filter(function (entry) { return isLooseKindInStations(entry[0]) && (TUNING.itemMarkWeights[entry[1]] || 0) > 0; });
+  if (marks.length === 0) return baseKey;
+  let total = TUNING.itemMarkWeights[1];
+  for (const entry of marks) total += TUNING.itemMarkWeights[entry[1]];
+  let draw = random() * total - TUNING.itemMarkWeights[1];
+  if (draw < 0) return baseKey;
+  for (const entry of marks) { draw -= TUNING.itemMarkWeights[entry[1]]; if (draw < 0) return entry[0]; }
+  return baseKey;
+}
+
 function createLooseObject(kindKey, x, y, z, yaw) {
   const kind = LOOSE_OBJECT_KINDS[kindKey];
   if (!kind) return null;
@@ -559,7 +612,7 @@ function createLooseObject(kindKey, x, y, z, yaw) {
     fallenPlayerId: 0, restartSeconds: 0, // a scanner: whose it was, and for how long it has lain where it can be restarted
     // A scanner that scans by itself (a tripod, a fallen scanner): whether it is on, how much of its battery is left, the count to its next pulse, how much
     // of the pulse that is going out now is still to come, and what its light has fallen on since it was switched on.
-    isOn: false, batterySeconds: kindKey === 'scannerTripod' ? TUNING.tripodBatterySeconds : 0, pulseSeconds: 0, flashSeconds: 0, flashBudget: 0,
+    isOn: false, batterySeconds: kind.scans && kind.scans.hasBattery ? getLooseNumber({ kind: kind }, 'tripodBatterySeconds') : 0, pulseSeconds: 0, flashSeconds: 0, flashBudget: 0,
     pulsesFired: 0, pulsesOnCreatures: 0, lastLitPlayerTime: -999,
     // A fuel can: how much is in it (1 full, 0 none), the count to its next splash while it is at a tank, and
     // whether anybody has had it in the beam since it stood on its crate (until then it pours nowhere).
@@ -1982,10 +2035,30 @@ function canSprintWhileCarrying() {
 }
 
 
+// How far a thing reaches below and above its own middle, as it is turned now: by the balls it touches the
+// station with. Fills `into` with { below, above }.
+function measureLooseObjectHeight(object, into) {
+  const shell = object.prepared.shell, matrix = object.matrix;
+  let below = 0, above = 0;
+  for (let at = 0; at < shell.length; at += 4) {
+    const y = matrix[3] * shell[at] + matrix[4] * shell[at + 1] + matrix[5] * shell[at + 2];
+    if (shell[at + 3] - y > below) below = shell[at + 3] - y;
+    if (shell[at + 3] + y > above) above = shell[at + 3] + y;
+  }
+  into.below = below; into.above = above;
+  return into;
+}
+const looseHeightScratch = { below: 0, above: 0 };
+
 // Where the carried object wants to be: straight out from the scanner's lens, along the way the scanner
 // points, far enough to be clear of it, and a little lower for its weight. The scanner is in your right hand,
 // so that is to the right of and below the middle of what you see. It goes wherever you point: at the floor to
 // set it down, over your head if you look up.
+//
+// But not into the floor, and not into the ceiling. Where the beam points lower or higher than the thing has
+// room for, it is held as low or as high as it fits, a finger's width clear (TUNING.looseHoldClearance). A jar
+// never notices. Something tall does: a tripod a metre high used to be pushed into the floor by a look
+// downwards, and knocked out of the beam by it.
 function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   const held = looseState.held;
   if (!held) return;
@@ -1995,6 +2068,14 @@ function computeLooseHoldTarget(eyeX, eyeY, eyeZ) {
   looseState.holdTargetX = scanEmitter.x + scannerBasis.forwardX * distance;
   looseState.holdTargetY = scanEmitter.y + scannerBasis.forwardY * distance - getHeldLooseMass() * TUNING.looseHoldSagPerKilogram;
   looseState.holdTargetZ = scanEmitter.z + scannerBasis.forwardZ * distance;
+  const tileX = Math.floor(looseState.holdTargetX), tileZ = Math.floor(looseState.holdTargetZ);
+  if (!isTileOpenAt(tileX, tileZ) || (tileFlags[tileIndexAt(tileX, tileZ)] & TILE_FLAG_PIT)) return; // (a wall, or the shaft: nothing to keep clear of)
+  const height = measureLooseObjectHeight(held, looseHeightScratch);
+  const lowest = tileFloorHeight[tileIndexAt(tileX, tileZ)] + height.below + TUNING.looseHoldClearance;
+  const highest = tileCeilingHeight[tileIndexAt(tileX, tileZ)] - height.above - TUNING.looseHoldClearance;
+  if (highest < lowest) return; // taller than the room where it is wanted: the room will have to stop it
+  if (looseState.holdTargetY < lowest) looseState.holdTargetY = lowest;
+  else if (looseState.holdTargetY > highest) looseState.holdTargetY = highest;
 }
 
 // `isByButton`: it is held for as long as the right mouse button is, and dropped when that is let go.
@@ -2639,12 +2720,14 @@ function planStationLooseObjects() {
   // First aid kits: a few to a station, on bare floor that is in nobody's way. They have numbers of their own,
   // so that nothing else here is moved by how many of them there are.
   const kitRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0xa1d417);
+  // (Which mark each thing below is has numbers of its own as well: where it lies does not hang on what it is.)
+  const markRandom = createSeededRandomGenerator(Math.imul(level.seed + 1, 0x9E3779B1) ^ 0x3a21c7);
   const kitsWanted = Math.max(1, Math.round(rooms * TUNING.firstAidKitsPerRoom));
   let kits = 0;
   for (; kits < kitsWanted && nextTile < tiles.length; nextTile++) {
     if (tiles[nextTile][2] !== 1) continue;
     const index = tiles[nextTile][1];
-    addStationLooseObject('firstAidKit', index % GRID_WIDTH + 0.3 + kitRandom() * 0.4, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.3 + kitRandom() * 0.4,
+    addStationLooseObject(chooseMarkedKind('firstAidKit', markRandom), index % GRID_WIDTH + 0.3 + kitRandom() * 0.4, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.3 + kitRandom() * 0.4,
       kitRandom() * TWO_PI, true, false, 'floor');
     kits++;
   }
@@ -2656,7 +2739,7 @@ function planStationLooseObjects() {
   for (; tripods < tripodsWanted && nextTile < tiles.length; nextTile++) {
     if (tiles[nextTile][2] !== 1) continue;
     const index = tiles[nextTile][1];
-    addStationLooseObject('scannerTripod', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, tripodRandom() * TWO_PI, false, false, 'floor');
+    addStationLooseObject(chooseMarkedKind('scannerTripod', markRandom), index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, tripodRandom() * TWO_PI, false, false, 'floor');
     tripods++;
   }
   level.scannerTripodCount = tripods;
@@ -2668,7 +2751,7 @@ function planStationLooseObjects() {
   for (; grenades < grenadesWanted && nextTile < tiles.length; nextTile++) {
     if (tiles[nextTile][2] !== 1) continue;
     const index = tiles[nextTile][1];
-    addStationLooseObject('scanGrenade', index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, grenadeRandom() * TWO_PI, false, false, 'floor');
+    addStationLooseObject(chooseMarkedKind('scanGrenade', markRandom), index % GRID_WIDTH + 0.5, tileFloorHeight[index], Math.floor(index / GRID_WIDTH) + 0.5, grenadeRandom() * TWO_PI, false, false, 'floor');
     grenades++;
   }
   level.scanGrenadeCount = grenades;
@@ -3290,11 +3373,38 @@ function flingLooseObjectFromHollow(object) {
 //
 // A kind with a `scans` is one: where its lens is and which way it looks (in the coordinates its parts are
 // given in), where the light on it is, how it is turned in the beam, and whether it has a battery. Both kinds
-// scan by the same numbers (TUNING.tripod...).
+// scan by the same numbers (TUNING.tripod...), each as its mark has them (getLooseNumber: a better tripod is a
+// mark of the tripod, with its own shape, and its lens and its light where that shape has them:
+// placeScannerOnParts).
 // ---------------------------------------------------------------------------
 
+// Where the lens and the light of a scanner are on a shape that is not the one its kind was written with: a
+// mark of the tripod, made in the workshop. The lens is the front of the ball that is furthest forward (forward
+// is -z, as a thing hangs in the beam), a little way out of it; the light is on top of the box nearest that
+// ball, which is its head. A shape with no ball looks out of the front of its highest box; one with neither
+// keeps the places its kind has. Everything else about how it scans is its kind's.
+function placeScannerOnParts(scans, parts) {
+  const placed = Object.assign({}, scans);
+  const boxes = parts.filter(function (part) { return part.shape === 'box'; });
+  let lensBall = null;
+  for (const part of parts) if (part.shape === 'ball' && (lensBall === null || part.center[2] - part.radius < lensBall.center[2] - lensBall.radius)) lensBall = part;
+  let head = null;
+  if (lensBall) {
+    placed.lens = [lensBall.center[0], lensBall.center[1], Math.round((lensBall.center[2] - lensBall.radius - 0.005) * 1000) / 1000];
+    for (const box of boxes) {
+      const away = Math.hypot(box.center[0] - lensBall.center[0], box.center[1] - lensBall.center[1], box.center[2] - lensBall.center[2]);
+      if (head === null || away < head.away) head = { box: box, away: away };
+    }
+  } else {
+    for (const box of boxes) if (head === null || box.center[1] + box.half[1] > head.box.center[1] + head.box.half[1]) head = { box: box, away: 0 };
+    if (head) placed.lens = [head.box.center[0], head.box.center[1], Math.round((head.box.center[2] - head.box.half[2] - 0.005) * 1000) / 1000];
+  }
+  if (head) placed.light = [head.box.center[0], Math.round((head.box.center[1] + head.box.half[1] + 0.02) * 1000) / 1000, head.box.center[2]];
+  return placed;
+}
+
 function describeLooseScannerSwitch(object) {
-  return 'Switch the ' + object.kind.scans.name + (object.isOn ? ' off' : ' on') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + '%' : '');
+  return 'Switch the ' + object.kind.scans.name + (object.isOn ? ' off' : ' on') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / getLooseNumber(object, 'tripodBatterySeconds') * 100)) + '%' : '');
 }
 
 // Q, with it in the beam ('setOff', carried out in every browser): on, or off again.
@@ -3350,20 +3460,20 @@ function updateLooseScanner(object, dt) {
       distanceBetweenPoints(hollow.figure.x, hollow.figure.z, object.x, object.z) < TUNING.hollowKnowsScannerMetres) letHollowKnowScanner(object);
   object.pulseSeconds -= dt;
   if (object.pulseSeconds <= 0) {
-    object.pulseSeconds += TUNING.tripodPulseEverySeconds;
+    object.pulseSeconds += getLooseNumber(object, 'tripodPulseEverySeconds');
     object.flashSeconds = TUNING.tripodFlashSeconds;
     playTripodSound('pulse', object.x, object.y, object.z);
     showCaption('tripodPulse', { x: object.x, z: object.z });
     if (!isLooseObjectAnothers(object)) emitNoise(object.x, object.z, TUNING.noiseRadiusTripodPulse);
   }
   if (object.flashSeconds <= 0) return;
-  object.flashBudget += TUNING.tripodPulseRays * Math.min(dt, object.flashSeconds) / TUNING.tripodFlashSeconds;
+  object.flashBudget += getLooseNumber(object, 'tripodPulseRays') * Math.min(dt, object.flashSeconds) / TUNING.tripodFlashSeconds;
   object.flashSeconds -= dt;
   const pulses = Math.min(4000, Math.floor(object.flashBudget));
   object.flashBudget -= pulses;
   if (pulses <= 0) return;
   const lens = getLooseScannerLens(object, looseScannerScratch);
-  const result = fireScanCone(lens.x, lens.y, lens.z, lens.directionX, lens.directionY, lens.directionZ, TUNING.tripodConeDegrees / 2, pulses, object);
+  const result = fireScanCone(lens.x, lens.y, lens.z, lens.directionX, lens.directionY, lens.directionZ, getLooseNumber(object, 'tripodConeDegrees') / 2, pulses, object);
   object.pulsesFired += result.fired;
   object.pulsesOnCreatures += result.onCreatures;
   if (result.litPlayers.length > 0) object.lastLitPlayerTime = game.time;
@@ -3393,8 +3503,9 @@ function showLooseScannerLights() {
 // go of it, or when its fuse runs out, wherever it is by then.
 function armScanGrenade(object) {
   object.armedTime = game.time;
-  object.goesOffTime = game.time + TUNING.scanGrenadeFuseSeconds;
+  object.goesOffTime = game.time + getLooseNumber(object, 'scanGrenadeFuseSeconds');
   object.hasLanded = false;
+  object.burstsDone = 0;
   playScanGrenadeSound('arm', object.x, object.y, object.z);
   showMessage('Armed. It goes off where it lands. Throw it.', 4, 'warning');
 }
@@ -3415,8 +3526,9 @@ function updateScanGrenade(object, dt) {
     object.burstHitsOnHollow = 0;
   }
   // Its light: pulses in every direction from where it is, a share of them each frame, for as long as it lasts.
-  const pulsesInAll = QUALITY_PRESETS[settings.quality].sweepRays * TUNING.scanGrenadeSweeps;
-  object.burstBudget += pulsesInAll * Math.min(dt, TUNING.scanGrenadeBurstSeconds - object.burstSeconds) / TUNING.scanGrenadeBurstSeconds;
+  const burstSeconds = getLooseNumber(object, 'scanGrenadeBurstSeconds');
+  const pulsesInAll = QUALITY_PRESETS[settings.quality].sweepRays * getLooseNumber(object, 'scanGrenadeSweeps');
+  object.burstBudget += pulsesInAll * Math.min(dt, burstSeconds - object.burstSeconds) / burstSeconds;
   const pulses = Math.min(4000, Math.floor(object.burstBudget));
   object.burstBudget -= pulses;
   looseRaySkipped = object; // its own light does not stop on its own case
@@ -3436,9 +3548,16 @@ function updateScanGrenade(object, dt) {
     }
   }
   looseRaySkipped = null;
-  if (object.burstHitsOnHollow >= TUNING.scanGrenadeStunHits && !object.hasStunned) object.hasStunned = stunHollow(TUNING.scanGrenadeStunSeconds);
+  if (object.burstHitsOnHollow >= TUNING.scanGrenadeStunHits && !object.hasStunned) object.hasStunned = stunHollow(getLooseNumber(object, 'scanGrenadeStunSeconds'));
   object.burstSeconds += dt;
-  if (object.burstSeconds >= TUNING.scanGrenadeBurstSeconds) {
+  if (object.burstSeconds >= burstSeconds) {
+    // One that scans more than once goes dark for a moment and then goes off again, where it lies by then.
+    object.burstsDone = (object.burstsDone || 0) + 1;
+    if (object.burstsDone < getLooseNumber(object, 'scanGrenadeBursts')) {
+      object.burstSeconds = 0; object.burstBudget = 0;
+      object.goesOffTime = game.time + TUNING.scanGrenadeBurstGapSeconds;
+      return;
+    }
     object.isSpent = true;
     object.worth = Math.min(object.worth, 2); // (gone off, it is scrap)
     looseState.statistics.grenadesSpent++;
@@ -3491,7 +3610,7 @@ function sayNeededThingIsBack(object) {
 function getLooseObjectLabel(object) {
   if (object.kindKey === 'fuelCan' && object.fuel < 0.995) return object.kind.label + ', ' + Math.max(1, Math.round(object.fuel * 100)) + ' % full';
   if (object.isSpent) return 'spent ' + object.kind.label;
-  if (object.kind.scans) return object.kind.label + (object.isOn ? ', on' : '') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / TUNING.tripodBatterySeconds * 100)) + ' % charged' : '');
+  if (object.kind.scans) return object.kind.label + (object.isOn ? ', on' : '') + (object.kind.scans.hasBattery ? ', ' + Math.max(1, Math.round(object.batterySeconds / getLooseNumber(object, 'tripodBatterySeconds') * 100)) + ' % charged' : '');
   if (object.armedTime >= 0) return object.kind.label + ', armed';
   return object.kind.label;
 }
