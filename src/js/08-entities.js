@@ -320,12 +320,14 @@ function poseAdvancingStill(figure, distanceToPlayer) {
   figure.pose.legSwing = Math.sin((figure.x + figure.z) * 5) * 0.3;
 }
 
-function getNearestHuntingStillDistance() {
+// (From where you stand, or from the place given: where the one you are watching stands, 11-watching.js.)
+function getNearestHuntingStillDistance(x, z) {
   if (!stillsAreHunting) return Infinity;
+  if (x === undefined) { x = player.x; z = player.z; }
   let nearest = Infinity;
   for (const still of stills) {
     if (!still.isPresent) continue;
-    nearest = Math.min(nearest, distanceBetweenPoints(still.figure.x, still.figure.z, player.x, player.z));
+    nearest = Math.min(nearest, distanceBetweenPoints(still.figure.x, still.figure.z, x, z));
   }
   return nearest;
 }

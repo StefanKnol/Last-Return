@@ -86,6 +86,7 @@ const settings = {
   hud: 'quiet',             // 'quiet' shows instruments only while they matter; 'full' shows everything all the time
   captions: 'tells',        // the lines in square brackets: 'off', 'tells' (what the Hollow has just done) or 'all' (every sound, with where it comes from)
   carryButton: 'hold',      // the right mouse button and a thing in reach: 'hold' carries it while the button is down, 'toggle' takes it at a click and lets go at the next (08-loose-objects.js)
+  playerName: '',           // what the others call you when you descend together (11-chat.js); '' is "Player" and your number in the lobby
   hasPickedSomethingUp: false, // the line that says how to pick a thing up is a tutorial: shown until you have done it once, and never again
   // Which work orders a generated station may be given (09-quests.js): one that is switched off never comes up.
   // A key that is missing counts as on, so that a work order added later is there without being asked for.
@@ -138,6 +139,7 @@ function loadSettings() {
       if (stored.captions === 'off' || stored.captions === 'tells' || stored.captions === 'all') settings.captions = stored.captions;
       if (stored.carryButton === 'hold' || stored.carryButton === 'toggle') settings.carryButton = stored.carryButton;
       if (stored.hasPickedSomethingUp === true) settings.hasPickedSomethingUp = true;
+      settings.playerName = cleanChatText(stored.playerName, CHAT_NAME_MOST_CHARACTERS);
       if (stored.workOrders && typeof stored.workOrders === 'object') { for (const key in stored.workOrders) if (stored.workOrders[key] === false) settings.workOrders[key] = false; }
     }
   } catch (error) { /* storage is optional */ }
@@ -210,6 +212,7 @@ function initializeInput() {
     if (code === 'Tab' || code === 'Space' || code.indexOf('Arrow') === 0) event.preventDefault();
     if (event.repeat) return;
     if (isDebugKey) { event.preventDefault(); debugHooks.togglePanel(); return; }
+    if (takeKeyForChat(event)) return; // Enter or T, down there with others: the box to talk in opens (11-chat.js)
     input.keysDown.add(code);
     if (game.mode === 'playing') {
       if (code === 'KeyE') input.wantsInteract = true;
@@ -229,6 +232,8 @@ function initializeInput() {
       if (code === 'KeyE' || code === 'Escape' || code === 'Enter' || code === 'Space') closeReader();
     } else if (game.mode === 'intro') {
       if (code === 'Space' || code === 'Enter' || code === 'Escape') finishIntro();
+    } else if (game.mode === 'dead') {
+      takeKeyForWatching(code); // dead, down there with others: on to the next of them (11-watching.js)
     }
   });
   window.addEventListener('keyup', function (event) { input.keysDown.delete(event.code); });
@@ -240,6 +245,7 @@ function initializeInput() {
   });
 
   canvas.addEventListener('mousedown', function (event) {
+    if (game.mode === 'dead' && event.button === 0) watchNext(1); // watching the others: a click is the next of them (11-watching.js)
     if (game.mode !== 'playing') return;
     if (event.button === 0) {
       if (!input.isPointerLocked && !input.useDragLook) requestPointerLockOnCanvas();

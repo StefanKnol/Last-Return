@@ -212,6 +212,7 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const a = first.page, b = second.page;
 
   check('the title screen offers a lobby when the page comes from the server', await a.isVisible('#button-host-lobby'));
+  check('outside a lobby there is nothing to talk in, and a place to type your name', await a.isHidden('#chat') && await a.isVisible('#together-name'));
   await a.evaluate((lobbySeed) => { const d = window.lastReturnDebug; d.settings.station = 'generated'; d.settings.seedText = String(lobbySeed); d.settings.stationSize = 'small'; d.settings.difficulty = 'standard'; d.settings.workOrders = { salvage: true, survey: false, recovery: false, restart: false }; }, lobbySeed);
   await a.click('#button-host-lobby');
   await a.waitForFunction(() => window.lastReturnDebug.together.code !== '');
@@ -223,6 +224,61 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('one opens a lobby, the other joins it with the code, and both see two in it',
     (await a.textContent('#together-status')).startsWith('2 of 4') && (await b.textContent('#together-status')).startsWith('2 of 4'), code);
   check('the host can begin; the other waits', (await a.textContent('#button-begin')) === 'Begin descent together' && await b.isDisabled('#button-begin'));
+
+  // ---- Names, and talking (src/js/11-chat.js) ----
+  const linesIn = (page) => page.evaluate(() => window.lastReturnDebug.chat.lines.map((line) => ({ who: line.who, text: line.text, kind: line.kind, shown: !line.element.hidden })));
+  const namesIn = (page) => page.evaluate(() => [1, 2].map((id) => window.lastReturnDebug.getPlayerName(id)));
+  const namesAtFirst = [await namesIn(a), await namesIn(b)];
+  check('without a name you are "Player" and your number in the lobby, in everybody\'s game', namesAtFirst.every((names) => names.join() === 'Player 1,Player 2'), namesAtFirst);
+  // The host types a name: too long, and with spaces round it.
+  // (Put into the box as a page could, past the box's own limit on typing: it is the game that cuts it.)
+  await a.evaluate(() => { const box = document.getElementById('together-name'); box.value = '   Mara of the Third Shift   '; box.dispatchEvent(new Event('change')); });
+  await b.waitForFunction(() => window.lastReturnDebug.getPlayerName(1) !== 'Player 1', null, { timeout: 5000 }).catch(() => {});
+  const named1 = { host: await a.evaluate(() => ({ name: window.lastReturnDebug.getPlayerName(1), box: document.getElementById('together-name').value, kept: JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').playerName })), other: (await namesIn(b))[0],
+    most: await a.evaluate(() => window.lastReturnDebug.chat !== undefined && document.getElementById('together-name').maxLength) };
+  check('a name typed on the title screen is cut to length, kept with your settings, and is what the others call you',
+    named1.host.name === 'Mara of the Thir' && named1.host.box === named1.host.name && named1.host.kept === named1.host.name && named1.other === named1.host.name && named1.most === 16, named1);
+  await a.fill('#together-name', 'Mara'); await a.press('#together-name', 'Enter');
+  await b.waitForFunction(() => window.lastReturnDebug.getPlayerName(1) === 'Mara', null, { timeout: 5000 }).catch(() => {});
+  // They talk, at the title screen: the box is simply there.
+  const boxAtTheTitle = await b.evaluate(() => ({ chat: !document.getElementById('chat').hidden, box: !document.getElementById('chat-form').hidden, inTheLobbyBlock: document.getElementById('chat').parentNode.id }));
+  await b.fill('#chat-input', 'ready when you are'); await b.press('#chat-input', 'Enter');
+  await a.waitForFunction(() => window.lastReturnDebug.chat.lines.some((line) => line.kind === 'said'), null, { timeout: 5000 }).catch(() => {});
+  await a.fill('#chat-input', '<img src=x onerror=alert(1)> going <b>down</b>'); await a.press('#chat-input', 'Enter');
+  await b.waitForFunction(() => window.lastReturnDebug.chat.lines.some((line) => line.kind === 'said'), null, { timeout: 5000 }).catch(() => {});
+  const talk = { host: await linesIn(a), other: await linesIn(b), boxAtTheTitle: boxAtTheTitle,
+    markup: await b.evaluate(() => { const said = window.lastReturnDebug.chat.lines.filter((line) => line.kind === 'said')[0]; return said ? { elements: said.element.querySelectorAll('*').length, images: document.querySelectorAll('#chat img').length, text: said.element.textContent } : null; }) };
+  const saidTo = (lines, who, text, kind) => lines.some((line) => line.who === who && line.text === text && line.kind === kind && line.shown);
+  check('in a lobby the title screen has a box to talk in, in the lobby\'s own block; a line typed there is in everybody\'s log under the name of who said it',
+    talk.boxAtTheTitle.chat && talk.boxAtTheTitle.box && talk.boxAtTheTitle.inTheLobbyBlock === 'together-options' &&
+    saidTo(talk.host, 'Player 2', 'ready when you are', 'said') && saidTo(talk.other, 'Player 2', 'ready when you are', 'own') && saidTo(talk.other, 'Mara', '<img src=x onerror=alert(1)> going <b>down</b>', 'said'), talk);
+  check('what is said is put on the page as text: markup in it is shown as it was typed, and makes nothing',
+    talk.markup !== null && talk.markup.elements === 1 && talk.markup.images === 0 && /<img src=x onerror=alert\(1\)> going <b>down<\/b>/.test(talk.markup.text), talk.markup);
+  check('the log also says who has joined, once, and when somebody takes another name',
+    talk.host.filter((line) => line.kind === 'note' && /Player 2 has joined the lobby/.test(line.text)).length === 1 && !talk.other.some((line) => /has joined/.test(line.text)) &&
+    talk.other.some((line) => line.kind === 'note' && /is now called Mara/.test(line.text)), [talk.host, talk.other]);
+  // What comes in from another browser is not trusted (this is what their browser could send, whatever their game would).
+  const hostile = await b.evaluate(() => {
+    const d = window.lastReturnDebug, result = {}, count = () => d.chat.lines.filter((line) => line.kind === 'said').length;
+    const before = count(), droppedBefore = d.chat.statistics.dropped;
+    d.chat.heardAt = {};
+    d.hearChat(1, { m: 'x'.repeat(900) });
+    result.long = d.chat.lines[d.chat.lines.length - 1].text.length;
+    d.hearChat(1, { m: 'one\u0007two\nthree\u202efour\u2028five     six' });
+    result.cleaned = d.chat.lines[d.chat.lines.length - 1].text;
+    const atTwo = count();
+    d.hearChat(1, { m: 12345 }); d.hearChat(1, { m: '   ' }); d.hearChat(1, {}); d.hearChat(99, { m: 'I am not in this lobby' });
+    result.notText = count() - atTwo;
+    for (let line = 0; line < 12; line++) d.hearChat(1, { m: 'again ' + line });
+    result.heardOfFourteen = count() - before; result.dropped = d.chat.statistics.dropped - droppedBefore; result.kept = d.chat.lines.length <= 40;
+    d.chat.heardAt = {};
+    result.cleanName = d.cleanChatText('  \u202eEvil\nName that goes on and on  ', 16);
+    return result;
+  });
+  check('a line from another browser is cut to two hundred characters and to one line, with what cannot be shown taken out of it',
+    hostile.long === 200 && hostile.cleaned === 'one two three four five six' && hostile.cleanName === 'Evil Name that g', hostile);
+  check('what is not text, is empty, or comes from nobody in the lobby is not shown; nor is more than five lines in five seconds from one of them',
+    hostile.notText === 0 && hostile.heardOfFourteen === 5 && hostile.dropped === 9 && hostile.kept, hostile);
 
   // The other's title screen shows what the host has chosen, and follows it when the host changes it.
   await b.waitForFunction(() => window.lastReturnDebug.settings.station === 'generated', null, { timeout: 5000 }).catch(() => {});
@@ -330,6 +386,43 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await a.waitForFunction(() => window.lastReturnDebug.together.others[0].spreadDegrees === 0);
   check('the other\'s scanning is on the host\'s map of light, though the host is not scanning; the other\'s own game keeps no such map',
     lightOfTheOther.inTheHostsMap.counted > 100 && !lightOfTheOther.inTheHostsMap.hostIsScanning && lightOfTheOther.inTheirOwn.counted === 0 && lightOfTheOther.inTheirOwn.pointsOfTheirOwn, lightOfTheOther);
+
+  // Talking in play: Enter opens the box, and while it is open the keys are the box's.
+  const boxInPlay = await b.evaluate(() => { const d = window.lastReturnDebug; d.updateChat(1); return { button: !document.getElementById('chat-open').hidden, box: !document.getElementById('chat-form').hidden, overTheScreen: document.getElementById('chat').parentNode.id }; });
+  const stoodAt = await b.evaluate(() => ({ x: window.lastReturnDebug.player.x, z: window.lastReturnDebug.player.z }));
+  await b.keyboard.press('Enter');
+  const opened = await b.evaluate(() => ({ isOpen: window.lastReturnDebug.chat.isOpen, hasTheKeys: document.activeElement === document.getElementById('chat-input'), mode: window.lastReturnDebug.game.mode }));
+  await b.keyboard.down('KeyW'); await b.keyboard.type('asd it is behind you');
+  await b.evaluate(() => { window.lastReturnDebug.simulate(0.6); });
+  const typed = await b.evaluate((stoodAt) => { const d = window.lastReturnDebug; return { box: document.getElementById('chat-input').value, moved: Math.hypot(d.player.x - stoodAt.x, d.player.z - stoodAt.z), keysDown: d.input.keysDown.size, scanning: d.input.isScanHeld }; }, stoodAt);
+  await b.keyboard.up('KeyW');
+  await b.keyboard.press('Enter');
+  await a.waitForFunction(() => window.lastReturnDebug.chat.lines.some((line) => /behind you/.test(line.text)), null, { timeout: 5000 }).catch(() => {});
+  const sent = { other: await b.evaluate(() => ({ isOpen: window.lastReturnDebug.chat.isOpen, box: document.getElementById('chat-input').value, boxShown: !document.getElementById('chat-form').hidden })),
+    host: (await linesIn(a)).filter((line) => /behind you/.test(line.text)) };
+  check('in play the box to talk in is shut until Enter opens it; then the keys are the box\'s, and you stand where you stood',
+    boxInPlay.button && !boxInPlay.box && boxInPlay.overTheScreen === 'game-root' && opened.isOpen && opened.hasTheKeys && opened.mode === 'playing' &&
+    typed.box === 'wasd it is behind you' && typed.moved < 0.01 && typed.keysDown === 0 && !typed.scanning, [boxInPlay, opened, typed]);
+  check('Enter sends the line and shuts the box; the others read it under your name', !sent.other.isOpen && sent.other.box === '' && !sent.other.boxShown && sent.host.length === 1 && sent.host[0].who === 'Player 2' && sent.host[0].shown, sent);
+  // T opens it too, without being typed into it; Esc shuts it, and is not the menu.
+  await b.keyboard.press('KeyT');
+  await b.keyboard.type('not sent');
+  const withT = await b.evaluate(() => ({ isOpen: window.lastReturnDebug.chat.isOpen, box: document.getElementById('chat-input').value }));
+  await b.keyboard.press('Escape');
+  const afterEscape = await b.evaluate(() => ({ isOpen: window.lastReturnDebug.chat.isOpen, mode: window.lastReturnDebug.game.mode, box: document.getElementById('chat-input').value }));
+  await b.evaluate(() => { document.getElementById('chat-input').value = ''; });
+  check('T opens it as well and is not typed into it; Esc shuts it without opening the menu, and what was typed stays for the next time',
+    withT.isOpen && withT.box === 'not sent' && !afterEscape.isOpen && afterEscape.mode === 'playing' && afterEscape.box === 'not sent', [withT, afterEscape]);
+  // In play a line is shown for a few seconds; after that only while the box is open.
+  const aging = await a.evaluate(() => {
+    const d = window.lastReturnDebug, line = d.chat.lines.filter((one) => /behind you/.test(one.text))[0], result = {};
+    d.updateChat(1); result.fresh = !line.element.hidden;
+    line.at -= 60; d.updateChat(1); result.old = !line.element.hidden;
+    d.openChat(); result.withTheBoxOpen = !line.element.hidden;
+    d.closeChat(); d.updateChat(1); result.shutAgain = !line.element.hidden;
+    return result;
+  });
+  check('in play a line is shown for a few seconds, and after that only while the box is open', aging.fresh && !aging.old && aging.withTheBoxOpen && !aging.shutAgain, aging);
 
   // Your own body is in the way of the others' scanners, though you never see it. The host scans the other from
   // a metre and a half, with a narrow beam: on the other's screen none of that light gets past them, and none
@@ -550,6 +643,83 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const scannerInTheirs = await b.evaluate((id) => window.lastReturnDebug.looseObjects.some((object) => object.id === id && object.fallenPlayerId === window.lastReturnDebug.together.myId), fallen.scanner ? fallen.scanner.id : -1);
   check('dead, their body is gone and their scanner lies where they fell, still lit, the same thing in both games',
     fallen.isFallen && !fallen.bodyHit && fallen.light > 0 && fallen.scanner !== null && fallen.scanner.metresFromThem < 0.5 && scannerInTheirs, fallen);
+  // ---- Dead, they watch the host (src/js/11-watching.js) ----
+  const offered = await b.evaluate(() => { const d = window.lastReturnDebug; return { button: !document.getElementById('button-watch').hidden, told: document.getElementById('death-lines').textContent,
+    leave: document.getElementById('button-death-restart').textContent, offeredAt: d.watching.offeredAt >= 0, isOn: d.watching.isOn, canWatch: d.canWatchSomebody(), screen: !document.getElementById('screen-death').hidden }; });
+  check('the death screen offers to watch the others, and its other button says what it does down there with others: you leave, they play on',
+    offered.screen && offered.button && /through their scanners/.test(offered.told) && offered.leave === 'Leave the descent' && offered.offeredAt && !offered.isOn && offered.canWatch, offered);
+  // The host goes and stands far from where they fell, looking some way or other.
+  await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0];
+    let best = null, bestMetres = -1;
+    for (const waypoint of d.roamingWaypoints) { const metres = Math.hypot(waypoint[0] - other.x, waypoint[1] - other.z); if (metres > bestMetres) { bestMetres = metres; best = waypoint; } }
+    d.teleport(best[0], best[1], 1.1); d.player.pitch = -0.2;
+  });
+  await both(0.6);
+  // It begins by itself when the death screen has stood its time. (The time is pushed on here: a frame of this
+  // page takes long, and its clock goes by frames.)
+  const began = await b.evaluate(() => {
+    const d = window.lastReturnDebug, result = {};
+    d.updateWatching(0.05); result.notAtOnce = !d.watching.isOn; result.counting = document.getElementById('button-watch').textContent;
+    d.game.realTime += 10;
+    d.updateWatching(0.05);
+    const other = d.together.others[0];
+    result.isOn = d.watching.isOn; result.id = d.watching.id; result.theirId = other.id; result.mode = d.game.mode;
+    result.screen = !document.getElementById('screen-death').hidden; result.hud = !document.getElementById('hud').hidden; result.bar = !document.getElementById('watch-bar').hidden;
+    result.name = document.getElementById('watch-name').textContent; result.note = document.getElementById('watch-note').textContent;
+    result.nextButton = !document.getElementById('button-watch-next').hidden; result.leave = document.getElementById('button-watch-leave').textContent;
+    result.ownInstruments = window.getComputedStyle(document.getElementById('hud-block-instruments')).display;
+    result.viewerIsThem = d.getViewer() === other;
+    d.aimCameraAtWatched(d.renderCamera, 0.016);
+    result.metresFromTheirEyes = Math.hypot(d.renderCamera.x - other.x, d.renderCamera.y - other.eyeY, d.renderCamera.z - other.z);
+    result.yawOff = Math.abs(Math.atan2(Math.sin(d.renderCamera.yaw - other.yaw), Math.cos(d.renderCamera.yaw - other.yaw))); result.pitchOff = Math.abs(d.renderCamera.pitch - other.pitch);
+    result.metresFromYourBody = Math.hypot(d.renderCamera.x - d.player.x, d.renderCamera.z - d.player.z);
+    // What is heard, and how far off, is measured from where they stand: a tick beside them, and one beside your body.
+    d.settings.captions = 'all'; d.clearCaptions();
+    result.heardBesideThem = d.showCaption('tripodPulse', { x: other.x + 1, z: other.z });
+    d.clearCaptions();
+    result.heardBesideYourBody = d.showCaption('tripodPulse', { x: d.player.x + 1, z: d.player.z });
+    result.withinMetres = d.captions.tripodPulse.withinMetres;
+    return result;
+  });
+  check('watching does not begin at once (the button counts down), and then begins by itself: the death screen goes, and a bar says whom you are watching and how you come back',
+    began.notAtOnce && /Watch the others \(\d\)/.test(began.counting) && began.isOn && began.id === began.theirId && began.mode === 'dead' && !began.screen && began.hud && began.bar && began.name === 'Mara' &&
+    /carries it into the lift car/.test(began.note) && !began.nextButton && began.leave === 'Leave the descent' && began.ownInstruments === 'none', began);
+  check('you see from their eyes, looking where they look, far from where your own body lies; and what you hear is measured from where they stand',
+    began.viewerIsThem && began.metresFromTheirEyes < 0.01 && began.yawOff < 0.01 && began.pitchOff < 0.01 && began.metresFromYourBody > began.withinMetres + 2 && began.heardBesideThem && !began.heardBesideYourBody, began);
+  // They move and turn: your view goes with them, closing in rather than jumping.
+  await a.evaluate(() => { const d = window.lastReturnDebug, spot = d.findWalkableSpotNear(d.player.x + 2, d.player.z + 1); d.teleport(spot.x, spot.z, -0.6); d.player.pitch = 0.25; });
+  await both(0.6);
+  const followed2 = await b.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0], result = {};
+    const off = () => Math.hypot(d.renderCamera.x - other.x, d.renderCamera.z - other.z) + Math.abs(Math.atan2(Math.sin(d.renderCamera.yaw - other.yaw), Math.cos(d.renderCamera.yaw - other.yaw)));
+    // (Your view is put back to where they were, as if they had only just moved: a frame drawn meanwhile may
+    // have followed them some of the way already, and how far is the clock's business.)
+    d.watching.x = other.x - 2; d.watching.z = other.z - 1; d.watching.yaw = other.yaw + 1.7; d.watching.pitch = other.pitch - 0.45;
+    d.aimCameraAtWatched(d.renderCamera, 0); result.before = off();
+    d.aimCameraAtWatched(d.renderCamera, 1 / 60); result.afterOneFrame = off();
+    for (let frame = 0; frame < 40; frame++) d.aimCameraAtWatched(d.renderCamera, 1 / 60);
+    result.afterTwoThirdsOfASecond = off();
+    // With nobody else to go to, the keys for the next of them leave you where you are.
+    d.takeKeyForWatching('KeyD'); d.takeKeyForWatching('ArrowLeft');
+    result.stillThem = d.watching.id === other.id;
+    return result;
+  });
+  check('when they move and turn your view goes with them, closing in on theirs and not jumping to it',
+    followed2.before > 1 && followed2.afterOneFrame < followed2.before && followed2.afterOneFrame > followed2.before * 0.3 && followed2.afterTwoThirdsOfASecond < 0.01 && followed2.stillThem, followed2);
+  // Drawn, it is their view that is drawn, and not black as the dead see.
+  for (let count = 0; count < 4; count++) await b.screenshot({ type: 'jpeg', quality: 5 });
+  const drawn = await b.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { fade: d.frameState.fade, metresFromTheirEyes: Math.hypot(d.renderCamera.x - other.x, d.renderCamera.z - other.z), mode: d.game.mode, isOn: d.watching.isOn }; });
+  check('a frame drawn while you watch is drawn from where they stand, and it is not the black of the dead', drawn.isOn && drawn.mode === 'dead' && drawn.fade > 0 && drawn.metresFromTheirEyes < 0.5, drawn);
+  // Dead, you can still talk, and the others see that it is somebody who is down talking.
+  await b.evaluate(() => { window.lastReturnDebug.sendChat('carry me back'); });
+  await a.waitForFunction(() => window.lastReturnDebug.chat.lines.some((line) => line.text === 'carry me back'), null, { timeout: 5000 }).catch(() => {});
+  const fromTheDead = { host: (await linesIn(a)).filter((line) => line.text === 'carry me back' || /is down/.test(line.text)), own: (await linesIn(b)).filter((line) => line.text === 'carry me back') };
+  check('the dead can talk: their line is marked as from somebody who is down, and the log said when they fell',
+    fromTheDead.host.some((line) => line.who === 'Player 2 (down)' && line.kind === 'said') && fromTheDead.host.some((line) => line.kind === 'note' && /Player 2 is down/.test(line.text)) && fromTheDead.own.length === 1 && fromTheDead.own[0].who === 'Player 2 (down)', fromTheDead);
+  const stillDown = await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { isFallen: other.isFallen, players: d.players.length }; });
+  check('watching changes nothing for the others: you are as down as you were, and nothing hunts you', stillDown.isFallen && stillDown.players === 1, stillDown);
+
   // The host carries it into the lift car and puts it down. It restarts, and they are on their feet there.
   await a.evaluate((id) => {
     const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.id === id)[0];
@@ -579,6 +749,11 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     host: await a.evaluate(() => { const d = window.lastReturnDebug; return { players: d.players.length, isDown: d.together.others[0].isDown, isFallen: d.together.others[0].isFallen, scanners: d.looseObjects.filter((object) => object.fallenPlayerId > 0).length }; }) };
   check('carried, it does nothing; put down in the lift car, it restarts and they are on their feet there, and one of the players again',
     notYet === 'dead' && restarted.other.mode === 'playing' && restarted.other.metresFromCar < 2.2 && restarted.other.scanners === 0 && restarted.host.scanners === 0 && restarted.host.players === 2 && !restarted.host.isDown, [notYet, restarted]);
+  const ownEyes = await b.evaluate(() => { const d = window.lastReturnDebug; d.updateWatching(0.05); return { isOn: d.watching.isOn, bar: !document.getElementById('watch-bar').hidden, hud: !document.getElementById('hud').hidden,
+    instruments: window.getComputedStyle(document.getElementById('hud-block-instruments')).display, viewerIsYou: d.getViewer() === d.player, screen: !document.getElementById('screen-death').hidden }; });
+  const toldTheHost = (await linesIn(a)).some((line) => line.kind === 'note' && /Player 2 is back on their feet/.test(line.text));
+  check('on their feet again they have their own eyes back: the bar is gone, their instruments are there, and the others\' log says they are up',
+    !ownEyes.isOn && !ownEyes.bar && ownEyes.hud && ownEyes.instruments !== 'none' && ownEyes.viewerIsYou && !ownEyes.screen && toldTheHost, [ownEyes, toldTheHost]);
 
   // What one of you does to the station is done in every game: the other takes the first keycard.
   const taken = await b.evaluate(() => {
@@ -1566,6 +1741,63 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('the host begins again and everyone in the lobby goes down, the one who waited included', second2[0] === 2 && isDown(second2[1]) && isDown(second2[2]), second2);
   await b.keyboard.press('Enter'); await c.keyboard.press('Enter');
   await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing');
+
+  // ---- Three down there: the dead one goes from one of the others to the next (src/js/11-watching.js) ----
+  await b.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing', null, { timeout: 10000 }).catch(() => {});
+  // Dying takes frames, and three browsers draw them slowly: it is played out by hand here. Then they say they are down.
+  const dieNow = (page) => page.evaluate(() => {
+    const d = window.lastReturnDebug;
+    d.setDebugOption && d.setDebugOption('invulnerable', false);
+    d.triggerPlayerDeath('hollow', d.hollow.figure);
+    for (let step = 0; step < 80 && d.game.mode === 'dying'; step++) d.updateDying(0.05);
+    for (let count = 0; count < 3; count++) d.updateTogether(0.1);
+    return d.game.mode;
+  });
+  const sayWhere = async () => { for (const page of [a, b, c]) await page.evaluate(() => { const d = window.lastReturnDebug; for (let count = 0; count < 3; count++) d.updateTogether(0.1); }); await pause(250); };
+  await sayWhere();
+  const diedThird = await dieNow(c);
+  await sayWhere(); await sayWhere();
+  await c.waitForFunction(() => window.lastReturnDebug.together.others.filter((other) => other.hasBeenHeardFrom && !other.isFallen).length === 2, null, { polling: 200, timeout: 20000 }).catch(() => {});
+  await c.evaluate(() => { const d = window.lastReturnDebug; d.updateWatching(0.05); }); // (the death screen offers it once it has heard from them)
+  await c.click('#button-watch');
+  const three = await c.evaluate(() => {
+    const d = window.lastReturnDebug, result = { ids: d.together.others.map((other) => other.id), order: [] };
+    d.updateWatching(0.05);
+    result.isOn = d.watching.isOn; result.first = d.watching.id; result.nextButton = !document.getElementById('button-watch-next').hidden; result.note = document.getElementById('watch-note').textContent;
+    result.names = [document.getElementById('watch-name').textContent];
+    return result;
+  });
+  await c.keyboard.press('KeyD');
+  three.afterD = await c.evaluate(() => { window.lastReturnDebug.updateWatching(0.05); return { id: window.lastReturnDebug.watching.id, name: document.getElementById('watch-name').textContent }; });
+  await c.keyboard.press('ArrowLeft');
+  three.afterLeft = await c.evaluate(() => window.lastReturnDebug.watching.id);
+  await c.click('#button-watch-next');
+  three.afterTheButton = await c.evaluate(() => window.lastReturnDebug.watching.id);
+  await c.evaluate(() => { const d = window.lastReturnDebug; d.renderer.canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true })); });
+  three.afterAClick = await c.evaluate(() => window.lastReturnDebug.watching.id);
+  check('with two of them on their feet you go from one to the next: D, the left arrow, the button and a click each move you on, and the bar names who it is',
+    diedThird === 'dead' && three.isOn && three.ids.length === 2 && three.ids.indexOf(three.first) >= 0 && three.nextButton && /the next of them/.test(three.note) &&
+    three.afterD.id !== three.first && three.ids.indexOf(three.afterD.id) >= 0 && three.afterD.name !== three.names[0] && three.afterLeft === three.first && three.afterTheButton === three.afterD.id && three.afterAClick === three.first, three);
+  // The one they are watching falls: they are moved to the one who is left.
+  const watchedPage = three.first === 1 ? a : b, watchedId = three.first;
+  await dieNow(watchedPage);
+  await sayWhere(); await sayWhere();
+  await c.waitForFunction((watchedId) => { const d = window.lastReturnDebug, other = d.together.others.filter((one) => one.id === watchedId)[0]; return other && other.isFallen; }, watchedId, { polling: 200, timeout: 20000 }).catch(() => {});
+  const movedOn = await c.evaluate(() => { const d = window.lastReturnDebug; d.updateWatching(0.05); return { id: d.watching.id, isOn: d.watching.isOn, nextButton: !document.getElementById('button-watch-next').hidden, name: document.getElementById('watch-name').textContent,
+    log: d.chat.lines.filter((line) => /is down/.test(line.text)).length }; });
+  check('when the one you are watching falls you are moved to the one who is still on their feet, and with one left there is nobody to go on to',
+    movedOn.isOn && movedOn.id !== watchedId && three.ids.indexOf(movedOn.id) >= 0 && !movedOn.nextButton && movedOn.log >= 1, [watchedId, movedOn]);
+  // Both are put on their feet again, as the host's game does it when a scanner has been carried back: the rest of
+  // this suite wants them there.
+  for (let turn = 0; turn < 2; turn++) {
+    await a.evaluate(() => { const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.fallenPlayerId)[0]; if (scanner) d.askToAct({ what: 'restart', id: scanner.id }); });
+    await sayWhere();
+  }
+  await c.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing', null, { polling: 200, timeout: 20000 }).catch(() => {});
+  await watchedPage.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing', null, { polling: 200, timeout: 20000 }).catch(() => {});
+  await sayWhere();
+  const upAgain = { third: await c.evaluate(() => { const d = window.lastReturnDebug; d.updateWatching(0.05); return { mode: d.game.mode, isOn: d.watching.isOn, bar: !document.getElementById('watch-bar').hidden }; }), watched: await watchedPage.evaluate(() => window.lastReturnDebug.game.mode) };
+  check('their scanners restarted, both are on their feet and the one who watched has their own eyes back', upAgain.third.mode === 'playing' && !upAgain.third.isOn && !upAgain.third.bar && upAgain.watched === 'playing', upAgain);
 
   // One of them goes back up alone. They wait for the others; the descent goes on.
   await b.evaluate(() => window.lastReturnDebug.returnToTitle());

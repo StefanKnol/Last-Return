@@ -391,6 +391,7 @@ function returnToTitle() {
   silenceGameplaySounds();
   if (debugHooks.hidePanel) debugHooks.hidePanel();
   if (document.exitPointerLock && input.isPointerLocked) document.exitPointerLock();
+  endWatching();
   leaveDescentTogether(); // back at the surface you are on your own again
   resetWorldState();
   game.mode = 'title';
@@ -770,6 +771,8 @@ function updateDying(dt) {
 // you come back, and not from a checkpoint.
 function standUpAgainAt(x, z) {
   if (game.mode !== 'dead' && game.mode !== 'dying') return;
+  endWatching(); // (your own eyes again)
+  silenceGameplaySounds();
   player.x = x; player.z = z;
   player.pitch = 0; player.velocityX = 0; player.velocityZ = 0;
   steadyHeldScanner();
@@ -942,31 +945,38 @@ function updateGameProgress(dt) {
 }
 
 function updateAtmosphere(dt) {
+  updateAtmosphereAt(player.x, getPlayerEyeY(), player.z, player.yaw, getSpaceOf(player), dt, true);
+}
+
+// How the station weighs and sounds at a place: the interference, the red, the heartbeat, the Hollow's voice,
+// what is heard from where. The place is where you stand, or (`isYourOwn` false) where the one you are
+// watching stands (11-watching.js): then it is their ears you have, and nothing of your own is touched.
+function updateAtmosphereAt(x, eyeY, z, yaw, space, dt, isYourOwn) {
   let hollowPressure = 0, hollowDistance = Infinity, hollowPresence = 1;
   if (hollow.isActive) {
-    hollowDistance = distanceBetweenPoints(hollow.figure.x, hollow.figure.z, player.x, player.z);
+    hollowDistance = distanceBetweenPoints(hollow.figure.x, hollow.figure.z, x, z);
     const aggression = getHollowAggression();
     hollowPressure = clampNumber(1 - hollowDistance / 16, 0, 1) * (0.35 + 0.65 * aggression) + hollow.heldAmount * 0.2;
     if (hollow.enragedTimer > 0) hollowPressure = Math.max(hollowPressure, 0.85);
     // Above the ceiling it is not in the room with you, however near on the map: it weighs on you less ("Spaces", 08-creatures.js).
-    hollowPresence = getPresenceBetweenSpaces(getSpaceOf(hollow.figure), getSpaceOf(player));
+    hollowPresence = getPresenceBetweenSpaces(getSpaceOf(hollow.figure), space);
     hollowPressure *= hollowPresence;
   }
-  const stillDistance = getNearestHuntingStillDistance();
+  const stillDistance = getNearestHuntingStillDistance(x, z);
   const stillPressure = clampNumber(1 - stillDistance / 5, 0, 1) * 0.6;
   const pressure = Math.min(1, Math.max(hollowPressure, stillPressure));
   game.interference = approachValue(game.interference, pressure, dt * 1.8);
   const isCloseHunt = hollow.isActive && hollow.state === HOLLOW_STATE_HUNT;
   game.danger = approachValue(game.danger, isCloseHunt ? clampNumber(1 - hollowDistance / 7, 0, 1) * hollowPresence : 0, dt * 1.5);
-  updatePlayerHealth(dt); // (here, so that it also runs while you have the menu open down there with others)
+  if (isYourOwn) updatePlayerHealth(dt); // (here, so that it also runs while you have the menu open down there with others)
   if (game.fade < 1) game.fade = Math.min(1, game.fade + dt * 0.9);
 
-  updateAudioListener(player.x, getPlayerEyeY(), player.z, player.yaw);
+  updateAudioListener(x, eyeY, z, yaw);
   setInterferenceSound(game.interference);
   updateHeartbeat(pressure, game.time);
   updateHollowVoice(hollow.figure.x, hollow.figure.z, hollow.isActive, getHollowAggression(),
     hollow.heldAmount * hollow.anger, dt, game.time);
-  const ambientEvent = updateAmbientEvents(game.time, player.x, player.z, game.flags.powerOn ? 0.6 : 0.2);
+  const ambientEvent = updateAmbientEvents(game.time, x, z, game.flags.powerOn ? 0.6 : 0.2);
   if (ambientEvent) showCaption(ambientEvent.caption, ambientEvent);
   // The sounds that go on and on get their captions here, for as long as they last.
   if (hollow.isActive) {
@@ -1131,6 +1141,7 @@ function runFrame(timestamp) {
     renderCamera.z = player.z;
     renderCamera.yaw = player.yaw;
     renderCamera.pitch = player.pitch;
+    if (watching.isOn) aimCameraAtWatched(renderCamera, realDt); // dead, down there with others: you see from where one of them stands (11-watching.js)
     renderCamera.fieldOfViewDegrees = getPlayFieldOfViewDegrees();
     frameState.showViewmodel = game.mode === 'playing' || game.mode === 'paused' || game.mode === 'reading' || game.mode === 'ascending';
     frameState.viewmodelSwayX = Math.cos(player.bobPhase * 0.5) * 0.006;
@@ -1152,7 +1163,7 @@ function runFrame(timestamp) {
   frameState.realTime = game.realTime;
   frameState.interference = game.interference;
   frameState.danger = Math.max(game.danger, player.hurtFlash); // (a hit is a flash of the same red)
-  frameState.fade = game.mode === 'intro' || game.mode === 'dead' || game.mode === 'ending' ? 0 : game.fade;
+  frameState.fade = game.mode === 'intro' || (game.mode === 'dead' && !watching.isOn) || game.mode === 'ending' ? 0 : game.fade;
   frameState.powerOn = game.flags.powerOn;
   frameState.hasKeycard = game.flags.hasKeycard;
   frameState.keycardLevel = game.flags.keycardLevel;
@@ -1162,8 +1173,10 @@ function runFrame(timestamp) {
   if (game.mode === 'workshop') frameState.debug = workshopHooks.buildFrameData();
   else frameState.debug = game.mode === 'title' || !debugHooks.buildFrameData ? null : debugHooks.buildFrameData();
   updateTogether(realDt); // the others down here with you: where they are now, and what their scanners show
+  updateWatching(realDt); // ... and, dead, watching one of them (11-watching.js)
   renderFrame(renderCamera, frameState);
   updateHud(realDt);
+  updateChat(realDt); // what was said grows old (11-chat.js)
   if (debugHooks.update) debugHooks.update(realDt);
 }
 
@@ -1197,6 +1210,8 @@ function startApplication() {
   createPhantoms();
   initializeInput();
   initializeInterface();
+  initializeChat();
+  initializeWatching();
   initializeTogether();
   liftDoor.forcedState = true;
   liftDoor.openFraction = 1;
@@ -1398,6 +1413,10 @@ function startApplication() {
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
     hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getNearestEyeDistanceTo: getNearestEyeDistanceTo, describeIfOutOfReach: describeIfOutOfReach, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
     hasClearWalkingLine: hasClearWalkingLine,
+    // Talking to the others (11-chat.js) and watching them (11-watching.js).
+    chat: chat, sendChat: sendChat, openChat: openChat, closeChat: closeChat, getPlayerName: getPlayerName, cleanChatText: cleanChatText, hearChat: hearChat,
+    watching: watching, beginWatching: beginWatching, watchNext: watchNext, canWatchSomebody: canWatchSomebody, getViewer: getViewer, getWatchedPlayer: getWatchedPlayer,
+    updateWatching: updateWatching, aimCameraAtWatched: aimCameraAtWatched, endWatching: endWatching, updateChat: updateChat, takeKeyForChat: takeKeyForChat, frameState: frameState, triggerPlayerDeath: triggerPlayerDeath, updateDying: updateDying, takeKeyForWatching: takeKeyForWatching,
     // The director (08-director.js) and the map of light ("Light", 08-creatures.js).
     directedCreatures: DIRECTED_CREATURES, findDirectedCreature: findDirectedCreature, updateDirector: updateDirector, resetDirector: resetDirector, beginDirectorBreather: beginDirectorBreather,
     isDirectorInBreather: isDirectorInBreather, getDirectorPressure: getDirectorPressure, pickDirectedWaypoint: pickDirectedWaypoint, sendDirectedCreaturesAway: sendDirectedCreaturesAway,
