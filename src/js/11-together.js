@@ -161,6 +161,7 @@ function refreshTogetherControls() {
     }
   }
   elements['together-status'].textContent = status;
+  refreshVoiceControls(); // who is here, and how your microphone is (11-voice.js)
 }
 
 // ---- Talking to the server ----
@@ -179,9 +180,11 @@ function openLobbySocket(firstMessage) {
   together.statusText = 'Reaching the server...';
   refreshTogetherControls();
   const socket = new WebSocket(together.relayAddress);
+  socket.binaryType = 'arraybuffer'; // (what is not text is a piece of somebody's voice: 11-voice.js)
   together.socket = socket;
   socket.addEventListener('open', function () { socket.send(JSON.stringify(firstMessage)); });
   socket.addEventListener('message', function (event) {
+    if (typeof event.data !== 'string') { if (together.socket === socket) hearVoicePiece(event.data); return; }
     let message = null;
     try { message = JSON.parse(event.data); } catch (error) { return; }
     if (message && typeof message === 'object' && together.socket === socket) hearRelay(message);
@@ -208,6 +211,7 @@ function endLobby(statusText) {
   together.code = ''; together.myId = 0; together.hostId = 0; together.memberIds = [];
   together.isRoundOn = false; together.isLocked = false;
   clearChat(); // (nobody to talk to: 11-chat.js)
+  noteLobbyForVoice(false); // ... and your microphone is let go of (11-voice.js)
   if (together.ownChoices) {
     // The title screen is yours again: back to what you had chosen yourself.
     Object.assign(settings, together.ownChoices);
@@ -316,6 +320,7 @@ function hearRelay(message) {
     for (const memberId of together.memberIds) chat.isKnown[memberId] = true;
     addChatLine('', together.memberIds.length > 1 ? 'You are in lobby ' + together.code + ', with ' + (together.memberIds.length - 1) + ' other' + (together.memberIds.length > 2 ? 's' : '') + '.' : 'Lobby ' + together.code + ' is open. Give the others the code.', 'note');
     sayYourName();
+    noteLobbyForVoice(message.voice === true); // does this server carry voices? Then your microphone is on, if you have it so (11-voice.js)
   } else if (message.t === 'locked') {
     together.isLocked = message.on === true;
   } else if (message.t === 'refused') {
@@ -329,6 +334,7 @@ function hearRelay(message) {
     together.memberIds = together.memberIds.filter(function (id) { return id !== message.id; });
     addChatLine('', getPlayerName(message.id) + ' has left the lobby.', 'note');
     delete chat.names[message.id]; delete chat.isKnown[message.id]; delete chat.hasSaidName[message.id]; delete chat.heardAt[message.id];
+    forgetVoiceTalker(message.id);
     handBackLooseThingsOf(message.id);
     const other = findOtherPlayer(message.id);
     if (other) {

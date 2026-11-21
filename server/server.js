@@ -13,6 +13,7 @@
 //   LAST_RETURN_LOBBIES       "off" serves the game alone, with no lobbies
 //   LAST_RETURN_PROXIES       how many proxies stand between the browsers and this server (0; 1 behind an ingress
 //                             or a load balancer that writes X-Forwarded-For). See "Guessing codes" below.
+//   LAST_RETURN_VOICE         "off": the lobbies carry no voices (see "Voices" below). Everything else works as it did.
 //
 // What a browser says to the server, and what it hears back (one JSON object per message):
 //   { t: 'host', build }          ->  { t: 'lobby', code, you, host, players }
@@ -28,6 +29,15 @@
 //   { t: 'joined', id }   { t: 'left', id }   { t: 'closed' } (the host has gone, and the lobby with them)
 // `d` is the game's own business and is handed on unread. `build` is which build of the game the browser has:
 // a station is only the same station for two browsers with the same build, so a lobby holds one build.
+//
+// Voices. Every message above is text. A message that is not text is a piece of somebody's voice (the game's
+// 11-voice.js makes and plays them: a twenty-fifth of a second of sound each, some 330 bytes). The server does
+// not look inside one any more than it reads `d`: it puts the number of who said it in front (two bytes) and
+// hands it to the others in the lobby. Whether they hear it, and how loud, is their own game's to work out: it
+// knows where everybody stands. A piece that is too long, or one more than MAXIMUM_VOICE_PIECES_PER_SECOND from
+// one browser, is dropped and nothing more; so is one for a browser that has fallen behind in what it has
+// been sent (sound that arrives late is worth nothing). The 'lobby' message says `voice: true` when the server
+// carries them, and a browser sends none unless it does.
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
@@ -37,6 +47,9 @@ const { WebSocketServer } = require('ws');
 const MAXIMUM_PLAYERS = 4;
 const MAXIMUM_LOBBIES = 200;
 const MAXIMUM_MESSAGE_BYTES = 4096;
+const MAXIMUM_VOICE_BYTES = 600;            // one piece of voice: the game's are 328
+const MAXIMUM_VOICE_PIECES_PER_SECOND = 40; // the game sends 25 while somebody talks
+const VOICE_BEHIND_BYTES = 65536;           // a browser with this much still waiting to be sent to it gets no voice until it has caught up
 const MAXIMUM_MESSAGES_PER_SECOND = 120; // in play a browser says some 45 things a second, and the host some 55: this is for one gone wrong
 const SECONDS_BETWEEN_PINGS = 30;       // a browser that has not answered the last one by the next is gone
 const RELAY_PATH = '/relay';
@@ -81,6 +94,7 @@ function fillInPage(page, serverName, hasLobbies) {
 // `options.proxies`: how many proxies stand in front (see "Guessing codes").
 function keepLobbies(server, options) {
   const proxies = Math.max(0, Math.floor(Number(options && options.proxies) || 0));
+  const carriesVoice = !(options && options.voice === false);
   const lobbies = new Map(); // by code: { code, build, hostId, nextId, isLocked, members: Map of id -> socket }
   const refusals = new Map(); // by address: when it was refused, the last minute's worth (see "Guessing codes")
 
@@ -92,7 +106,7 @@ function keepLobbies(server, options) {
     for (const other of socket.lobby.members.values()) if (other !== socket) send(other, text);
   };
   const describeLobby = function (lobby, socket) {
-    return { t: 'lobby', code: lobby.code, you: socket.playerId, host: lobby.hostId, players: Array.from(lobby.members.keys()), locked: lobby.isLocked };
+    return { t: 'lobby', code: lobby.code, you: socket.playerId, host: lobby.hostId, players: Array.from(lobby.members.keys()), locked: lobby.isLocked, voice: carriesVoice };
   };
   const enterLobby = function (lobby, socket) {
     socket.lobby = lobby;
@@ -167,6 +181,20 @@ function keepLobbies(server, options) {
     // Anything else is not something this server knows what to do with, and is let pass.
   };
 
+  // A piece of somebody's voice: to the others in their lobby, with who said it in front. (See "Voices" above.)
+  const hearVoice = function (socket, data) {
+    const lobby = socket.lobby;
+    if (!carriesVoice || !lobby || socket.isRefused || socket.playerId > 65535) return;
+    const piece = Buffer.isBuffer(data) ? data : Buffer.concat([].concat(data));
+    if (piece.length < 1 || piece.length > MAXIMUM_VOICE_BYTES || ++socket.voiceThisSecond > MAXIMUM_VOICE_PIECES_PER_SECOND) return;
+    const said = Buffer.allocUnsafe(piece.length + 2);
+    said.writeUInt16LE(socket.playerId, 0);
+    piece.copy(said, 2);
+    for (const other of lobby.members.values()) {
+      if (other !== socket && other.readyState === other.OPEN && other.bufferedAmount < VOICE_BEHIND_BYTES) other.send(said, { binary: true });
+    }
+  };
+
   const sockets = new WebSocketServer({ noServer: true, maxPayload: MAXIMUM_MESSAGE_BYTES });
   server.on('upgrade', function (request, connection, head) {
     // Only the page this server serves may open a lobby here: the browser says which page is asking.
@@ -174,14 +202,15 @@ function keepLobbies(server, options) {
     try { isOwnPage = new URL(request.headers.origin).host === request.headers.host; } catch (error) { /* no origin, or not an address */ }
     if (request.url !== RELAY_PATH || !isOwnPage) { connection.destroy(); return; }
     sockets.handleUpgrade(request, connection, head, function (socket) {
-      socket.lobby = null; socket.playerId = 0; socket.hasAnswered = true; socket.messagesThisSecond = 0; socket.isRefused = false;
+      socket.lobby = null; socket.playerId = 0; socket.hasAnswered = true; socket.messagesThisSecond = 0; socket.voiceThisSecond = 0; socket.isRefused = false;
       const forwarded = String(request.headers['x-forwarded-for'] || '').split(',').map(function (entry) { return entry.trim(); }).filter(Boolean);
       socket.address = (proxies > 0 && forwarded[forwarded.length - proxies]) || request.socket.remoteAddress || '';
       socket.on('pong', function () { socket.hasAnswered = true; });
       socket.on('error', function () { /* it closes next, and that is where it is dealt with */ });
       socket.on('close', function () { leaveLobby(socket); });
       socket.on('message', function (data, isBinary) {
-        if (isBinary || ++socket.messagesThisSecond > MAXIMUM_MESSAGES_PER_SECOND) { socket.close(1008, 'too much'); return; }
+        if (isBinary) { hearVoice(socket, data); return; } // (counted by itself, and never a reason to show a browser the door)
+        if (++socket.messagesThisSecond > MAXIMUM_MESSAGES_PER_SECOND) { socket.close(1008, 'too much'); return; }
         let message = null;
         try { message = JSON.parse(data.toString('utf8')); } catch (error) { /* dealt with below */ }
         if (!message || typeof message !== 'object' || typeof message.t !== 'string') { socket.close(1007, 'not understood'); return; }
@@ -189,7 +218,7 @@ function keepLobbies(server, options) {
       });
     });
   });
-  const everySecond = setInterval(function () { for (const socket of sockets.clients) socket.messagesThisSecond = 0; }, 1000);
+  const everySecond = setInterval(function () { for (const socket of sockets.clients) { socket.messagesThisSecond = 0; socket.voiceThisSecond = 0; } }, 1000);
   const everyMinute = setInterval(function () { for (const address of Array.from(refusals.keys())) countRefusals(address); }, 60000); // (forgets the addresses that have stopped)
   const pings = setInterval(function () {
     for (const socket of sockets.clients) {
@@ -203,10 +232,10 @@ function keepLobbies(server, options) {
   return { lobbies: lobbies, close: close };
 }
 
-// Starts the server. `options` are the settings above by another name (port, pagePath, serverName, lobbies, proxies);
+// Starts the server. `options` are the settings above by another name (port, pagePath, serverName, lobbies, proxies, voice);
 // the tests use them. Returns the http server; `server.lobbies` is the lobbies there are, by code.
 function startServer(options) {
-  const settings = Object.assign({ port: 8080, pagePath: path.join(__dirname, '..', 'index.html'), serverName: '', lobbies: true, proxies: 0 }, options || {});
+  const settings = Object.assign({ port: 8080, pagePath: path.join(__dirname, '..', 'index.html'), serverName: '', lobbies: true, proxies: 0, voice: true }, options || {});
   const page = Buffer.from(fillInPage(fs.readFileSync(settings.pagePath, 'utf8'), settings.serverName, settings.lobbies), 'utf8');
   const pageZipped = zlib.gzipSync(page);
 
@@ -222,7 +251,7 @@ function startServer(options) {
     response.writeHead(200, headers).end(request.method === 'HEAD' ? undefined : body);
   });
 
-  const kept = settings.lobbies ? keepLobbies(server, { proxies: settings.proxies }) : null;
+  const kept = settings.lobbies ? keepLobbies(server, { proxies: settings.proxies, voice: settings.voice }) : null;
   server.lobbies = kept ? kept.lobbies : new Map();
   const closeServer = server.close.bind(server);
   server.close = function (done) { if (kept) kept.close(); return closeServer(done); }; // the lobbies go first, or it would wait for them for ever
@@ -241,7 +270,8 @@ if (require.main === module) {
     pagePath: process.env.LAST_RETURN_PAGE || path.join(__dirname, '..', 'index.html'),
     serverName: (process.env.LAST_RETURN_SERVER_NAME || '').trim(),
     lobbies: hasLobbies,
-    proxies: Number(process.env.LAST_RETURN_PROXIES) || 0
+    proxies: Number(process.env.LAST_RETURN_PROXIES) || 0,
+    voice: process.env.LAST_RETURN_VOICE !== 'off'
   });
   // Asked to stop (a container being replaced, Ctrl+C): stop now. A process that is first in its container is
   // not stopped by being asked unless it says so itself.

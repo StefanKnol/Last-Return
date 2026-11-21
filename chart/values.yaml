@@ -21,6 +21,10 @@ replicaCount: 1
 # served to be played alone and the title screen does not mention it.
 lobbies:
   enabled: true
+  # Whether the lobbies carry voices: players talking to each other out loud, the sound passing through this
+  # server (about 8 kilobytes a second from each player who is talking, to each of the others in their lobby).
+  # Off, players can still write to each other.
+  voice: true
   # How many proxies stand between the browsers and the pod, so that the server knows whose address is whose
   # when it limits how often one address may guess at lobby codes. Left empty: 1 with the ingress on (the
   # ingress controller), 0 without. Set it to 2 if something else is in front of the ingress as well (a CDN).

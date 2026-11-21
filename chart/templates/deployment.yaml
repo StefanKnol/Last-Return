@@ -30,6 +30,8 @@ spec:
               value: "8080"
             - name: LAST_RETURN_LOBBIES
               value: {{ ternary "on" "off" .Values.lobbies.enabled | quote }}
+            - name: LAST_RETURN_VOICE
+              value: {{ ternary "on" "off" .Values.lobbies.voice | quote }}
             - name: LAST_RETURN_PROXIES
               value: {{ .Values.lobbies.proxies | default (ternary 1 0 .Values.ingress.enabled) | quote }}
             {{- with .Values.serverName }}

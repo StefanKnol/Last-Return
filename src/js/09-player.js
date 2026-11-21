@@ -87,6 +87,9 @@ const settings = {
   captions: 'tells',        // the lines in square brackets: 'off', 'tells' (what the Hollow has just done) or 'all' (every sound, with where it comes from)
   carryButton: 'hold',      // the right mouse button and a thing in reach: 'hold' carries it while the button is down, 'toggle' takes it at a click and lets go at the next (08-loose-objects.js)
   playerName: '',           // what the others call you when you descend together (11-chat.js); '' is "Player" and your number in the lobby
+  voiceMode: 'off',         // your microphone, descending together (11-voice.js): 'off', 'push' (it sends while you hold B) or 'open' (it sends whenever it hears something)
+  voiceVolume: 1,           // how loud the others' voices are: 0 to 1.5
+  voiceLevels: {},          // how loud you have set each of the others, by the name they gave: 0 (muted) to 2. Somebody not in it is 1
   hasPickedSomethingUp: false, // the line that says how to pick a thing up is a tutorial: shown until you have done it once, and never again
   // Which work orders a generated station may be given (09-quests.js): one that is switched off never comes up.
   // A key that is missing counts as on, so that a work order added later is there without being asked for.
@@ -140,6 +143,13 @@ function loadSettings() {
       if (stored.carryButton === 'hold' || stored.carryButton === 'toggle') settings.carryButton = stored.carryButton;
       if (stored.hasPickedSomethingUp === true) settings.hasPickedSomethingUp = true;
       settings.playerName = cleanChatText(stored.playerName, CHAT_NAME_MOST_CHARACTERS);
+      if (VOICE_MODES.indexOf(stored.voiceMode) >= 0) settings.voiceMode = stored.voiceMode;
+      if (typeof stored.voiceVolume === 'number') settings.voiceVolume = clampNumber(stored.voiceVolume, 0, 1.5);
+      if (stored.voiceLevels && typeof stored.voiceLevels === 'object') {
+        for (const name of Object.keys(stored.voiceLevels).slice(-VOICE_LEVELS_KEPT)) {
+          if (typeof stored.voiceLevels[name] === 'number' && cleanChatText(name, CHAT_NAME_MOST_CHARACTERS) === name && name !== '') settings.voiceLevels[name] = clampNumber(stored.voiceLevels[name], 0, VOICE_LEVEL_MOST);
+        }
+      }
       if (stored.workOrders && typeof stored.workOrders === 'object') { for (const key in stored.workOrders) if (stored.workOrders[key] === false) settings.workOrders[key] = false; }
     }
   } catch (error) { /* storage is optional */ }

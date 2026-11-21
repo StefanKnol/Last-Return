@@ -75,6 +75,7 @@ function hearName(id, data) {
   if (!wasKnown) addChatLine('', getPlayerName(id) + ' has joined the lobby.', 'note');
   else if (hadSaidName && before !== getPlayerName(id)) addChatLine('', before + ' is now called ' + getPlayerName(id) + '.', 'note');
   refreshWatchBar(); // (11-watching.js: it may be showing their name)
+  refreshVoiceControls(); // (11-voice.js: the list of who is here)
 }
 
 // Is this one more line than they may say in five seconds? (`times` is their last few; this one is added to it.)

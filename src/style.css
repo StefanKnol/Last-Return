@@ -400,3 +400,21 @@ body.is-touch #chat { bottom: auto; top: 46%; width: min(300px, 44%); }
 /* At the title screen it is part of the lobby's block (11-chat.js moves it there). */
 #chat.is-on-title, body.is-touch #chat.is-on-title { position: static; width: 100%; margin-top: 10px; pointer-events: auto; }
 #chat.is-on-title .chat-line { background: transparent; padding-left: 0; }
+
+/* ---- Voices (11-voice.js) ---- */
+.voice-talkers { display: flex; flex-direction: column; gap: 2px; }
+.voice-talkers[hidden] { display: none; }
+.voice-talker { padding: 2px 8px 2px 20px; background: rgba(4, 6, 10, 0.72); color: var(--return); font-family: var(--font-data); font-size: 11px; letter-spacing: 0.08em; position: relative; width: fit-content; }
+.voice-talker::before { content: ''; position: absolute; left: 7px; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-radius: 50%; background: var(--return); }
+.voice-talk.is-held { color: var(--void); background: var(--return); border-color: var(--return); opacity: 1; }
+.voice-talk { touch-action: none; -webkit-user-select: none; user-select: none; }
+.together-players { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-family: var(--font-data); font-size: 12px; color: var(--text-dim); }
+.together-players[hidden] { display: none; }
+.together-player { display: flex; gap: 6px; align-items: center; }
+.together-player span { color: var(--text); }
+.together-player input[type=range] { width: 9ch; }
+.together-player i { font-style: normal; min-width: 5ch; }
+.pause-voices { margin-top: 10px; }
+.pause-voices[hidden] { display: none; }
+#together-voice { max-width: 26ch; }
+#together-voice-volume { width: 12ch; }
