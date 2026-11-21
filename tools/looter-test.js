@@ -110,6 +110,29 @@ const labSource = String(function () {
   check('a generated station has as many looters as the threat level says, or as many as it has nests for if that is fewer: each at home in a vent, in a nest of its own, a dead end if the station has one',
     living.stations.length >= 8 && living.stations.every((station) => station.looters === Math.min(station.wanted, station.nestsThereAre) && station.allInVents && station.nestsOfTheirOwn && station.deadEndsFirst) &&
     living.stations.some((station) => station.looters >= 2), living.stations);
+  // Which body each has: one of those there are for looters (the list in 00-config.js, those of them the game has
+  // a body for), taken in turn, the same in the same station every time.
+  const bodies = await inGame(() => {
+    const d = window.lastReturnDebug, thereAre = d.tuning.looterBodies.filter((key) => Boolean(d.figureKinds[key]));
+    const seen = { thereAre: thereAre, stations: [], firstBodies: {} };
+    const usualDifficulty = d.game.difficulty;
+    d.game.difficulty = Object.assign({}, usualDifficulty, { looterCount: 5 }); // (as many as a threat level ever has: more than there are bodies)
+    for (let seed = 1; seed <= 24 && seen.stations.length < 8; seed++) {
+      if (!d.loadStation('generated', seed, 'large', 'mixed', 'two') || d.looters.length < 2) continue;
+      const has = d.looters.map((looter) => looter.bodyKey);
+      d.loadStation('generated', seed, 'large', 'mixed', 'two');
+      const hasAgain = d.looters.map((looter) => looter.bodyKey);
+      seen.firstBodies[has[0]] = true;
+      seen.stations.push({ seed: seed, has: has, sameAgain: has.join() === hasAgain.join(), different: new Set(has).size,
+        areOfThatKind: d.looters.every((looter) => looter.figure.proportions === d.figureKinds[looter.bodyKey].proportions) });
+    }
+    d.game.difficulty = usualDifficulty;
+    return seen;
+  });
+  check('the looters of a station have the bodies there are for looters, in turn (as many different ones as there are bodies, or looters), and the same station has the same ones again',
+    bodies.thereAre.length >= 1 && bodies.stations.length >= 4 && bodies.stations.every((station) => station.sameAgain && station.areOfThatKind &&
+      station.has.every((key) => bodies.thereAre.indexOf(key) >= 0) && station.different === Math.min(station.has.length, bodies.thereAre.length)) &&
+    Object.keys(bodies.firstBodies).length === Math.min(bodies.thereAre.length, bodies.stations.length), bodies);
   check('a looter is under a metre tall, and so walks upright where you crawl',
     living.stations.every((station) => station.looters === 0 || (station.tallest > 0.4 && station.tallest < 1 && station.tallest < living.ventHeight)), living.stations.map((station) => Math.round(station.tallest * 100) / 100));
 

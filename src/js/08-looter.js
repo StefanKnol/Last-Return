@@ -34,8 +34,9 @@
 // out in every browser), and where a looter stands is told with the rest of the host's station (`describe`).
 // A thing in a looter's arms is nobody's to move: it is where the looter is.
 //
-// Its body is a creature made in the workshop: src/creatures/looter.json. (Without that file it gets a plain
-// small one, so that the game does not depend on it.) How many there are is the threat level's `looterCount`
+// Its body is a creature made in the workshop: src/creatures/looter.json, or another of the bodies there are
+// for looters (TUNING.looterBodies: chooseLooterBody below). (Without any of those files it gets a plain small
+// one, so that the game does not depend on them.) How many there are is the threat level's `looterCount`
 // (00-config.js), and never more than the station has nests for. Kessel-9 has no vents, and so none.
 // ---------------------------------------------------------------------------
 
@@ -68,8 +69,19 @@ if (!FIGURE_KINDS.looter) {
     surfaceClass: SURFACE_PLAYER, imprintTuningKey: 'playerImprintSeconds', color: [0.35, 0.9, 0.85], isDesigned: true };
 }
 
+// Which body a looter has: one of TUNING.looterBodies, those of them that there is a body for. They are taken
+// in turn, starting with the one the station's seed says: so a station's looters are as unlike each other as
+// the bodies allow, the same station has the same looters every time, and every game that shows a station
+// (yours, and those of whoever is down there with you) gives each looter the same body without being told.
+function chooseLooterBody(index) {
+  const bodies = TUNING.looterBodies.filter(function (key) { return Boolean(FIGURE_KINDS[key]); });
+  if (bodies.length === 0) return 'looter';
+  return bodies[(Math.abs(level.seed | 0) + index) % bodies.length];
+}
+
 // Every looter of this descent. One is its legs (createCreatureLegs) and:
 //   index      which one it is: what a thing in its arms is marked with (looterIndex, 08-loose-objects.js)
+//   bodyKey    which body it has: a key of FIGURE_KINDS (chooseLooterBody)
 //   figure     its body
 //   nest       where it lives: one of level.ventNests
 //   state      one of LOOTER_STATE_...; `timer` counts down what that state is waiting for
@@ -82,8 +94,9 @@ if (!FIGURE_KINDS.looter) {
 const looters = [];
 
 function createLooter(index, nest) {
+  const bodyKey = chooseLooterBody(index);
   const looter = Object.assign(createCreatureLegs(LOOTER_WAY), {
-    index: index, figure: createFigureOfKind('looter'), nest: nest,
+    index: index, bodyKey: bodyKey, figure: createFigureOfKind(bodyKey), nest: nest,
     state: LOOTER_STATE_NEST, timer: 0, wanted: null, carried: null, goalX: nest.x, goalZ: nest.z, ignored: {},
     nestField: new Int16Array(TILE_COUNT), nestFieldVersion: -1, // how far it is on foot from its nest to everywhere, by its way
     isRobbed: false, madAt: null,
