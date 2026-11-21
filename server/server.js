@@ -37,7 +37,7 @@ const { WebSocketServer } = require('ws');
 const MAXIMUM_PLAYERS = 4;
 const MAXIMUM_LOBBIES = 200;
 const MAXIMUM_MESSAGE_BYTES = 4096;
-const MAXIMUM_MESSAGES_PER_SECOND = 120; // in play a browser says about 15 things a second, and the host about 30: this is for one gone wrong
+const MAXIMUM_MESSAGES_PER_SECOND = 120; // in play a browser says some 45 things a second, and the host some 55: this is for one gone wrong
 const SECONDS_BETWEEN_PINGS = 30;       // a browser that has not answered the last one by the next is gone
 const RELAY_PATH = '/relay';
 

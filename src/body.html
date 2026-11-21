@@ -49,6 +49,15 @@
     <div id="hud-countdown" hidden></div>
     <div id="hud-messages" aria-live="polite"></div>
     <div id="hud-caption" aria-live="polite"></div>
+    <div id="watch-bar" hidden>
+      <div class="watch-who"><span class="hud-label">Watching</span> <b id="watch-name"></b></div>
+      <div id="watch-note" class="watch-note"></div>
+      <div class="watch-buttons">
+        <button type="button" id="button-watch-previous" class="button-quiet" aria-label="Watch the one before">&#9664;</button>
+        <button type="button" id="button-watch-next" class="button-quiet" aria-label="Watch the next of them">&#9654;</button>
+        <button type="button" id="button-watch-leave" class="button-quiet">Leave the descent</button>
+      </div>
+    </div>
   </div>
 
   <div id="touch-controls" hidden>
@@ -167,6 +176,11 @@
             </label>
             <button type="button" id="button-join-lobby" class="button-quiet">Join</button>
           </div>
+          <div class="station-options">
+            <label>Your name
+              <input type="text" id="together-name" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Player">
+            </label>
+          </div>
           <div id="together-lobby" class="station-options" hidden>
             <span class="together-code">Lobby <b id="together-lobby-code"></b></span>
             <button type="button" id="button-lock-lobby" class="button-quiet" hidden>Lock it</button>
@@ -190,6 +204,7 @@
           <div><dt>Map</dt><dd><kbd>Tab</kbd> or <kbd>M</kbd></dd></div>
           <div><dt>Colours</dt><dd><kbd>V</kbd></dd></div>
           <div><dt>Pause</dt><dd><kbd>Esc</kbd></dd></div>
+          <div><dt>Talk</dt><dd><kbd>Enter</kbd> or <kbd>T</kbd> (descending together)</dd></div>
         </dl>
         <p class="card-note">On a touch screen the controls appear on screen: left thumb moves, right thumb looks, hold SCAN to paint.</p>
         <div class="settings-grid">
@@ -323,6 +338,7 @@
       <h2 id="death-title" class="death-title">SIGNAL LOST</h2>
       <div id="death-lines" class="panel-text"></div>
       <div class="button-row">
+        <button type="button" id="button-watch" class="button-primary" hidden>Watch the others</button>
         <button type="button" id="button-retry" class="button-primary">Resume from last checkpoint</button>
         <button type="button" id="button-death-restart" class="button-quiet">Start over</button>
       </div>
@@ -341,6 +357,14 @@
       </div>
     </div>
   </section>
+
+  <div id="chat" hidden>
+    <div id="chat-log" aria-live="polite" aria-label="What the others have said"></div>
+    <form id="chat-form" hidden>
+      <input type="text" id="chat-input" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="send" aria-label="Say to the others" placeholder="Say to the others: Enter sends, Esc shuts">
+    </form>
+    <button type="button" id="chat-open" class="chat-open" hidden>Enter: talk</button>
+  </div>
 
   <div id="fatal-error" class="screen screen-dark" hidden>
     <div class="panel panel-bare">

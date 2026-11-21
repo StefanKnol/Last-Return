@@ -29,7 +29,9 @@
 //   - Still each browser's own: the apparitions (on purpose).
 // ---------------------------------------------------------------------------
 
-const TOGETHER_SENDS_PER_SECOND = 15;    // how often you say where you are
+// (It was 15, which is enough for a body seen across a room. Dead, you look through one of the others' eyes
+// (11-watching.js), and there every step in where they look shows.)
+const TOGETHER_SENDS_PER_SECOND = 30;    // how often you say where you are
 const WORLD_SENDS_PER_SECOND = 10;       // how often the host says how the creatures stand and which doors are open
 
 const together = {
@@ -205,6 +207,7 @@ function endLobby(statusText) {
   endDescentTogether();
   together.code = ''; together.myId = 0; together.hostId = 0; together.memberIds = [];
   together.isRoundOn = false; together.isLocked = false;
+  clearChat(); // (nobody to talk to: 11-chat.js)
   if (together.ownChoices) {
     // The title screen is yours again: back to what you had chosen yourself.
     Object.assign(settings, together.ownChoices);
@@ -308,6 +311,11 @@ function hearRelay(message) {
     together.memberIds = message.players.slice();
     together.isLocked = message.locked === true;
     together.statusText = '';
+    // Whoever is here already is not somebody who "has joined" when they say their name (11-chat.js).
+    clearChat();
+    for (const memberId of together.memberIds) chat.isKnown[memberId] = true;
+    addChatLine('', together.memberIds.length > 1 ? 'You are in lobby ' + together.code + ', with ' + (together.memberIds.length - 1) + ' other' + (together.memberIds.length > 2 ? 's' : '') + '.' : 'Lobby ' + together.code + ' is open. Give the others the code.', 'note');
+    sayYourName();
   } else if (message.t === 'locked') {
     together.isLocked = message.on === true;
   } else if (message.t === 'refused') {
@@ -316,8 +324,11 @@ function hearRelay(message) {
   } else if (message.t === 'joined') {
     if (together.memberIds.indexOf(message.id) < 0) together.memberIds.push(message.id);
     tellLobbyWhatIsChosen(); // as the host: so that their title screen shows it
+    sayYourName(); // so that they know what you are called (theirs comes when they say it: 11-chat.js)
   } else if (message.t === 'left') {
     together.memberIds = together.memberIds.filter(function (id) { return id !== message.id; });
+    addChatLine('', getPlayerName(message.id) + ' has left the lobby.', 'note');
+    delete chat.names[message.id]; delete chat.isKnown[message.id]; delete chat.hasSaidName[message.id]; delete chat.heardAt[message.id];
     handBackLooseThingsOf(message.id);
     const other = findOtherPlayer(message.id);
     if (other) {
@@ -448,6 +459,9 @@ function hearOtherPlayer(id, data) {
     return;
   }
   if (data.k === 'chosen') { if (id === together.hostId) hearLobbyChoices(data); return; }
+  // What they are called, and a line of text: in the lobby and down in the station alike (11-chat.js).
+  if (data.k === 'name') { hearName(id, data); return; }
+  if (data.k === 'chat') { hearChat(id, data); return; }
   if (data.k === 'over') {
     // The host is back at the title screen. The station was the host's: the descent is over for everyone.
     if (id !== together.hostId) return;
@@ -490,6 +504,7 @@ function hearOtherPlayer(id, data) {
   if (other.hasBeenHeardFrom && (data.d === 1) !== other.isFallen) setFigureRaycastable(other.figure, data.d !== 1);
   // The hit killed them: what did it does not stand over them while the others play on.
   if (data.d === 1 && !other.isFallen && other.caughtBy !== '') { sendCreaturesAwayAfterCatch(other.caughtBy); other.caughtBy = ''; }
+  if (other.hasBeenHeardFrom && data.d === 1 && !other.isFallen) addChatLine('', getPlayerName(id) + ' is down. Their scanner lies where they fell.', 'note');
   other.isFallen = data.d === 1;
   if (!other.hasBeenHeardFrom) {
     // The first word from them: they are simply there, not on their way from nowhere.
@@ -1046,7 +1061,7 @@ function restartFallenScanner(id) {
   const other = findOtherPlayer(ownerId);
   if (other) { other.isDown = false; other.isFallen = false; }
   if (ownerId === together.myId) standUpAgainAt(x, z);
-  else if (game.mode !== 'title') showMessage('A scanner restarts. One of the others is back on their feet.', 5, 'info');
+  else if (game.mode !== 'title') { showMessage('A scanner restarts. ' + getPlayerName(ownerId) + ' is back on their feet.', 5, 'info'); addChatLine('', getPlayerName(ownerId) + ' is back on their feet.', 'note'); }
 }
 
 // The host's game: is a fallen scanner lying where it can be restarted, and has it lain there long enough? And
