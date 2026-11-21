@@ -578,7 +578,7 @@ function renderCreatureWorkshopDesignPanel(body) {
   }
   addWorkshopNote(body, creature.playerSkin
     ? 'A body a player can wear. The game poses it as it poses a player (11-together.js), and getPlayerBodyKinds (04-workshop-creatures.js) lists it with the others. Nothing chooses between them yet: down there everybody still wears the body written as code.'
-    : 'A file gives a creature its body. What it does in a station is code, the way the Hollow and the Stills are code in 08-entities.js: createFigureOfKind(\'' + design.key + '\') makes one. Until something does, it is kept, and in no station.');
+    : 'A file gives a creature its body. What it does in a station is code, the way the Hollow is code in 08-hollow.js and the Stills in 08-entities.js: createFigureOfKind(\'' + design.key + '\') makes one. Until something does, it is kept, and in no station.');
 }
 
 // ---------------------------------------------------------------------------

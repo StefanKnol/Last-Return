@@ -672,7 +672,7 @@ function spawnPhantomOfKind(kindKey) {
   const kind = PHANTOM_KINDS[kindKey];
   const spot = kind.findSpot();
   if (!spot) return null;
-  const figure = createPhantomFigure(kindKey === 'dummy' ? FIGURE_PROPORTIONS_DUMMY : FIGURE_PROPORTIONS_HOLLOW);
+  const figure = createPhantomFigure(kindKey === 'dummy' ? FIGURE_PROPORTIONS_DUMMY : getHollowBody()); // (as this station's Hollow is made: 08-hollow.js)
   figure.x = spot.x; figure.z = spot.z; figure.yaw = spot.yaw;
   const phantom = createPhantomRecord(kindKey, figure);
   phantom.frameSeconds = 0;
@@ -735,7 +735,7 @@ function createPhantoms() {
   phantoms.length = 0;
   // A threat level with apparitions switched off has none at all: not the placed ones either.
   for (const definition of (game.difficulty.phantomFactor > 0 ? phantomDefinitions : [])) {
-    const figure = createPhantomFigure(FIGURE_PROPORTIONS_HOLLOW);
+    const figure = createPhantomFigure(getHollowBody());
     figure.x = definition.x; figure.z = definition.z; figure.yaw = definition.yaw;
     poseStandingPhantom(figure);
     const phantom = createPhantomRecord('placed', figure);

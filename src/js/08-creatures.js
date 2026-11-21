@@ -2,7 +2,7 @@
 // What the creatures have in common.
 //
 // Every creature is its own piece of code: what it wants, what it does about a noise, how it holds itself, what
-// happens when it reaches you. The Hollow and the Stills are in 08-entities.js, and there is no general
+// happens when it reaches you. The Hollow is in 08-hollow.js and the Stills in 08-entities.js, and there is no general
 // "behaviour" that they are settings of: two creatures that want different things have little of that to share.
 //
 // What they do share is here, so that the next one does not have to bring it:
@@ -318,8 +318,11 @@ function moveCreatureToward(creature, targetX, targetZ, speed, dt) {
 //   debugLines   (optional) function (lines): adds its lines to the readout
 const CREATURE_KINDS = [];
 
-function addCreatureKind(kind) {
-  CREATURE_KINDS.push(kind);
+// The kinds are run in the order they are added in, which is the order of their files' names. `isRunFirst` is
+// for a kind that the others go by (the director, 08-director.js): it is put in front of whatever is there
+// already, so that it does not depend on what its file is called.
+function addCreatureKind(kind, isRunFirst) {
+  if (isRunFirst === true) CREATURE_KINDS.unshift(kind); else CREATURE_KINDS.push(kind);
   return kind;
 }
 

@@ -1513,7 +1513,13 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await a.evaluate(() => { const d = window.lastReturnDebug; d.game.mode = 'playing'; d.game.flags.liftArrived = false; });
   await b.evaluate(() => { window.lastReturnDebug.game.isLeftBehind = false; });
 
-  await a.evaluate(() => { const d = window.lastReturnDebug; d.hollow.isActive = true; d.hollow.figure.x = d.player.x + 0.3; d.hollow.figure.z = d.player.z; d.hollow.graceTimer = 0; d.hollow.crawlspace = null; });
+  // (The host has not been hit yet in this suite, and one hit is not the death of anybody who is whole: so the
+  // host is down to the last of their health first, and this hit is the one that takes it. 09-health.js)
+  await a.evaluate(() => {
+    const d = window.lastReturnDebug;
+    d.player.health = 1; d.player.hurtGraceSeconds = 0;
+    d.hollow.isActive = true; d.hollow.figure.x = d.player.x + 0.3; d.hollow.figure.z = d.player.z; d.hollow.graceTimer = 0; d.hollow.recoverSeconds = 0; d.hollow.crawlspace = null;
+  });
   await play(a, 0.2);
   await drawUntilDead(a);
   await drawUntilDead(b);

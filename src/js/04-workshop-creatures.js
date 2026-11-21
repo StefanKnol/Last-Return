@@ -7,9 +7,10 @@
 // balls, capsules, cylinders and cones, the same basic forms a loose object is made of. This file turns each of
 // them into an ordinary entry of FIGURE_KINDS (04-figures.js), so createFigureOfKind('<file name>') makes one.
 //
-// What a file cannot give a creature is something to do: that is code, the way the Hollow and the Stills are
-// code in 08-entities.js. A creature that nothing in the game makes is in no station; it is kept, and stands in
-// the workshop.
+// What a file cannot give a creature is something to do: that is code, the way the Hollow is code in
+// 08-hollow.js and the Stills in 08-entities.js. A creature that nothing in the game makes is in no station; it
+// is kept, and stands in the workshop. (One that something does make: the looters' bodies, TUNING.looterBodies,
+// and the Hollow's other body, TUNING.hollowBodies.)
 //
 // A body a player can wear is such a file too (`playerSkin`): a person's skeleton that is made as tall as a
 // player is, with the scanner in its hand, posed by the game the way it poses a player (11-together.js).

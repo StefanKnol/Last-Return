@@ -1488,7 +1488,7 @@ function startApplication() {
     setScanHeld: function (isHeld) { input.isScanHeld = isHeld; },
     addScanPoint: addScanPoint,
     setScannerSpread: setScannerSpread,
-    updateFigureCapsules: updateFigureCapsules, figureKinds: FIGURE_KINDS, createFigureOfKind: createFigureOfKind, getPlayerBodyKinds: getPlayerBodyKinds, setFigureRaycastable: setFigureRaycastable,
+    updateFigureCapsules: updateFigureCapsules, getFigureTop: getFigureTop, figureKinds: FIGURE_KINDS, createFigureOfKind: createFigureOfKind, getPlayerBodyKinds: getPlayerBodyKinds, setFigureRaycastable: setFigureRaycastable,
     voiceState: voiceState, hasVoiceLine: hasVoiceLine, playRadioLine: playRadioLine, playVoiceLine: playVoiceLine,
     loadVoiceLine: loadVoiceLine, radioLineKeys: Object.keys(RADIO_MESSAGES),
     debugState: debugState,

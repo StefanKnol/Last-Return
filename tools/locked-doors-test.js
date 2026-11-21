@@ -591,7 +591,7 @@ const labSource = String(function () {
   // --- above the ceiling it is in another space than you ("Spaces", src/js/08-creatures.js) ---
   const ceiling = await inGame(() => {
     const d = window.lastReturnDebug, result = {}, spaces = d.spaces, round = (value) => Math.round(value * 1000) / 1000;
-    const ROAMING = 0, LOOKING = 1, HUNTING = 2; // (HOLLOW_STATE_ROAM, _INVESTIGATE and _HUNT in src/js/08-entities.js)
+    const ROAMING = 0, LOOKING = 1, HUNTING = 2; // (HOLLOW_STATE_ROAM, _INVESTIGATE and _HUNT in src/js/08-hollow.js)
     result.rules = {
       noiseWithin: [d.getNoiseCarryBetweenSpaces(spaces.station, spaces.station), d.getNoiseCarryBetweenSpaces(spaces.crawlspace, spaces.crawlspace)],
       noiseThrough: [d.getNoiseCarryBetweenSpaces(spaces.station, spaces.crawlspace), d.getNoiseCarryBetweenSpaces(spaces.crawlspace, spaces.station)], noiseFactor: d.tuning.noiseThroughCeilingFactor,

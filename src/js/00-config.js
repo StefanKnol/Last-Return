@@ -477,7 +477,12 @@ const TUNING = {
   hollowDoorBangCooldownSeconds: 20,  // after a bout that did not break the door it leaves that door alone for this long, and goes round
   hollowDoorBangWithinMetres: 7,      // it only goes at a door it is this close to, with a clear walk to it
   hollowDoorBangWorthSteps: 15,       // and only if through the door is at least this many steps shorter than the way round
-  // How the Hollow holds itself. Its size is in FIGURE_PROPORTIONS_HOLLOW (04-figures.js); these two decide how bent it is.
+  // The bodies there are for the Hollow (08-hollow.js): the kind written as code ('hollow': FIGURE_PROPORTIONS_HOLLOW,
+  // 04-figures.js), or creatures made in the workshop on the Hollow's skeleton (src/creatures/<name>.json). Which of
+  // them a station's Hollow has is drawn by the station's seed; Kessel-9 has the first. A name nothing is made for,
+  // or a body on another skeleton, is passed over. With one name here every station has that one.
+  hollowBodies: ['hollow', 'hollowAlt'],
+  // How the Hollow holds itself. Its size is in its body's proportions (04-figures.js, or its file); these two decide how bent it is.
   hollowBaseStoop: 0.4,             // how bent it always is, from 0 (as upright as its hunch allows) to 1 (folded right over).
                                     // It still draws itself up when it stops to listen.
   hollowCeilingGap: 0.25,           // metres it keeps between its head and the ceiling. It reads the ceiling over it and

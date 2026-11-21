@@ -57,8 +57,8 @@ const FIGURE_PROPORTIONS_PLAYER = {
 // creature tool lists it by itself, with a slider for every number, "Posed by hand", and "Write to file".
 // Or make it in the workshop ("New creature"): such a creature is a file in src/creatures/, and joins this
 // list when the page loads (04-workshop-creatures.js). It can have more than capsules on its bones.
-// What it does in a station is not said here: that is code, the way the Hollow and the Stills are code in
-// 08-entities.js and the other players in 11-together.js.
+// What it does in a station is not said here: that is code, the way the Hollow is code in 08-hollow.js, the
+// Stills in 08-entities.js and the other players in 11-together.js.
 //
 //   label             what the workshop calls it
 //   proportions       its numbers, and `proportionsName`, what that object is called in this file (the workshop
@@ -136,6 +136,16 @@ const FIGURE_KINDS = {
 function createFigureOfKind(kindKey) {
   const kind = FIGURE_KINDS[kindKey];
   return createFigure(kind.proportions, kind.surfaceClass, kind.imprintTuningKey);
+}
+
+// Makes a body that is there already a body of this kind: the same figure, where it stands and posed as it is,
+// with the other kind's proportions, what that kind has fixed to its bones, and its colour in a scan. For a
+// creature of which there is one and whose body is not the same in every station (the Hollow, 08-hollow.js):
+// everything that knows its figure goes on knowing it.
+function setFigureKind(figure, kindKey) {
+  const kind = FIGURE_KINDS[kindKey];
+  figure.proportions = kind.proportions; figure.surfaceClass = kind.surfaceClass; figure.imprintTuningKey = kind.imprintTuningKey;
+  updateFigureCapsules(figure);
 }
 
 // The proportions a body is really built from. For most kinds, the ones it has. For a kind with a

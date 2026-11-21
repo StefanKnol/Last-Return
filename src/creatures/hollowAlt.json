@@ -1,0 +1,15 @@
+{
+  "label": "The Hollow alt",
+  "skeleton": "hollow",
+  "scansAs": "hollow",
+  "playerSkin": false,
+  "proportions": { "thigh": 0.68, "shin": 0.89, "footLength": 0.36, "hipWidth": 0.435, "lowerSpine": 0.505, "upperSpine": 0.555, "shoulderWidth": 0.525, "neckLength": 0.27, "headLength": 0, "headRadius": 0.135, "jawLength": 0.11, "upperArm": 0.575, "foreArm": 0.44, "handLength": 0.06, "fingerLengths": [0.29,0.31,0.305], "torsoRadius": 0.14, "limbRadius": 0.055, "footRadius": 0.08, "legRadius": 0.09, "fingerRadius": 0.015 },
+  "hides": [],
+  "parts": [
+    { "bone": "shoulders", "mirror": false, "shape": "cone", "from": [-0.305,0.025,0], "to": [-0.425,0.09,0], "radius": 0.05 },
+    { "bone": "shoulders", "mirror": false, "shape": "cone", "from": [0.305,0.025,0], "to": [0.41,0.09,0], "radius": 0.05 },
+    { "bone": "head", "mirror": true, "shape": "cone", "from": [-0.08,0.055,0], "to": [-0.24,0.185,0], "radius": 0.06 },
+    { "bone": "upperArmLeft", "mirror": true, "shape": "cone", "from": [0,-0.575,0], "to": [-0.1,-0.535,-0.17], "radius": 0.05 },
+    { "bone": "hips", "mirror": true, "shape": "cone", "from": [-0.245,0.025,0], "to": [-0.395,0.09,-0.21], "radius": 0.06 }
+  ]
+}

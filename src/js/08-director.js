@@ -245,6 +245,7 @@ function updateDirector(dt) {
 }
 
 // It is one of the things the game runs every frame: first of them, so that what it decides is what they go by.
+// (It says so itself, below: a creature whose file comes before this one is still run after it.)
 addCreatureKind({
   key: 'director',
   update: function (dt) { updateLightHeat(dt); updateDirector(dt); }, // (the light of a while ago fades: "Light", 08-creatures.js)
@@ -263,4 +264,4 @@ addCreatureKind({
       lines.push('  paces     ' + creature.key + ': ' + (steps === undefined || steps >= NAVIGATION_UNREACHABLE ? 'unreachable' : steps + ' steps away') + (creature.isIdle() ? ', on its rounds' : ', busy'));
     }
   }
-});
+}, true);
