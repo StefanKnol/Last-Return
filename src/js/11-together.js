@@ -917,6 +917,8 @@ function askToAct(action) {
 // The host's game: this is done now, by this one of you. Everyone is told, and it is carried out here.
 function decideAction(actorId, action) {
   if (action.what === 'fall') action.id = looseState.nextId; // a new thing: it gets the same number in every browser, the host's next
+  // The lift terminal takes the spools that have been brought to it. Which those are is said here, once, so that every game loads the same ones.
+  if (action.what === 'use' && action.objectId === OBJECT_LIFT_TERMINAL) action.spools = listSpoolsAtTheTerminal(actorId);
   sayToOthers({ k: 'did', p: actorId, a: action });
   performActionFor(actorId, action);
 }
@@ -924,7 +926,10 @@ function decideAction(actorId, action) {
 // An action as somebody else's browser sent it, checked. Returns it clean, or null.
 function readAction(data) {
   if (!data || typeof data !== 'object') return null;
-  if (data.what === 'use' && Number.isInteger(data.objectId)) return { what: 'use', objectId: data.objectId };
+  if (data.what === 'use' && Number.isInteger(data.objectId)) {
+    const hasSpools = Array.isArray(data.spools) && data.spools.length <= 32 && data.spools.every(Number.isInteger);
+    return hasSpools ? { what: 'use', objectId: data.objectId, spools: data.spools } : { what: 'use', objectId: data.objectId };
+  }
   if (data.what === 'enter' && typeof data.place === 'string' && ZONE_NAMES.indexOf(data.place) >= 0 && data.place !== '') return { what: 'enter', place: data.place };
   if (data.what === 'leaveLift' || data.what === 'ascend' || data.what === 'allDown') return { what: data.what };
   // A scanner where somebody fell, and its restarting.
@@ -936,6 +941,12 @@ function readAction(data) {
   if ((data.what === 'take' || data.what === 'release' || data.what === 'carry' || data.what === 'lose' || data.what === 'setOff') && Number.isInteger(data.id)) return { what: data.what, id: data.id, isByButton: data.isByButton === true };
   // What lives down there arrives (the host's to decide, likewise: 08-arrivals.js).
   if (data.what === 'arrive' && findCreatureArrival(data.key) && (data.cause === 'time' || data.cause === 'noise' || data.cause === 'mains')) return { what: 'arrive', key: data.key, cause: data.cause };
+  // Pockets (08-pockets.js): a thing put into one, taken out of one, and all of them emptied where somebody fell.
+  if (data.what === 'stow' && Number.isInteger(data.id) && Number.isInteger(data.slot) && data.slot >= 0 && data.slot < TUNING.pocketCount) return { what: 'stow', id: data.id, slot: data.slot };
+  if (data.what === 'unstow' && Number.isInteger(data.id)) return { what: 'unstow', id: data.id };
+  if (data.what === 'spill' && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
+    return { what: 'spill', x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH) };
+  }
   // A splash from a fuel can into a tank (the host's to decide: see hearOfTheStation, which lets nobody else ask).
   if (data.what === 'pour' && Number.isInteger(data.id) && Number.isInteger(data.tank)) return { what: 'pour', id: data.id, tank: data.tank };
   if (data.what === 'shatter' && Number.isInteger(data.id) && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
@@ -969,7 +980,9 @@ function performActionFor(actorId, action) {
 function performAction(action) {
   if (action.what === 'use') {
     const interactable = findInteractableByObjectId(action.objectId);
-    if (interactable && interactable.isAvailable) useInteractable(interactable); // (gone already: somebody was quicker)
+    game.spoolIdsFromTheHost = action.spools || null;
+    try { if (interactable && interactable.isAvailable) useInteractable(interactable); } // (gone already: somebody was quicker)
+    finally { game.spoolIdsFromTheHost = null; }
   } else if (action.what === 'enter') notePlaceEntered(action.place);
   else if (action.what === 'leaveLift') noteLiftLeft();
   else if (action.what === 'ascend') beginAscent();
@@ -980,6 +993,7 @@ function performAction(action) {
     game.isDescentLost = true;
     if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // it says so
   }
+  else if (isPocketAction(action.what)) performPocketAction(action);
   else performLooseAction(action);
 }
 
@@ -1083,6 +1097,8 @@ function performLooseAction(action) {
     if (game.actor) { wakeLooseObject(object); wakeLooseObjectsTouching(object); }
     else if (!pickUpLooseObjectNow(object, action.isByButton)) askToAct({ what: 'release', id: object.id }); // (your beam has something else by now)
     if (object.heldById) noteWhatRestsOnLooseObject(object); // what is in a crate goes where the crate goes, from now
+    // A survey spool that nobody has had in the beam before is found now, by whoever took it (11-game.js).
+    if (object.kindKey === 'spool' && (game.actor || looseState.held === object)) noteSpoolFound(object);
     // Yours, and with things in it that another browser moves: they are asked for now, while they count as
     // riding, and not at the next turn of the clock that asks (claimWhatRidesInYourBeam).
     if (!game.actor && object.heldById && isWorldShared()) { noteRidersForHandOver(object); claimWhatRidesInYourBeam(); }
@@ -1268,6 +1284,9 @@ function hearWhereLooseThingsAre(id, data) {
 
 // One of the others is no longer down here: what was theirs to move, or in their beam, is the host's.
 function handBackLooseThingsOf(id) {
+  // What they had in their pockets lies where they last stood.
+  const leaving = findOtherPlayer(id);
+  if (leaving) spillPocketsOf(id, leaving.x, getFloorHeightAt(leaving.x, leaving.z) + 0.3, leaving.z);
   for (const object of looseObjects) {
     if (object.heldById === id) object.heldById = 0;
     if (object.ownerId === id) { object.ownerId = together.hostId; if (isLobbyHost()) wakeLooseObject(object); }

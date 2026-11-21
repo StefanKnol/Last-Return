@@ -226,9 +226,9 @@ function installLab() {
       // within all that too, so nothing of it is further from that centre than that space is across.
       const limits = d.designedObjectLimits, furthestCorner = Math.sqrt(3) * (limits.reach + Math.max(limits.maximumHalf, limits.maximumRadius));
       if (!(prepared.boundsRadius >= prepared.smallestRadius && prepared.boundsRadius <= 2 * furthestCorner) || !(prepared.smallestRadius >= limits.minimumRadius)) wrong.push(kindKey + ': size');
-      // (A scanner is what is left of a player, and a fuel can with fuel in it is for a generator: neither is
-      // salvage. A tool is: a scan grenade and a scanner tripod are worth something unused.)
-      if (kindKey !== 'scanner' && kindKey !== 'fuelCan' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
+      // (A scanner is what is left of a player, a fuel can with fuel in it is for a generator, and a survey spool is
+      // for the lift terminal: none of them is salvage. A tool is: a scan grenade and a scanner tripod are worth something unused.)
+      if (kindKey !== 'scanner' && kindKey !== 'fuelCan' && kindKey !== 'spool' && !(kind.value > 0)) wrong.push(kindKey + ': is worth nothing');
       d.removeLooseObject(object);
     }
     return { wrong: wrong, counts: counts, kinds: Object.keys(d.looseObjectKinds).length, ofTheGame: Object.keys(d.looseObjectKinds).filter((kindKey) => testKinds.indexOf(kindKey) < 0).length };
@@ -1579,7 +1579,7 @@ function installLab() {
     d.createLooseObject('testBox', spot.x - 1.5, 0.5, spot.z, 0);
     result.before = { loose: d.looseObjects.length, carrying: d.getHeldLooseObject() !== null };
     d.loadStation('classic', 0);
-    result.after = { loose: d.looseObjects.length, ofTheStation: d.stationLooseObjects.length, carrying: d.getHeldLooseObject() !== null, speedFactor: d.getCarrySpeedFactor() };
+    result.after = { loose: d.looseObjects.length, ofTheStation: d.stationLooseObjects.length + d.roomLooseObjects.length, carrying: d.getHeldLooseObject() !== null, speedFactor: d.getCarrySpeedFactor() };
     return result;
   }, spot);
   check('something dropped down the shaft is gone for good', housekeeping.pit.there && housekeeping.pit.gone && housekeeping.pit.counted === 1, housekeeping.pit);
@@ -1596,7 +1596,7 @@ function installLab() {
       // What the station asks for: litter and things worth carrying out by how many rooms it has (Kessel-9 counts as nineteen).
       const rooms = d.level.roomCount || 19;
       // (What a quest puts out, a fuel can, is counted with them: it lies about the station like the rest.)
-      const entry = { total: d.stationLooseObjects.length + d.questLooseObjects.length, fromQuests: d.questLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
+      const entry = { total: d.stationLooseObjects.length + d.roomLooseObjects.length + d.questLooseObjects.length, fromRooms: d.roomLooseObjects.length, fromQuests: d.questLooseObjects.length, loose: d.looseObjects.length, asleep: d.looseObjects.filter((object) => object.isAsleep).length,
         counts: {}, value: 0, onSurfaces: 0, lowestSurface: 9, cansInHeaps: d.noisyFloorCanHeaps.reduce((sum, heap) => sum + heap.cans.length, 0), problems: d.auditStationLooseObjects(),
         mouths: d.level.ventMouths.length, wanted: { litter: Math.round(rooms * d.tuning.looseLitterPerRoom), valuables: Math.round(rooms * d.tuning.looseValuablesPerRoom), firstAidKits: Math.max(1, Math.round(rooms * d.tuning.firstAidKitsPerRoom)), tripods: Math.max(1, Math.round(rooms * d.tuning.scannerTripodsPerRoom)) }, notOnASurface: [] };
       // At most this many of the valuables go on tables and shelves (as the game rounds it).
@@ -1616,7 +1616,7 @@ function installLab() {
         else entry.lowestSurface = Math.min(entry.lowestSurface, surface.maximumY - d.getFloorHeightAt(surface.centerX, surface.centerZ));
       });
       entry.lowestSurface = Math.round(entry.lowestSurface * 100) / 100;
-      const signature = JSON.stringify([d.stationLooseObjects, d.questLooseObjects]);
+      const signature = JSON.stringify([d.stationLooseObjects, d.roomLooseObjects, d.questLooseObjects]);
       // Wake every one of them: put down as it would lie, none of them should stir, and none should make a sound.
       const noises = []; d.debugHooks.recordNoise = function (x, z, radius) { noises.push(radius); };
       const before = d.looseObjects.map((object) => [object.x, object.y, object.z, object.orientationX, object.orientationY, object.orientationZ, object.orientationW]);
@@ -1635,7 +1635,7 @@ function installLab() {
       d.removeLooseObject(d.looseObjects[1]);
       d.simulate(0.5);
       d.loadStation.apply(null, station);
-      entry.sameAgain = JSON.stringify([d.stationLooseObjects, d.questLooseObjects]) === signature && d.looseObjects.length === entry.total &&
+      entry.sameAgain = JSON.stringify([d.stationLooseObjects, d.roomLooseObjects, d.questLooseObjects]) === signature && d.looseObjects.length === entry.total &&
         d.looseObjects.every((object, index) => object.isAsleep && Math.hypot(object.x - before[index][0], object.y - before[index][1], object.z - before[index][2]) < 1e-6);
       result[station.join(' ')] = entry;
     }
@@ -1646,12 +1646,12 @@ function installLab() {
     const entry = lyingAbout[stationName];
     check(stationName + ': the station has things lying about, each at rest, none in rock, a doorway, a vent, the pit or the lift car',
       entry.total > 0 && entry.fromQuests <= 4 && entry.loose === entry.total && entry.asleep === entry.total && entry.problems.length === 0, entry);
-    // Besides the cans of the heaps, the vents' covers and what a quest put out: never more litter and things worth carrying out than its
+    // Besides the cans of the heaps, the vents' covers, what the rooms have of their own (the survey spools) and what a quest put out: never more litter and things worth carrying out than its
     // rooms ask for, and as many where the station has floor enough to put them on (the game stops putting them out
     // when it runs out of floor: these stations have plenty). Of the valuables no more than their share on tables
     // and shelves, and each of those really lies on the top of one, 35 cm high or more (findStationSurfaces).
     // (Which kinds they are is the game's draw, from its tables: that is not looked at here.)
-    const litterAndValuables = entry.total - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0) - (entry.counts.firstAidKit || 0) - (entry.counts.scannerTripod || 0);
+    const litterAndValuables = entry.total - entry.fromRooms - entry.fromQuests - entry.cansInHeaps - (entry.counts.ventCover || 0) - (entry.counts.firstAidKit || 0) - (entry.counts.scannerTripod || 0);
     entry.shortOfWhatTheRoomsAskFor = entry.wanted.litter + entry.wanted.valuables - litterAndValuables;
     check(stationName + ': cans where the draw put cans, litter, and things worth carrying out, as many as its rooms ask for in a station with floor enough, and no more than their share on tables and shelves, each lying on one',
       entry.counts.can >= entry.cansInHeaps && (entry.counts.ventCover || 0) <= entry.mouths && entry.shortOfWhatTheRoomsAskFor === 0 &&
@@ -1724,9 +1724,12 @@ function installLab() {
       d.setLooseObjectOrientation(object, 0.7071, 0, 0, 0.7071);
       for (let step = 0; step < 150 && !object.isAsleep; step++) d.simulate(1 / 30);
       object.wasHandled = true; // you threw it there, a while ago
-      d.spawnHollow(object.x, object.z - 1.5);
+      // It walks through where the thing lies, towards the middle of the room: what it kicks stays out in the open.
+      // (Kicked the other way the thing ends against the wall, and a throw let go against a door post there
+      // scrapes along it and drops: where its arm lets go is the test's doing here, not the Hollow's.)
+      d.spawnHollow(object.x, object.z + 1.5);
       d.hollow.graceTimer = 0; d.hollow.state = 0;
-      for (let step = 0; step < 24; step++) { d.hollow.figure.z += 3 / 30; d.simulate(1 / 30); } // it walks through where the thing lies
+      for (let step = 0; step < 24; step++) { d.hollow.figure.z -= 3 / 30; d.simulate(1 / 30); }
       const entry = { kicked: object.kickedByHollowTime > d.game.time - 2, flungTooSoon: d.looseState.statistics.flungBack };
       // It stays on the thing's heels for as long as it goes after it.
       lab.noises.length = 0;
@@ -1746,7 +1749,10 @@ function installLab() {
       // Where it aimed, measured from you, and (further down) where the thing came to rest: to the last digit.
       entry.aimedExactly = flungAt >= 0 ? [d.looseState.lastFling.targetX - p.x, d.looseState.lastFling.targetZ - p.z] : null;
       const hollowAt = { x: d.hollow.figure.x, z: d.hollow.figure.z };
-      for (let step = 0; step < 240 && !object.isAsleep; step++) d.simulate(1 / 30);
+      // How near you it passes on its way. (Where it comes to rest says little: a tin bounces and rolls on.)
+      let nearest = Math.hypot(object.x - p.x, object.z - p.z);
+      for (let step = 0; step < 240 && !object.isAsleep; step++) { d.simulate(1 / 30); nearest = Math.min(nearest, Math.hypot(object.x - p.x, object.z - p.z)); }
+      entry.passedMetresFromYou = lab.round(nearest);
       entry.landedMetresFromYou = lab.round(Math.hypot(object.x - p.x, object.z - p.z));
       entry.landedExactly = [object.x, object.y, object.z];
       entry.wasMetresFromYou = lab.round(Math.hypot(hollowAt.x - p.x, hollowAt.z - p.z));
@@ -1768,9 +1774,9 @@ function installLab() {
   // only what it goes after. The capsule more than hollowFlingsMass, and no more than
   // hollowChasesKickedMass, so that it is gone after and not thrown.)
   const tin = thrownBack.testTin, capsule = thrownBack.testCapsule;
-  check('a small tin you have handled, light enough to throw, the Hollow kicks, goes after for a couple of seconds, and then throws back: aimed at you or just beside you, it comes down on your side of the room, with a caption',
+  check('a small tin you have handled, light enough to throw, the Hollow kicks, goes after for a couple of seconds, and then throws back: aimed at you or just beside you, it comes right across the room to where you stand, with a caption',
     TEST_OBJECT_KINDS.testTin.mass <= thrownBack.throwsUpTo && TEST_OBJECT_KINDS.testTin.mass <= thrownBack.goesAfterUpTo && tin.kicked && tin.flungTooSoon === 0 && tin.flungAfterSeconds >= 0.5 && tin.speed > 3 && tin.said >= 1 &&
-    tin.aimedMetresFromYou >= 0 && tin.aimedMetresFromYou <= tin.scatter + 0.01 && tin.landedMetresFromYou < tin.wasMetresFromYou - 1.5, [tin, thrownBack.throwsUpTo]);
+    tin.aimedMetresFromYou >= 0 && tin.aimedMetresFromYou <= tin.scatter + 0.01 && tin.passedMetresFromYou <= tin.scatter + 1 && tin.wasMetresFromYou > tin.scatter + 2.5, [tin, thrownBack.throwsUpTo]);
   check('what it threw makes its own noise where it lands, and the Hollow does not come to that; picked up again, the thing is yours again',
     tin.knocksOnLanding.heard + tin.knocksOnLanding.quiet >= 1 && tin.noisesTheHollowHeard === 0 && tin.ignored && !tin.stillOfInterest &&
     !tin.afterPickingItUp.ignored && tin.afterPickingItUp.ofInterest, tin);
@@ -2569,6 +2575,28 @@ function installLab() {
     result.tapped.takenAtTheNextPress = d.getHeldLooseObject() === object;
     d.input.isGrabHeld = false; d.simulate(0.2);
 
+    // Held by the button and put in a pocket with R: the button that is still down does not take the next thing
+    // you look at. Up and down again, and it does.
+    object = begin();
+    d.removeLooseObject(object);
+    const grenade = d.createLooseObject('scanGrenade', spot.x + 1.6, 0.3, spot.z, 0);
+    for (let step = 0; step < 150 && !grenade.isAsleep; step++) d.simulate(1 / 30);
+    const lookAt = (thing) => { p.yaw = Math.atan2(thing.x - p.x, -(thing.z - p.z)); p.pitch = Math.atan2(thing.y - d.getPlayerEyeY(), Math.hypot(thing.x - p.x, thing.z - p.z)); };
+    lookAt(grenade); d.simulate(0.1);
+    d.input.isGrabHeld = true; d.simulate(1);
+    result.pocketed = { carried: d.getHeldLooseObject() === grenade };
+    d.input.wantsStow = true; d.simulate(0.2);
+    result.pocketed.inAPocket = d.findPocketedObject(grenade.id) !== null && d.getHeldLooseObject() === null;
+    const next = d.createLooseObject('testTin', spot.x + 1.6, 0.3, spot.z, 0);
+    let tookTheNext = false;
+    for (let step = 0; step < 45; step++) { d.simulate(1 / 30); lookAt(next); if (d.getHeldLooseObject()) tookTheNext = true; }
+    result.pocketed.tookTheNext = tookTheNext; result.pocketed.nextInReach = d.player.focusedLooseObject === next;
+    d.input.isGrabHeld = false; d.simulate(0.1);
+    d.input.isGrabHeld = true; d.simulate(0.5);
+    result.pocketed.takenAtTheNextPress = d.getHeldLooseObject() === next;
+    d.input.isGrabHeld = false; d.simulate(0.2);
+    for (const slot of d.getOwnPockets().keys()) d.getOwnPockets()[slot] = null;
+
     // Taken with E, and then the button goes down: it is the button's, and letting the button go lets go of it.
     object = begin();
     pressE(0);
@@ -2617,6 +2645,8 @@ function installLab() {
     together.thrown.carriedByButton && together.thrown.letGo && together.thrown.speed > 3 && !together.thrown.takenBack && together.thrown.buttonStillDown && together.thrown.metresFromYou > 3, together.thrown);
   check('a tap of E drops what the button holds, and the button that is still down does not take it back though it lies in reach; let go of and pressed again, it does',
     together.tapped.carried && !together.tapped.takenBack && together.tapped.inReach && together.tapped.takenAtTheNextPress, together.tapped);
+  check('put in a pocket with R while the button holds it, a thing is in the pocket, and the button that is still down does not take the next thing in reach; pressed again, it does',
+    together.pocketed.carried && together.pocketed.inAPocket && !together.pocketed.tookTheNext && together.pocketed.nextInReach && together.pocketed.takenAtTheNextPress, together.pocketed);
   check('a thing taken with E is the button\'s once the button goes down: letting the button go lets go of it',
     together.handedOver.takenWithE && together.handedOver.stillCarried && together.handedOver.byButton && together.handedOver.letGo, together.handedOver);
   check('with the right mouse button set to "click" it takes a thing and keeps it after the button is up; a click lets go, and held and let go it throws; E does as it always did',

@@ -12,6 +12,13 @@
         <span id="chip-extra" class="chip" hidden></span>
         <span id="chip-carrying" class="chip is-on" hidden></span>
       </div>
+      <!-- The pockets (08-pockets.js): shown while there is something in one, or something in the beam that would go in one. -->
+      <div class="hud-chips hud-pockets" id="hud-pockets" hidden>
+        <span id="pocket-0" class="chip"></span>
+        <span id="pocket-1" class="chip"></span>
+        <span id="pocket-2" class="chip"></span>
+        <span id="pocket-3" class="chip"></span>
+      </div>
     </div>
 
     <div class="hud-block hud-top-right hud-fade" id="hud-block-map">
@@ -54,6 +61,13 @@
     </div>
     <!-- Only there while the scanner's beam carries something that does something (a scan grenade): what Q is on a keyboard. -->
     <button type="button" id="touch-use-carried" class="touch-button touch-carried" hidden>ARM</button>
+    <!-- The pockets, on a phone: a tap on one is its key on a keyboard. Shown when the row on the screen is. -->
+    <div class="touch-pocket-buttons" id="touch-pockets" hidden>
+      <button type="button" id="touch-pocket-0" class="touch-button touch-small touch-pocket"></button>
+      <button type="button" id="touch-pocket-1" class="touch-button touch-small touch-pocket"></button>
+      <button type="button" id="touch-pocket-2" class="touch-button touch-small touch-pocket"></button>
+      <button type="button" id="touch-pocket-3" class="touch-button touch-small touch-pocket"></button>
+    </div>
     <div class="touch-right-buttons">
       <button type="button" id="touch-crouch" class="touch-button">CROUCH</button>
       <button type="button" id="touch-run" class="touch-button">RUN</button>

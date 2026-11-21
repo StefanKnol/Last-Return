@@ -292,6 +292,7 @@ function resetWorldForNewLevel() {
   level.ventMouths.length = 0; level.ventPockets.length = 0; level.ventDrops.length = 0; level.ventNests.length = 0;
   level.questTiles.length = 0;
   worldProps.length = 0; dynamicBoxProps.length = 0; doors.length = 0; interactables.length = 0;
+  roomLooseObjects.length = 0; // what the last station's rooms put out loose (08-loose-objects.js)
   clearLooseObjects();
   roamingWaypoints.length = 0;
   clearHollowHatches();

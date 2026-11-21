@@ -403,12 +403,12 @@ function drawMinimap() {
   }
   // What lies loose and a quest needs (a fuel can with fuel in it), where you last knew it to be.
   for (const object of looseObjects) {
-    const itemKey = getQuestItemKeyOfLooseObject(object);
-    if (!itemKey) continue;
+    const mark = getLooseObjectMapMark(object);
+    if (!mark) continue;
     const markerX = (object.mapX - player.x) * scale + canvas.width / 2;
     const markerY = (object.mapZ - player.z) * scale + canvas.height / 2;
     if (markerX < 0 || markerY < 0 || markerX > canvas.width || markerY > canvas.height) continue;
-    context.fillStyle = isQuestItemWantedNow(itemKey) ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
+    context.fillStyle = mark.isWanted ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
     context.fillRect(markerX - 3, markerY - 3, 6, 6);
   }
   if (debugHooks.drawMapMarkers) {
@@ -488,12 +488,12 @@ function drawFullMap() {
     if (interactable.mapLabel) context.fillText(interactable.mapLabel, toCanvasX(interactable.x) + 8, toCanvasY(interactable.z) + 4);
   }
   for (const object of looseObjects) {
-    const itemKey = getQuestItemKeyOfLooseObject(object);
-    if (!itemKey) continue;
-    const isWanted = isQuestItemWantedNow(itemKey), half = isWanted ? 4 : 3;
+    const mark = getLooseObjectMapMark(object);
+    if (!mark) continue;
+    const isWanted = mark.isWanted, half = isWanted ? 4 : 3;
     context.fillStyle = isWanted ? MAP_MARKER_WANTED_COLOUR : MAP_MARKER_OTHER_COLOUR;
     context.fillRect(toCanvasX(object.mapX) - half, toCanvasY(object.mapZ) - half, half * 2, half * 2);
-    context.fillText(QUEST_ITEMS[itemKey].mapLabel, toCanvasX(object.mapX) + 8, toCanvasY(object.mapZ) + 4);
+    context.fillText(mark.label, toCanvasX(object.mapX) + 8, toCanvasY(object.mapZ) + 4);
   }
   if (debugHooks.drawMapMarkers) debugHooks.drawMapMarkers(context, toCanvasX, toCanvasY, 7);
   drawPlayerMarker(context, toCanvasX(player.x), toCanvasY(player.z), player.yaw, 9);
@@ -805,7 +805,7 @@ function updateHud(realDt) {
   // ---- the quiet screen: every instrument is hidden until it has something to say ----
   // TWEAK: the numbers are when each one appears. Choose "Full instruments" in the settings to see them all, always.
   const isQuiet = settings.hud === 'quiet';
-  const statusSignature = game.objectiveText + '|' + game.flags.spoolsCollected + '|' + game.flags.powerOn + '|' + game.flags.keycardLevel + '|' + getExtraJobStatusText();
+  const statusSignature = game.objectiveText + '|' + game.flags.spoolsCollected + '|' + game.flags.spoolsLoaded + '|' + game.flags.powerOn + '|' + game.flags.keycardLevel + '|' + getExtraJobStatusText();
   if (statusSignature !== interfaceState.lastStatusSignature) {
     interfaceState.lastStatusSignature = statusSignature;
     interfaceState.objectiveShownUntil = now + 8; // the objective and the three chips show for 8 s when any of them changes
@@ -863,8 +863,10 @@ function updateHud(realDt) {
     // the place is empty until you take one anyway, and then says how many you hold and no more.
     const spools = game.flags.spoolsCollected, areWanted = areSpoolsOnTheOrder();
     elements['chip-spools'].hidden = !areWanted && spools === 0;
-    elements['chip-spools'].textContent = areWanted ? 'SPOOLS ' + spools + '/' + level.spoolCount : 'SPOOLS ' + spools;
-    elements['chip-spools'].classList.toggle('is-on', areWanted && spools >= level.spoolCount);
+    // Found, of how many; and how many of those the terminal has, where that is not all of them. Lit once it has every one.
+    const spoolsLoaded = game.flags.spoolsLoaded;
+    elements['chip-spools'].textContent = (areWanted ? 'SPOOLS ' + spools + '/' + level.spoolCount : 'SPOOLS ' + spools) + (spoolsLoaded > 0 && spoolsLoaded < spools ? ' \u00B7 ' + spoolsLoaded + ' LOADED' : '');
+    elements['chip-spools'].classList.toggle('is-on', areWanted && spoolsLoaded >= level.spoolCount);
     elements['chip-power'].textContent = game.flags.powerOn ? 'MAINS ON' : 'MAINS OFF';
     elements['chip-power'].classList.toggle('is-on', game.flags.powerOn);
     elements['chip-keycard'].textContent = getKeycardStatusText();
@@ -875,6 +877,18 @@ function updateHud(realDt) {
     const carried = getHeldLooseObject();
     elements['chip-carrying'].hidden = carried === null;
     if (carried !== null) elements['chip-carrying'].textContent = 'CARRYING: ' + getLooseObjectLabel(carried).toUpperCase();
+    // The pockets: a row of them while there is something in one, or something in the beam that would go in one.
+    const pocketSlots = getOwnPockets(), canPocketCarried = carried !== null && canLooseObjectBePocketed(carried);
+    const arePocketsShown = canPocketCarried || pocketSlots.some(function (object) { return object !== null; });
+    const pocketRow = document.getElementById('hud-pockets'), pocketButtons = document.getElementById('touch-pockets');
+    if (pocketRow) pocketRow.hidden = !arePocketsShown;
+    if (pocketButtons) pocketButtons.hidden = !(arePocketsShown && input.isTouchDevice && game.mode === 'playing');
+    for (let slot = 0; slot < pocketSlots.length; slot++) {
+      const inPocket = pocketSlots[slot], chip = document.getElementById('pocket-' + slot), button = document.getElementById('touch-pocket-' + slot);
+      const name = inPocket ? getLooseObjectLabel(inPocket).toUpperCase() : (canPocketCarried ? 'EMPTY' : '\u2014');
+      if (chip) { chip.textContent = (input.isTouchDevice ? '' : '[' + (slot + 4) + '] ') + name; chip.classList.toggle('is-on', inPocket !== null); }
+      if (button) { button.textContent = name; button.classList.toggle('is-full', inPocket !== null); }
+    }
     // On a phone held sideways the captions hang under the work order (see style.css), and the work order
     // is as tall as its sentence is long: the stylesheet is told where it ends.
     const workOrderBlock = elements['hud-block-objective'];
@@ -890,7 +904,7 @@ function updateHud(realDt) {
     // The map screen always carries the objective and where things stand, whatever the screen setting.
     if (interfaceState.isMapOverlayOpen) {
       elements['map-objective'].textContent = game.objectiveText;
-      elements['map-status'].textContent = 'SPOOLS ' + spools + '/3 · ' + (game.flags.powerOn ? 'MAINS ON' : 'MAINS OFF') + ' · ' +
+      elements['map-status'].textContent = elements['chip-spools'].textContent + ' · ' + (game.flags.powerOn ? 'MAINS ON' : 'MAINS OFF') + ' · ' +
         getKeycardStatusText() + (extraText ? ' · ' + extraText : '') + ' · ' + (ZONE_NAMES[zone] || ZONE_NAMES[0]);
     }
 
@@ -941,6 +955,11 @@ function updateHud(realDt) {
       // In the beam, and it does something: say which key, or which button.
       prompt.hidden = false;
       prompt.textContent = (input.isTouchDevice ? (heldLooseObject.kind.use.button || 'USE IT') + ' · ' : '[Q]  ') + (heldLooseObject.kind.use.promptFor ? heldLooseObject.kind.use.promptFor(heldLooseObject) : heldLooseObject.kind.use.prompt);
+      // ... and if it goes into a pocket, the key for that (on a phone the pockets are buttons of their own).
+      if (!input.isTouchDevice && canLooseObjectBePocketed(heldLooseObject)) prompt.textContent += '   \u00B7   [R]  Pocket it';
+    } else if (game.mode === 'playing' && heldLooseObject && !input.isTouchDevice && canLooseObjectBePocketed(heldLooseObject)) {
+      prompt.hidden = false;
+      prompt.textContent = '[R]  Pocket it';
     } else if (game.mode === 'playing' && !input.isPointerLocked && !input.useDragLook && !input.isTouchDevice) {
       prompt.hidden = false;
       prompt.textContent = 'Click to take control of the scanner';

@@ -928,6 +928,119 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   for (const page of [a, b]) await page.evaluate((id) => { const d = window.lastReturnDebug, tripod = d.looseObjects.filter((object) => object.id === id)[0]; if (tripod) d.removeLooseObject(tripod); }, tripodIds[0]);
   await fine(0.3);
 
+  // ---- Pockets: what is in whose pockets is the same in both games ----
+  const pocketIds = [];
+  for (const page of [a, b]) pocketIds.push(await page.evaluate((lane) => {
+    const d = window.lastReturnDebug;
+    if (!lane) return [0, 0];
+    return [d.createLooseObject('scanGrenade', lane.x + lane.wayX * 1.7, lane.floor + 0.1, lane.z + lane.wayZ * 1.7, 0).id,
+      d.createLooseObject('firstAidKit', lane.x + lane.wayX * 3.2, lane.floor + 0.1, lane.z + lane.wayZ * 3.2, 0).id];
+  }, lane));
+  const pocketsIn = (page) => page.evaluate(([ids, otherId]) => {
+    const d = window.lastReturnDebug, find = (id) => d.looseObjects.filter((object) => object.id === id)[0] || null, round = (value) => Math.round(value * 100) / 100;
+    const grenade = find(ids[0]), kit = find(ids[1]), pocketed = d.findPocketedObject(ids[0]);
+    return { theirs: d.getPocketsOf(otherId).map((object) => object ? object.id : 0), own: d.getOwnPockets().map((object) => object ? object.id : 0),
+      grenade: grenade ? { heldById: grenade.heldById, ownerId: grenade.ownerId, x: round(grenade.x), y: round(grenade.y), z: round(grenade.z), isAsleep: grenade.isAsleep } : null,
+      kitIsThere: kit !== null, kitHeldById: kit ? kit.heldById : -1, pocketedBy: pocketed ? pocketed.playerId : 0, holding: d.getHeldLooseObject() ? d.getHeldLooseObject().id : 0 };
+  }, [pocketIds[0], ids.other]);
+  await fine(1.5);
+  // Not out of thin air: a thing that is not in their beam does not go into their pocket.
+  await b.evaluate((id) => window.lastReturnDebug.askToAct({ what: 'stow', id: id, slot: 0 }), pocketIds[0][0]);
+  await fine(0.8);
+  const pocketNotHeld = { host: await pocketsIn(a), other: await pocketsIn(b) };
+  // The other takes the grenade and puts it in a pocket.
+  await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.pitch = -0.5; d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+  await b.evaluate((id) => { const d = window.lastReturnDebug; d.pickUpLooseObject(d.looseObjects.filter((object) => object.id === id)[0], false); }, pocketIds[0][0]);
+  await b.waitForFunction(() => window.lastReturnDebug.getHeldLooseObject() !== null, null, { timeout: 5000 }).catch(() => {});
+  await fine(0.5);
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  const pocketStowed = { host: await pocketsIn(a), other: await pocketsIn(b) };
+  // Out again, by its key.
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsPocket = 0; });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
+  await fine(0.6);
+  const pocketTakenOut = { host: await pocketsIn(a), other: await pocketsIn(b) };
+  // In again, and then they fall: what was in their pockets lies there, in both games.
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).pocketedBy !== ids.other; turn++) await fine(0.2);
+  await b.evaluate(() => { window.lastReturnDebug.spillOwnPockets(); });
+  for (let turn = 0; turn < 20 && (await pocketsIn(a)).grenade === null; turn++) await fine(0.2);
+  for (let turn = 0; turn < 16 && !((await pocketsIn(a)).grenade.isAsleep && (await pocketsIn(b)).grenade.isAsleep); turn++) await fine(0.4);
+  const pocketSpilled = { host: await pocketsIn(a), other: await pocketsIn(b), fellAt: await b.evaluate(() => [window.lastReturnDebug.player.x, window.lastReturnDebug.player.z]) };
+  check('a thing that is not in the other\'s beam does not go into their pocket for the asking',
+    pocketIds[0][0] > 0 && pocketIds[0].join() === pocketIds[1].join() && pocketNotHeld.host.grenade !== null && pocketNotHeld.other.grenade !== null && pocketNotHeld.host.pocketedBy === 0 && pocketNotHeld.other.pocketedBy === 0, pocketNotHeld);
+  check('the other puts a scan grenade from their beam into a pocket: it is out of the station in both games, and in their pocket in both',
+    pocketStowed.host.grenade === null && pocketStowed.other.grenade === null && pocketStowed.host.pocketedBy === ids.other && pocketStowed.other.pocketedBy === ids.other &&
+    pocketStowed.host.theirs[0] === pocketIds[0][0] && pocketStowed.other.own[0] === pocketIds[0][0] && pocketStowed.other.holding === 0 && pocketStowed.host.own.every((id) => id === 0), pocketStowed);
+  check('taken out again, it is in the other\'s beam in both games, and in nobody\'s pocket',
+    pocketTakenOut.host.grenade !== null && pocketTakenOut.host.grenade.heldById === ids.other && pocketTakenOut.other.holding === pocketIds[0][0] && pocketTakenOut.host.pocketedBy === 0 && pocketTakenOut.other.pocketedBy === 0 &&
+    Math.hypot(pocketTakenOut.host.grenade.x - pocketTakenOut.other.grenade.x, pocketTakenOut.host.grenade.z - pocketTakenOut.other.grenade.z) < 0.6, pocketTakenOut);
+  check('when the other falls, what was in their pockets lies where they fell, in the same place in both games, and is the host\'s to move',
+    pocketSpilled.host.grenade !== null && pocketSpilled.other.grenade !== null && pocketSpilled.host.pocketedBy === 0 && pocketSpilled.other.own.every((id) => id === 0) && pocketSpilled.host.theirs.every((id) => id === 0) &&
+    Math.hypot(pocketSpilled.host.grenade.x - pocketSpilled.fellAt[0], pocketSpilled.host.grenade.z - pocketSpilled.fellAt[1]) < 1.5 && pocketSpilled.host.grenade.heldById === 0 &&
+    Math.hypot(pocketSpilled.host.grenade.x - pocketSpilled.other.grenade.x, pocketSpilled.host.grenade.y - pocketSpilled.other.grenade.y, pocketSpilled.host.grenade.z - pocketSpilled.other.grenade.z) < 0.1 &&
+    pocketSpilled.other.grenade.ownerId === ids.host, pocketSpilled);
+  for (const page of [a, b]) await page.evaluate((ids) => { const d = window.lastReturnDebug; for (const id of ids) { const object = d.looseObjects.filter((candidate) => candidate.id === id)[0]; if (object) d.removeLooseObject(object); } }, pocketIds[0]);
+
+  // ---- Survey spools: found by whoever takes one, carried in their pocket, and loaded by the host's say ----
+  const spoolsIn = (page) => page.evaluate((otherId) => {
+    const d = window.lastReturnDebug, first = d.findSpool(3), second = d.findSpool(4);
+    const all = d.looseObjects.concat(d.listPocketedObjects()).filter((object) => object.kindKey === 'spool');
+    const firstAnywhere = all.filter((object) => object.questObjectId === 3)[0] || null, pocketed = firstAnywhere ? d.findPocketedObject(firstAnywhere.id) : null;
+    return { found: d.game.flags.spoolsCollected, loaded: d.game.flags.spoolsLoaded, uploadStarted: d.game.flags.uploadStarted, mode: d.game.mode, count: all.length,
+      firstId: firstAnywhere ? firstAnywhere.id : 0, firstWasFound: firstAnywhere ? firstAnywhere.wasFound : null, firstHeldById: first ? first.heldById : -1, firstPocketedBy: pocketed ? pocketed.playerId : 0,
+      secondId: second ? second.id : 0, secondIsThere: second !== null, secondWasFound: second ? second.wasFound : null, theirPockets: d.getPocketsOf(otherId).filter((object) => object !== null).length };
+  }, ids.other);
+  const closeReaders = async () => { for (const page of [a, b]) await page.evaluate(() => { const d = window.lastReturnDebug; if (d.game.mode === 'reading') d.closeReader(); }); };
+  // (The terminal takes spools only with the mains on. It is put back as it was afterwards: what follows is before the mains.)
+  const hadPowerBeforeSpools = await a.evaluate(() => window.lastReturnDebug.game.flags.powerOn);
+  for (const page of [a, b]) await page.evaluate(() => { const d = window.lastReturnDebug; d.grantPower(); d.clearMessages(); });
+  const spoolsAtFirst = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  // The other goes to the first spool and takes it into their beam.
+  await b.evaluate(() => {
+    const d = window.lastReturnDebug, spool = d.findSpool(3), spot = d.findWalkableSpotNear(spool.x, spool.z);
+    d.input.keysDown.clear(); d.teleport(spot.x, spot.z, Math.atan2(spool.x - spot.x, -(spool.z - spot.z))); d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1);
+    d.pickUpLooseObject(spool, false);
+  });
+  for (let turn = 0; turn < 25 && !((await spoolsIn(a)).found === 1 && (await spoolsIn(b)).found === 1); turn++) await fine(0.2);
+  const spoolTaken = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  await closeReaders();
+  await fine(0.5);
+  // Into their pocket.
+  await b.evaluate(() => { window.lastReturnDebug.input.wantsStow = true; });
+  for (let turn = 0; turn < 25 && (await spoolsIn(a)).firstPocketedBy !== ids.other; turn++) await fine(0.2);
+  const spoolPocketed = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  // The host presses the lift terminal: there is no spool on the host, and none lies by it. Nothing is loaded.
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.clearMessages(); d.askToAct({ what: 'use', objectId: 1 }); });
+  await fine(1);
+  const spoolHostPressed = { host: await spoolsIn(a), other: await spoolsIn(b), hostRead: await a.evaluate(() => Array.from(document.querySelectorAll('#hud-messages .hud-message')).map((element) => element.textContent).join(' | ')) };
+  // The other presses it, and says with it that the second spool is theirs to load as well, though it lies
+  // in its room: which spools a terminal takes is the host's game's to say, and it says the one in their pocket.
+  await b.evaluate((secondId) => { window.lastReturnDebug.askToAct({ what: 'use', objectId: 1, spools: [secondId] }); }, spoolsAtFirst.other.secondId);
+  for (let turn = 0; turn < 25 && !((await spoolsIn(a)).loaded === 1 && (await spoolsIn(b)).loaded === 1); turn++) await fine(0.2);
+  await fine(0.5);
+  const spoolLoaded = { host: await spoolsIn(a), other: await spoolsIn(b) };
+  check('down there with others the spools are the same things in both games, found by nobody at the start',
+    spoolsAtFirst.host.count === 3 && spoolsAtFirst.other.count === 3 && spoolsAtFirst.host.firstId > 0 && spoolsAtFirst.host.firstId === spoolsAtFirst.other.firstId && spoolsAtFirst.host.secondId === spoolsAtFirst.other.secondId &&
+    spoolsAtFirst.host.found === 0 && spoolsAtFirst.other.found === 0, spoolsAtFirst);
+  check('the other takes a spool into their beam: it is found in both games, once, and is theirs to carry',
+    spoolTaken.host.found === 1 && spoolTaken.other.found === 1 && spoolTaken.host.firstWasFound === true && spoolTaken.other.firstWasFound === true && spoolTaken.host.firstHeldById === ids.other &&
+    spoolTaken.host.loaded === 0 && spoolTaken.other.loaded === 0, spoolTaken);
+  check('in their pocket it is in their pocket in both games, still found and not loaded',
+    spoolPocketed.host.firstPocketedBy === ids.other && spoolPocketed.other.firstPocketedBy === ids.other && spoolPocketed.host.theirPockets === 1 && spoolPocketed.host.found === 1 && spoolPocketed.other.found === 1 &&
+    spoolPocketed.host.loaded === 0, spoolPocketed);
+  check('the host pressing the lift terminal loads nothing: what is in the other\'s pocket is not the host\'s to hand in',
+    spoolHostPressed.host.loaded === 0 && spoolHostPressed.other.loaded === 0 && spoolHostPressed.host.firstPocketedBy === ids.other && /LIFT CONTROL/.test(spoolHostPressed.hostRead), spoolHostPressed);
+  check('the other pressing it loads the spool from their pocket in both games, and no spool they only claim to have: that one still lies in its room, found by nobody',
+    spoolLoaded.host.loaded === 1 && spoolLoaded.other.loaded === 1 && spoolLoaded.host.firstId === 0 && spoolLoaded.other.firstId === 0 && spoolLoaded.host.theirPockets === 0 && spoolLoaded.other.theirPockets === 0 &&
+    spoolLoaded.host.secondIsThere && spoolLoaded.other.secondIsThere && spoolLoaded.host.secondWasFound === false && spoolLoaded.other.secondWasFound === false && spoolLoaded.host.found === 1 && spoolLoaded.other.found === 1 &&
+    spoolLoaded.host.count === 2 && spoolLoaded.other.count === 2 && !spoolLoaded.host.uploadStarted && !spoolLoaded.other.uploadStarted, spoolLoaded);
+  await closeReaders();
+  if (lane) await b.evaluate((lane) => { const d = window.lastReturnDebug; d.input.keysDown.clear(); d.teleport(lane.x, lane.z, lane.yaw); d.player.velocityX = 0; d.player.velocityZ = 0; d.simulate(0.1); }, lane);
+  for (const page of [a, b]) await page.evaluate((hadPower) => { const d = window.lastReturnDebug; d.game.flags.powerOn = hadPower; d.clearMessages(); }, hadPowerBeforeSpools);
+  await fine(0.5);
+
   // ---- What lives down there arrives in its own time, and that is the host's game's to say ----
   // (This suite's pages keep it away until Generator 2 is started, like every suite's: see browser-harness.js.
   // For this check the host's game is given its say back, with half a minute of its wait left.)
