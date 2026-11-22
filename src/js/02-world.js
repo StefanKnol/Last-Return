@@ -197,6 +197,7 @@ const level = {
   workOrder: 'survey',  // which work order this descent has: a key of WORK_ORDERS (09-quests.js)
   liftWaits: true,      // whether the car has to come down when you call it (false: it never left, and opens at once)
   questSeed: 0,         // the numbers the quests were drawn from: the station's seed, unless something else was asked for
+  intercomSpeakers: [], // where the intercom's loudspeakers hang: { x, y, z, zone } (08-intercom.js)
   mapFingerprint: 0,    // one number from everything that is the map's, as it was when it was finished (03-levelgen.js)         // where each vent opens into a room, and where its cover would lie if it has come off (03-levelgen.js)
   hatchCount: 0,          // ceiling hatches of the Hollow's crawlspace (see 08-crawlspace.js)
   description: 'Kessel-9 (classic)'

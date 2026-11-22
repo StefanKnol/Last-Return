@@ -113,6 +113,8 @@
   - ~~on death, watch one of the others~~ (in: 11-watching.js. Through their scanner, with their ears; A and D go from one to the next)
   - ~~regular chat~~ (in: 11-chat.js, with names. Enter or T)
   - ~~voice chat, by distance, through the server, heard by the Hollow, muffled through walls until a door is open~~ (in: 11-voice.js)
+  - ~~intercom, for the funny: a microphone at the main desk and another room, loudspeakers through the map, bad quality, a shriek of feedback on switching on~~ (in: 08-intercom.js. Everything that listens hears the loudspeakers, so alone it is a decoy)
+    - still open: a loudspeaker the Hollow can smash; playing a tape through it; the loudspeakers muffled by walls as voices are; more consoles in other rooms of a big station
     - still open: a radio to buy or find, that carries a voice across the station; the Hollow hearing how loud you really are (a shout, not only talk and whisper); looters startled by talking
   - dev backdoor to mess with people :P (play/direct the monsters, play sounds, control doors, disco mode with random lidar dots coming out of a disco ball and music)
     - only on same server host, not other hosted
