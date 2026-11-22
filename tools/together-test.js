@@ -1948,6 +1948,47 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   check('a position no player could be at is held to the station, and nothing hangs on it: they are shown there, facing the way that came in',
     wild.x <= 512 && wild.z === 0 && wild.eyeY <= 100 && wild.blend === 1 && Math.abs(yawApart) < 1e-6 && wild.pitch <= 1.6 && wild.spread <= 60, [wild, yawApart]);
 
+  // ---- The host is dead and watching, and the last one standing is hit and lives: the descent is not over ----
+  // (Found in play: a hit on the one still alive told the dead host, and everyone, that the descent was over.
+  // For the moment between the host's game saying "you were hit" and theirs answering "still standing", the
+  // host's game counted them as down.)
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.healPlayer(d.tuning.playerMaxHealth); d.player.hurtGraceSeconds = 0; });
+  const hostDied = await a.evaluate(() => {
+    const d = window.lastReturnDebug;
+    d.hollow.isActive = false;
+    d.triggerPlayerDeath('hollow', d.hollow.figure);
+    for (let step = 0; step < 80 && d.game.mode === 'dying'; step++) d.updateDying(0.05);
+    for (let count = 0; count < 3; count++) d.updateTogether(0.1);
+    return d.game.mode;
+  });
+  await both(0.6);
+  const hitWhileWatched = await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0], result = {};
+    d.beginWatching();
+    result.isWatching = d.watching.isOn;
+    // The host's game says they are hit. Theirs has not answered yet.
+    d.catchPlayer(other, 'surveyor', d.surveyor.figure);
+    result.isDownUntilTheyAnswer = other.isDown; result.isFallen = other.isFallen;
+    for (let count = 0; count < 5; count++) { d.updateTogether(0.1); d.updateWatching(0.1); }
+    result.lostBeforeTheyAnswer = d.game.isDescentLost; result.stillWatching = d.watching.isOn; result.deathScreen = !document.getElementById('screen-death').hidden;
+    return result;
+  });
+  await both(0.9);
+  const afterTheHit = { host: await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; d.updateWatching(0.1); return { lost: d.game.isDescentLost, isWatching: d.watching.isOn, isDown: other.isDown, isFallen: other.isFallen,
+      deathScreen: !document.getElementById('screen-death').hidden, scanners: d.looseObjects.filter((object) => object.fallenPlayerId).length }; }),
+    other: await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.game.mode, lost: d.game.isDescentLost, health: d.player.health, whole: d.tuning.playerMaxHealth }; }) };
+  check('the host dead and watching, the last one standing is hit and lives: nobody is told the descent is over, the host goes on watching, and their scanner can still be carried back',
+    hostDied === 'dead' && hitWhileWatched.isWatching && hitWhileWatched.isDownUntilTheyAnswer && !hitWhileWatched.isFallen && !hitWhileWatched.lostBeforeTheyAnswer && hitWhileWatched.stillWatching && !hitWhileWatched.deathScreen &&
+    !afterTheHit.host.lost && afterTheHit.host.isWatching && !afterTheHit.host.isDown && !afterTheHit.host.deathScreen && afterTheHit.host.scanners === 1 &&
+    afterTheHit.other.mode === 'playing' && !afterTheHit.other.lost && afterTheHit.other.health < afterTheHit.other.whole && afterTheHit.other.health > 0, [hostDied, hitWhileWatched, afterTheHit]);
+  // (The host on their feet again, as when a scanner has been carried back, and the other whole: the rest of this suite wants them so.)
+  await a.evaluate(() => { const d = window.lastReturnDebug, scanner = d.looseObjects.filter((object) => object.fallenPlayerId)[0]; if (scanner) d.askToAct({ what: 'restart', id: scanner.id }); });
+  await both(0.6);
+  await a.waitForFunction(() => window.lastReturnDebug.game.mode === 'playing', null, { timeout: 8000 }).catch(() => {});
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.updateWatching(0.1); d.healPlayer(d.tuning.playerMaxHealth); });
+  await b.evaluate(() => { const d = window.lastReturnDebug; d.healPlayer(d.tuning.playerMaxHealth); d.clearMessages(); });
+  await both(0.6);
+
   // ---- Everyone down ----
   // (The host well away from the other first: it catches everyone within its reach, and both stood in the car.)
   await a.evaluate(() => {
