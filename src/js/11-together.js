@@ -1073,8 +1073,12 @@ function restartFallenScanner(id) {
 // The host's game: is a fallen scanner lying where it can be restarted, and has it lain there long enough? And
 // is anybody still on their feet?
 function updateFallenScanners(dt) {
+  // Up: not dead, as they say themselves. Somebody who has just been hit is `isDown` in this game until theirs
+  // answers that they are still standing, and that is not being dead: with the host dead and watching, a hit
+  // on the last one standing used to be taken for everyone down, and the descent was called over for all of
+  // them while that one played on (and nobody could be carried back after it).
   let isAnyoneUp = game.mode !== 'dying' && game.mode !== 'dead';
-  for (const other of together.others) if (other.hasBeenHeardFrom && !other.isDown && !other.isFallen) isAnyoneUp = true;
+  for (const other of together.others) if (other.hasBeenHeardFrom && !other.isFallen) isAnyoneUp = true;
   if (!isAnyoneUp && !game.isDescentLost && game.mode === 'dead') decideAction(together.myId, { what: 'allDown' });
   if (game.isDescentLost) return;
   for (const object of looseObjects) {
