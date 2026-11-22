@@ -697,6 +697,64 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     noisy2.talking.length >= 2 && noisy2.talking.length <= 4 && noisy2.talking.every((noise) => noise.radius === numbers.noise && Math.hypot(noise.x - noisy2.at.x, noise.z - noisy2.at.z) < 0.1) && numbers.noise < numbers.walkStep && numbers.noise > numbers.walkStep * 0.6 &&
     noisy2.afterwards.length === 0 && noisy2.isCrouched && noisy2.whispering.length >= 1 && noisy2.whispering.every((noise) => noise.radius === numbers.noiseWhisper) && numbers.noiseWhisper < numbers.noise * 0.5, [noisy2, numbers]);
 
+  // ---- The intercom: one for everybody, and a voice through it (src/js/08-intercom.js) ----
+  // The other goes to the desk and switches it on. (The mains are put on by hand in both games for the length of this.)
+  const mainsBefore = [await a.evaluate(() => window.lastReturnDebug.game.flags.powerOn), await b.evaluate(() => window.lastReturnDebug.game.flags.powerOn)];
+  for (const page of [a, b]) await page.evaluate(() => { const d = window.lastReturnDebug; d.game.flags.powerOn = true; d.intercom.statistics.shrieks = 0; d.intercom.statistics.noises = 0; d.intercom.statistics.switchedOffByItself = 0; });
+  const stoodBefore = await b.evaluate(() => ({ x: window.lastReturnDebug.player.x, z: window.lastReturnDebug.player.z }));
+  const atTheDesk = await b.evaluate(() => {
+    const d = window.lastReturnDebug, desk = d.findInteractable(d.intercomObjectIds[0]) || d.findInteractable(d.intercomObjectIds[1]);
+    if (!desk) return null;
+    const stand = d.findWalkableSpotNear(desk.x, desk.z);
+    d.teleport(stand.x, stand.z, 0); d.simulate(0.2);
+    for (let count = 0; count < 3; count++) d.updateTogether(0.1);
+    d.askToAct({ what: 'use', objectId: desk.objectId });
+    return { objectId: desk.objectId, metres: Math.hypot(d.player.x - desk.x, d.player.z - desk.z) };
+  });
+  check('the station the lobby went down into has an intercom console', atTheDesk !== null, atTheDesk);
+  if (atTheDesk) {
+    await a.waitForFunction(() => window.lastReturnDebug.intercom.isOn, null, { timeout: 5000 }).catch(() => {});
+    await b.waitForFunction(() => window.lastReturnDebug.intercom.isOn, null, { timeout: 5000 }).catch(() => {});
+    const intercomIn = (page) => page.evaluate(() => { const d = window.lastReturnDebug; return { isOn: d.intercom.isOn, objectId: d.intercom.objectId, byId: d.intercom.byId, shrieks: d.intercom.statistics.shrieks, noises: d.intercom.statistics.noises,
+      byItself: d.intercom.statistics.switchedOffByItself, yours: d.isIntercomYours(), prompt: d.findInteractable(d.intercom.objectId || d.intercomObjectIds[0]) ? d.findInteractable(d.intercom.objectId || d.intercomObjectIds[0]).prompt : '' }; });
+    const switchedOn = { host: await intercomIn(a), other: await intercomIn(b) };
+    check('switched on by one of you it is on in every game, at that console and by that one of you: every game shrieks for itself, and it is the host\'s game that tells what listens',
+      switchedOn.host.isOn && switchedOn.other.isOn && switchedOn.host.objectId === atTheDesk.objectId && switchedOn.host.byId === 2 && switchedOn.other.byId === 2 && switchedOn.host.shrieks === 1 && switchedOn.other.shrieks === 1 &&
+      switchedOn.host.noises === 1 && switchedOn.other.noises === 0 && switchedOn.other.yours && !switchedOn.host.yours && switchedOn.host.prompt === 'Intercom: switch off', switchedOn);
+    // They talk. It comes out of the loudspeakers in the host's game, and is a noise there for what listens.
+    const intercomVoicesBefore = await heardCount(a);
+    await speak(b, 4, {});
+    await a.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 4, intercomVoicesBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+    const throughIt = await a.evaluate(() => {
+      const d = window.lastReturnDebug, talker = d.voice.talkers[2];
+      d.updateVoice(0.1); d.updateIntercom(0.6);
+      // (Counted since it was switched on: the shriek was one, and a frame of this game drawn meanwhile may have made the voice's already.)
+      return { isOnIntercom: talker.isOnIntercom, level: talker.intercomLevel, carriesAVoice: d.isIntercomCarryingVoice(), noises: d.intercom.statistics.noises - 1, voiceRadius: d.tuning.noiseRadiusIntercomVoice, talkRadius: d.tuning.noiseRadiusVoice,
+        shown: document.getElementById('voice-talkers').textContent, joinedToTheLoudspeakers: d.intercom.sound ? talker.intercomGain !== null : 'no sound yet' };
+    });
+    check('what the one at the microphone says goes to the loudspeakers in the others\' games, and is a noise at every loudspeaker in the host\'s for as long as they talk: louder than talking where you stand',
+      throughIt.isOnIntercom && throughIt.level > 0 && throughIt.carriesAVoice && throughIt.noises >= 1 && throughIt.noises <= 3 && throughIt.voiceRadius > throughIt.talkRadius && /Player 2 \(intercom\)/.test(throughIt.shown) && throughIt.joinedToTheLoudspeakers !== false, throughIt);
+    // They walk away from the desk: the host's game says it is off, for everybody.
+    await b.evaluate((stoodBefore) => { const d = window.lastReturnDebug; d.teleport(stoodBefore.x, stoodBefore.z, d.player.yaw); d.simulate(0.2); for (let count = 0; count < 3; count++) d.updateTogether(0.1); }, stoodBefore);
+    await pause(300);
+    await a.evaluate(() => { const d = window.lastReturnDebug; for (let count = 0; count < 3; count++) { d.updateTogether(0.1); d.updateIntercom(0.1); } });
+    await b.waitForFunction(() => !window.lastReturnDebug.intercom.isOn, null, { timeout: 5000 }).catch(() => {});
+    const wentOff = { host: await intercomIn(a), other: await intercomIn(b) };
+    // Said to be through the intercom when it is off: it is not.
+    const offBefore = await heardCount(a);
+    await b.evaluate(() => {
+      const d = window.lastReturnDebug, packed = d.packVoice(new Float32Array(d.voiceNumbers.pieceSamples).fill(0.2), 1 | 8, 0);
+      d.together.socket.send(packed);
+    });
+    await a.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 1, offBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+    wentOff.claimedWhileOff = await a.evaluate(() => { const d = window.lastReturnDebug, talker = d.voice.talkers[2]; d.updateVoice(0.1); return { isOnIntercom: talker.isOnIntercom, level: talker.intercomLevel }; });
+    check('when they walk away from the desk it goes off by itself in every game, by the host\'s say; and a voice that claims to be through it while it is off is not',
+      !wentOff.host.isOn && !wentOff.other.isOn && wentOff.host.byItself === 1 && wentOff.other.byItself === 1 && wentOff.host.prompt === 'Intercom: switch on' && !wentOff.claimedWhileOff.isOnIntercom && wentOff.claimedWhileOff.level === 0, wentOff);
+  }
+  await a.evaluate((was) => { window.lastReturnDebug.game.flags.powerOn = was; }, mainsBefore[0]);
+  await b.evaluate((was) => { window.lastReturnDebug.game.flags.powerOn = was; }, mainsBefore[1]);
+  await pause(300);
+
   // Your own body is in the way of the others' scanners, though you never see it. The host scans the other from
   // a metre and a half, with a narrow beam: on the other's screen none of that light gets past them, and none
   // is drawn on them. And the light on the host's scanner is simply there, scanning or not.

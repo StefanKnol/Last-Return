@@ -963,7 +963,7 @@ function readAction(data) {
     return hasLoad ? { what: 'use', objectId: data.objectId, load: data.load } : { what: 'use', objectId: data.objectId };
   }
   if (data.what === 'enter' && typeof data.place === 'string' && ZONE_NAMES.indexOf(data.place) >= 0 && data.place !== '') return { what: 'enter', place: data.place };
-  if (data.what === 'leaveLift' || data.what === 'ascend' || data.what === 'allDown') return { what: data.what };
+  if (data.what === 'leaveLift' || data.what === 'ascend' || data.what === 'allDown' || data.what === 'intercomOff') return { what: data.what };
   // A scanner where somebody fell, and its restarting.
   if (data.what === 'fall' && Number.isFinite(data.x) && Number.isFinite(data.y) && Number.isFinite(data.z)) {
     return { what: 'fall', x: clampNumber(data.x, 0, GRID_WIDTH), y: clampNumber(data.y, -100, 100), z: clampNumber(data.z, 0, GRID_DEPTH), id: Number.isInteger(data.id) ? data.id : 0 };
@@ -1001,7 +1001,7 @@ function readAction(data) {
 function performActionFor(actorId, action) {
   // What simply happens to the station (a thing breaks, a bay seals) is nobody's doing: everyone is told alike.
   const isNobodys = action.what === 'shatter' || action.what === 'lose' || action.what === 'bayState' || action.what === 'sealBay' || action.what === 'allDown' || action.what === 'pour' || action.what === 'arrive' ||
-    action.what === 'looterTake' || action.what === 'looterDrop';
+    action.what === 'looterTake' || action.what === 'looterDrop' || action.what === 'intercomOff';
   const other = actorId === together.myId || isNobodys ? null : (findOtherPlayer(actorId) || { x: player.x, z: player.z }); // (gone since: it is still done)
   game.actor = other;
   together.isCarryingOut = true;
@@ -1021,6 +1021,7 @@ function performAction(action) {
   else if (action.what === 'fall') dropFallenScanner(action);
   else if (action.what === 'restart') restartFallenScanner(action.id);
   else if (action.what === 'arrive') performArrival(action);
+  else if (action.what === 'intercomOff') switchIntercomOff(true); // whoever was at the microphone has left it (08-intercom.js)
   else if (action.what === 'allDown') {
     game.isDescentLost = true;
     if (game.mode === 'dead' && game.deathSequence) showDeathScreen(game.deathSequence.kind); // it says so
@@ -1359,7 +1360,7 @@ function hearOfTheStation(id, data) {
       const action = readAction(data.a);
       // When the car goes up, when a scanner is restarted, when everyone is down, what a salvage bay does and
       // takes, and a fuel can pouring are the host's game's to say: nobody else's browser ever asks for those, and one that does is not heard.
-      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive', 'looterTake', 'looterDrop'].indexOf(action.what) >= 0;
+      const isTheHostsToSay = action && ['ascend', 'restart', 'allDown', 'bayState', 'sealBay', 'pour', 'arrive', 'looterTake', 'looterDrop', 'intercomOff'].indexOf(action.what) >= 0;
       if (action && !isTheHostsToSay) decideAction(id, action);
     }
     return;

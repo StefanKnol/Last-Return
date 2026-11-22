@@ -188,6 +188,7 @@ function resetWorldState() {
   liftDoor.openFraction = 1;
   shutHollowHatches(); // the ceiling hatches are shut again until it has been through them
   raycastableFigures.length = 0;
+  resetIntercom(); // the intercom is off (08-intercom.js)
   resetCreatures(); // the Hollow is not in the station, the Stills stand in their store (CREATURE_KINDS, 08-creatures.js)
   createPhantoms();
   resetPlayerToStart();
@@ -532,6 +533,10 @@ function useInteractable(interactable) {
       } else {
         showMessage(game.isCarStaying ? 'LIFT CONTROL: winch ready. Everyone into the car.' : 'LIFT CONTROL: car at this level. Doors open.', 3, 'info');
       }
+      break;
+    case OBJECT_INTERCOM_DESK:
+    case OBJECT_INTERCOM_CONTROL:
+      useIntercomConsole(interactable); // (08-intercom.js)
       break;
     case OBJECT_LIFT_BUTTON:
       // The button outside the car. Alone the car has gone up, and there is nothing behind the door to call.
@@ -1175,6 +1180,7 @@ function runFrame(timestamp) {
   updateTogether(realDt); // the others down here with you: where they are now, and what their scanners show
   updateWatching(realDt); // ... and, dead, watching one of them (11-watching.js)
   updateVoice(realDt); // ... and their voices, from where they stand (11-voice.js)
+  if (game.mode !== 'title' && game.mode !== 'workshop') updateIntercom(realDt); // the loudspeakers, and whoever is at the microphone (08-intercom.js)
   renderFrame(renderCamera, frameState);
   updateHud(realDt);
   updateChat(realDt); // what was said grows old (11-chat.js)
@@ -1189,6 +1195,7 @@ function runFrameUnseen(dt) {
   else if (game.mode === 'ascending') updateAscending(dt);
   else if (game.mode === 'paused' || game.mode === 'reading' || game.mode === 'dead') updateStationWithoutYou(dt, false);
   updateTogether(dt);
+  updateIntercom(dt);
 }
 
 // ---------------------------------------------------------------------------
@@ -1415,6 +1422,9 @@ function startApplication() {
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
     hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getNearestEyeDistanceTo: getNearestEyeDistanceTo, describeIfOutOfReach: describeIfOutOfReach, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
     hasClearWalkingLine: hasClearWalkingLine,
+    // The intercom (08-intercom.js).
+    intercom: intercom, intercomObjectIds: INTERCOM_OBJECT_IDS, useIntercomConsole: useIntercomConsole, switchIntercomOff: switchIntercomOff, updateIntercom: updateIntercom, isIntercomYours: isIntercomYours,
+    isIntercomCarryingVoice: isIntercomCarryingVoice, makeIntercomNoise: makeIntercomNoise, getIntercomSpeakerLevel: getIntercomSpeakerLevel, findNearestIntercomSpeaker: findNearestIntercomSpeaker, placeIntercomSpeakers: placeIntercomSpeakers,
     // Voices (11-voice.js).
     voice: voice, packVoice: packVoice, unpackVoice: unpackVoice, voicePacking: voicePacking, handleCapturedVoice: handleCapturedVoice, hearVoicePiece: hearVoicePiece, updateVoice: updateVoice,
     getVoiceHearing: getVoiceHearing, getVoiceTalker: getVoiceTalker, setVoiceMode: setVoiceMode, setVoiceVolume: setVoiceVolume, getOwnVoicePlace: getOwnVoicePlace, isTalkingNow: isTalkingNow, getVoiceLevel: getVoiceLevel, setVoiceLevel: setVoiceLevel,

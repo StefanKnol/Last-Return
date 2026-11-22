@@ -180,6 +180,15 @@ const TUNING = {
   voiceMuffledFactor: 0.5,      // through a wall, with every door between you shut, a voice is this much as loud ...
   voiceMuffledHertz: 900,       // ... and nothing of it above this pitch comes through
   voiceOpenLevel: 0.02,         // "Open microphone": it sends when it hears something at least this loud (0 to 1). Higher = keys and breathing stay out, and so do quiet words
+  // ---- The intercom (08-intercom.js) ----
+  noiseRadiusIntercomShriek: 16,    // it comes on: every loudspeaker shrieks, and this is how far the Hollow hears each of them
+  noiseRadiusIntercomVoice: 9,      // a voice through it, at each loudspeaker, twice a second for as long as it talks. (Talking where you stand is 3.5.)
+  intercomReachMetres: 2.2,         // it goes off by itself when whoever switched it on is further than this from the desk
+  intercomSpeakerHeight: 2.1,       // how high on the wall a loudspeaker hangs, to its middle
+  intercomSpeakerSmallestTiles: 8,  // a part of the station smaller than this has none
+  intercomSpeakerTilesEach: 110,    // ... and one more for every so many tiles of it, three at the most
+  intercomSpeakerFullWithinMetres: 3, // you hear a loudspeaker at full within this ...
+  intercomSpeakerCarriesMetres: 22,   // ... and not at all from this far
   voiceOpenHoldSeconds: 0.4,    // ... and goes on for this long after, so that the end of a word is not cut off
   // ---- The looters (08-looter.js): small things that live in the vents and carry off what lies loose ----
   looterBodies: ['looter', 'looterF'], // the bodies there are for them: creatures made in the workshop (src/creatures/<name>.json), or kinds
@@ -849,6 +858,10 @@ const CAPTIONS = {
   ownObjectBreak: { text: '[something breaks apart at your feet]', level: 'sound', withinMetres: 0, seconds: 3, slot: 'ownHands', rank: 2 },
   objectBreak: { text: '[something breaks apart]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   ownObjectKicked: { text: '[something skitters away from your feet]', level: 'sound', withinMetres: 0, seconds: 2.5, slot: 'ownFeet', rank: 0 },
+  intercomShriek: { text: '[a shriek of feedback from every loudspeaker]', level: 'tell', withinMetres: 0, seconds: 2.6, slot: 'intercom', rank: 2 },
+  intercomVoice: { text: '[a voice from the loudspeakers, thin and overdriven]', level: 'sound', withinMetres: 22, seconds: 1.6, slot: 'intercom', rank: 1 },
+  intercomHiss: { text: '[the loudspeakers hiss: the intercom is on]', level: 'sound', withinMetres: 14, seconds: 1.6, slot: 'intercom', rank: 0 },
+  intercomOff: { text: '[a click from the loudspeakers: the intercom is off]', level: 'sound', withinMetres: 22, seconds: 2.2, slot: 'intercom', rank: 2 },
   tripodPulse: { text: '[a tick, and a flash: a scanner left scanning]', level: 'sound', withinMetres: 9, seconds: 1.7, slot: 'tripod', rank: 0 },
   scanGrenade: { text: '[a rising whine, and a crack of light]', level: 'sound', withinMetres: 30, seconds: 3, slot: 'objects', rank: 2 },
   hollowStunned: { text: '[it stands frozen in the light]', level: 'tell', withinMetres: 0, seconds: 3.2 },

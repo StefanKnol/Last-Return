@@ -1875,6 +1875,9 @@ function buildStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, work
   // And everything that lies loose: the cans, the litter, and the things worth carrying out. (Where they lie
   // is decided here; they are put out below, once the quests have dug what they dig.)
   planStationLooseObjects();
+  // The intercom's loudspeakers, on the walls (08-intercom.js). Last, and by numbers of their own, so that they
+  // move nothing that was put anywhere before there were any.
+  placeIntercomSpeakers();
   recordMapAsBuilt();
 
   // The quests. Kessel-9 asks for nothing but power, its three spools and the lift.

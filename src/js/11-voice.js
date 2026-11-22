@@ -41,6 +41,7 @@ const VOICE_HEAD_BYTES = 8;          // kind, where and how, number (2), where t
 const VOICE_KIND = 1;                // the first byte of a piece: which packing this is
 const VOICE_PLACE_LOBBY = 0, VOICE_PLACE_ON_FEET = 1, VOICE_PLACE_DOWN = 2;
 const VOICE_WHISPER_BIT = 4;
+const VOICE_INTERCOM_BIT = 8;        // said at the intercom's microphone, switched on: it comes out of every loudspeaker too (08-intercom.js)
 const VOICE_MODES = ['off', 'push', 'open'];
 const VOICE_TALK_KEY = 'KeyB';
 
@@ -254,7 +255,7 @@ function handleCapturedVoice(samples) {
     isTalking = getVoiceClock() < voice.openUntil;
   }
   if (!isTalking) return false;
-  const piece = packVoice(samples, getOwnVoicePlace() | (isWhispering() ? VOICE_WHISPER_BIT : 0), voice.sequence);
+  const piece = packVoice(samples, getOwnVoicePlace() | (isWhispering() ? VOICE_WHISPER_BIT : 0) | (isIntercomYours() ? VOICE_INTERCOM_BIT : 0), voice.sequence);
   voice.sequence = (voice.sequence + 1) & 65535;
   if (!together.socket || together.socket.readyState !== WebSocket.OPEN) return false;
   together.socket.send(piece);
@@ -353,7 +354,7 @@ function getVoiceTalker(id) {
   let talker = voice.talkers[id];
   if (!talker) {
     talker = voice.talkers[id] = { id: id, node: null, muffle: null, placedGain: null, panner: null, plainGain: null, lastHeardAt: -99, place: VOICE_PLACE_LOBBY, isWhispering: false,
-      level: 0, placedLevel: 0, plainLevel: 0, isMuffled: false, metres: 0, lookTimer: 0, pending: [] };
+      level: 0, placedLevel: 0, plainLevel: 0, isMuffled: false, metres: 0, lookTimer: 0, pending: [], isOnIntercom: false, intercomGain: null, intercomLevel: 0 };
   }
   return talker;
 }
@@ -380,7 +381,7 @@ function buildVoiceTalkerNodes(talker) {
 function forgetVoiceTalker(id) {
   const talker = voice.talkers[id];
   if (!talker) return;
-  for (const node of [talker.node, talker.muffle, talker.placedGain, talker.panner, talker.plainGain, talker.reverbSend]) if (node) { try { node.disconnect(); } catch (error) { /* not joined */ } }
+  for (const node of [talker.node, talker.muffle, talker.placedGain, talker.panner, talker.plainGain, talker.reverbSend, talker.intercomGain]) if (node) { try { node.disconnect(); } catch (error) { /* not joined */ } }
   delete voice.talkers[id];
   delete voice.levels[id];
 }
@@ -500,6 +501,8 @@ function hearVoicePiece(data) {
   const talker = getVoiceTalker(id);
   talker.place = place;
   talker.isWhispering = (piece[1] & VOICE_WHISPER_BIT) !== 0;
+  // Through the intercom: only if your own game has it that they are the one at the microphone.
+  talker.isOnIntercom = (piece[1] & VOICE_INTERCOM_BIT) !== 0 && place === VOICE_PLACE_ON_FEET && intercom.isOn && intercom.byId === id;
   talker.lastHeardAt = getVoiceClock();
   let sum = 0;
   for (let index = 0; index < samples.length; index++) sum += samples[index] * samples[index];
@@ -537,6 +540,14 @@ function updateVoice(dt) {
     talker.muffle.frequency.setTargetAtTime(hearing.isMuffled ? TUNING.voiceMuffledHertz : 8000, time, 0.08);
     const other = findOtherPlayer(talker.id);
     if (other) setPannerPosition(talker.panner, other.x, other.eyeY, other.z);
+    // Said at the intercom's microphone: it also goes to the loudspeakers (08-intercom.js), for whoever is down there.
+    talker.intercomLevel = talker.isOnIntercom && intercom.isOn && intercom.byId === talker.id && now - talker.lastHeardAt < 0.5 && getOwnVoicePlace() !== VOICE_PLACE_LOBBY
+      ? getVoiceLevel(talker.id) * settings.voiceVolume : 0;
+    if (!talker.intercomGain && intercom.sound) {
+      talker.intercomGain = audio.context.createGain(); talker.intercomGain.gain.value = 0;
+      talker.node.connect(talker.intercomGain); talker.intercomGain.connect(intercom.sound.voiceIn);
+    }
+    if (talker.intercomGain) talker.intercomGain.gain.setTargetAtTime(talker.intercomLevel, time, 0.04);
   }
   // Talking is a noise where you stand, for as long as you talk (08-creatures.js: what listens hears it).
   if (isTalkingNow() && getOwnVoicePlace() === VOICE_PLACE_ON_FEET && (game.mode === 'playing' || game.mode === 'paused' || game.mode === 'reading')) {
@@ -547,6 +558,15 @@ function updateVoice(dt) {
     }
   } else voice.noiseTimer = 0;
   refreshVoiceTalkers();
+}
+
+// Is somebody's voice going through the intercom just now? (You at the microphone and talking, or the one of
+// the others who is, as far as your game has heard.)
+function isIntercomCarryingVoice() {
+  if (!intercom.isOn) return false;
+  if (isIntercomYours()) return isTalkingNow();
+  const talker = voice.talkers[intercom.byId];
+  return Boolean(talker) && talker.isOnIntercom && getVoiceClock() - talker.lastHeardAt < 0.5;
 }
 
 // Is this one of the others talking, and do you hear them?
@@ -562,10 +582,11 @@ function refreshVoiceTalkers() {
   if (!element) return;
   const names = [];
   if (canChat()) {
-    if (isTalkingNow()) names.push('You' + (isWhispering() ? ' (whispering)' : ''));
+    if (isTalkingNow()) names.push('You' + (isIntercomYours() ? ' (intercom)' : (isWhispering() ? ' (whispering)' : '')));
     for (const key of Object.keys(voice.talkers)) {
       const talker = voice.talkers[key];
-      if (isVoiceHeard(talker)) names.push(getPlayerName(talker.id) + (talker.plainLevel === 0 && talker.isMuffled ? ' (muffled)' : ''));
+      if (talker.intercomLevel > 0) names.push(getPlayerName(talker.id) + ' (intercom)');
+      else if (isVoiceHeard(talker)) names.push(getPlayerName(talker.id) + (talker.plainLevel === 0 && talker.isMuffled ? ' (muffled)' : ''));
     }
   }
   const text = names.join('|');

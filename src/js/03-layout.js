@@ -302,6 +302,7 @@ function furnishSecurityOffice(random) {
   addBoxProp(11.0, 1.5, 47.94, 0.3, 0.3, 0.05, { surfaceClass: SURFACE_METAL, blocksMovement: false });
   addCeilingLamp(13, 45.5, 2.8, false);
   addNote(OBJECT_NOTE_SECURITY, 14.75, 0.77, 46.2, 0.3);
+  addIntercomConsole(OBJECT_INTERCOM_DESK, 14.7, 0.76, 44.9); // on the desk, in front of the monitors: the microphone the loudspeakers hang on (08-intercom.js)
   addWallSign('SECURITY', 13, 49, WALL_NORTH, { width: 1.1, height: 0.2, centerY: 2.52, alongOffset: 0 });
 }
 
@@ -427,6 +428,7 @@ function furnishControlRoom(random) {
   addChair(51.6, 34.4, 1.4, true);
   addBoxBetween(57.3, 0, 32.2, 57.95, 1.9, 33.4, { surfaceClass: SURFACE_METAL });
   addBoxProp(57.94, 1.5, 34.6, 0.04, 0.4, 0.6, { surfaceClass: SURFACE_METAL, blocksMovement: false });
+  addIntercomConsole(OBJECT_INTERCOM_CONTROL, 53.55, 0.76, 34.3); // on the table: the second microphone (08-intercom.js)
   addCeilingLamp(53.5, 34.5, 2.8, true);
   if (isObjectivePlacedInItsUsualRoom('spool1')) addSurveySpool(OBJECT_SPOOL_1, 53.0, 0.77, 34.3);
   addWallSign('PUMP CONTROL', 53, 32, WALL_NORTH, { width: 2.4, height: 0.3, centerY: 2.2 });

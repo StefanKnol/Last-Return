@@ -69,6 +69,25 @@ const labSource = String(function () {
     return tripod;
   };
   lab.switch = function (tripod) { d.askToAct({ what: 'setOff', id: tripod.id }); };
+  // A point ahead of the place, along its clear view, with open floor all round it and nothing over it: nothing
+  // within `room` metres on any side from shin to head height, and nothing above any of that floor lower than
+  // the ceiling. (The nearest such; a metre and a half ahead if the view has none, as it used to be.)
+  lab.openPointAhead = function (room) {
+    const isHit = function (x, y, z, directionX, directionY, directionZ, metres) { return d.castScannerRay(x, y, z, directionX, directionY, directionZ, metres); };
+    for (let metres = 1.5; metres < lab.place.clear - room; metres += 0.5) {
+      const at = lab.pointAt(metres, 0);
+      let isOpen = true;
+      for (let turn = 0; turn < 12 && isOpen; turn++) {
+        const yaw = turn * Math.PI / 6, sideX = Math.sin(yaw), sideZ = -Math.cos(yaw);
+        for (const height of [0.3, 1.0, 1.6]) if (isHit(at[0], lab.place.floorY + height, at[1], sideX, 0, sideZ, room)) isOpen = false;
+        // Straight up from the floor, here and at a step and two steps out this way: no lamp, shelf or duct in the way of a jump.
+        for (const out of [0, 0.7, 1.4]) if (isHit(at[0] + sideX * out, lab.place.floorY + 0.3, at[1] + sideZ * out, 0, 1, 0, 2.0)) isOpen = false;
+      }
+      if (isOpen) { lab.openMetresAhead = metres; return at; }
+    }
+    lab.openMetresAhead = -1;
+    return lab.pointAt(1.5, 0);
+  };
   // A point `metres` from the place, `turn` round from the way the tripod faces.
   lab.pointAt = function (metres, turn) {
     const yaw = lab.place.yaw + (turn || 0);
@@ -456,7 +475,11 @@ const labSource = String(function () {
     const watch = function (key, isCarried) {
       lab.station();
       d.clearLooseObjects();
-      const at = lab.pointAt(1.5, 0), floorY = lab.place.floorY;
+      // (Left to jump, it lies on open floor with nothing over it: what is asked is how it jumps and when its
+      // light is on, and a jump that clips a shelf on the way up is another matter. It used to lie a metre and
+      // a half into the room, beside the archive's shelving, and whether its second jump caught the edge of a
+      // shelf went by the moment in the game's clock at which this check happened to begin.)
+      const at = isCarried ? lab.pointAt(1.5, 0) : lab.openPointAhead(2.6), floorY = lab.place.floorY;
       const grenade = d.createLooseObject(key, at[0], floorY + 0.2, at[1], 0);
       d.simulate(1.5);
       const lyingAt = grenade.y - floorY, pointsBefore = d.pointCloud.totalReturns;
