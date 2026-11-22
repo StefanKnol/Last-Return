@@ -148,7 +148,7 @@ function setIntercomPrompts() {
 function useIntercomConsole(console) {
   if (!game.flags.powerOn) {
     playDeniedSound();
-    showMessage('INTERCOM: dead. It runs off the mains.', 4, 'warning');
+    showMessage('No power', 4, 'warning');
     return;
   }
   if (intercom.isOn) {
@@ -167,7 +167,6 @@ function useIntercomConsole(console) {
   showCaption('intercomShriek', findNearestIntercomSpeaker(getViewer()) || console);
   // Every loudspeaker shrieks: everything that listens hears the one it is near.
   makeIntercomNoise(TUNING.noiseRadiusIntercomShriek);
-  showMessage(isWorldShared() ? 'Intercom on. Every loudspeaker carries what you say, and everything down here hears them.' : 'Intercom on. Every loudspeaker in the station shrieked, and everything down here heard them.', 6, 'warning');
 }
 
 function switchIntercomOff(wasByItself) {
@@ -257,7 +256,7 @@ function updateIntercom(dt) {
 
 function buildIntercomSound() {
   if (intercom.sound || !isAudioReady()) return intercom.sound;
-  const context = audio.context, sound = { slots: [] };
+  const context = audio.context, sound = { slots: [], shriekLevel: null }; // (shriekLevel: the shriek of it coming on, while that is still heard)
   sound.bus = context.createGain();
   sound.voiceIn = context.createGain();
   const lowCut = context.createBiquadFilter(); lowCut.type = 'highpass'; lowCut.frequency.value = 480;
@@ -293,6 +292,7 @@ function quietIntercomSound() {
   if (!sound || !isAudioReady()) return;
   const now = audio.context.currentTime;
   sound.bedGain.gain.cancelScheduledValues(now); sound.bedGain.gain.setTargetAtTime(0, now, 0.05);
+  cutIntercomShriek();
 }
 
 // How loud a loudspeaker is from where you hear the station, 0 to 1.
@@ -327,35 +327,61 @@ function updateIntercomSound(dt) {
   }
 }
 
-// It comes on: the loudspeakers feed the microphone for a moment. A howl that climbs, wavers and dies.
+// It comes on: for a moment the loudspeakers feed the microphone, and the microphone the loudspeakers.
+//
+// What that sounds like is one note, the one the room and the loudspeakers pass best. It does not slide and
+// it does not waver. It comes up out of nothing, every trip round a little louder than the last, so that it
+// swells the way a thing does that keeps doubling. Then the amplifier can give no more and cuts the top off
+// the wave, and there it screams, with an edge on it. Then the circuit gets hold of it, and it rings away,
+// clean again as it goes.
+//
+// (A real loop was tried: a delay fed back into itself does all of this unasked. But it settles on another
+// pitch and swells at another speed at every sample rate, and a browser adds delay of its own inside a loop.
+// So this is one note, steered the way the loop's grew when it was measured, into the same overdriven amplifier.)
 function playIntercomShriek() {
   const sound = buildIntercomSound();
   if (!sound) return;
   updateIntercomSound(1); // (so that it comes from the loudspeakers near you at once)
-  const context = audio.context, now = context.currentTime, level = 0.5 * SOUND_LEVELS.intercomShriek;
-  for (const [from, to, share] of [[700, 2850, 1], [1400, 3900, 0.35]]) {
-    const howl = context.createOscillator(), gain = context.createGain(), waver = context.createOscillator(), waverDepth = context.createGain();
-    howl.type = 'sine';
-    howl.frequency.setValueAtTime(from, now);
-    howl.frequency.exponentialRampToValueAtTime(to, now + 0.22);
-    howl.frequency.setValueAtTime(to, now + 0.75);
-    howl.frequency.exponentialRampToValueAtTime(to * 1.12, now + 1.15);
-    waver.frequency.value = 9; waverDepth.gain.value = to * 0.012;
-    waver.connect(waverDepth); waverDepth.connect(howl.frequency);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(level * share, now + 0.07);
-    gain.gain.setValueAtTime(level * share, now + 0.7);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
-    howl.connect(gain); gain.connect(sound.bus);
-    howl.start(now); waver.start(now); howl.stop(now + 1.3); waver.stop(now + 1.3);
-  }
-  playNoiseBurst({ duration: 0.05, filterType: 'bandpass', frequency: 900, gain: 0.5 * SOUND_LEVELS.intercomShriek, destination: sound.bus }); // the click of the switch, through them all
+  cutIntercomShriek();
+  const pitch = 2400;        // TWEAK: Hz. 2000 to 3500 is the squeal of a PA; under 1000 it is a howl
+  const pitchCreep = 1.04;   // TWEAK: how far it has crept up by the time it is caught. 1 is dead steady
+  const swellSeconds = 0.5;  // TWEAK: from next to nothing to all the amplifier has
+  const screamSeconds = 0.45; // TWEAK: how long it stays there
+  const ringSeconds = 0.65;  // TWEAK: how long it takes to ring away
+  const overdrive = 3.5;     // TWEAK: how hard the amplifier is driven at the top. 1 stays a clean whistle, 6 is nearly a square wave
+  const faintest = 0.01;    // where the swell starts, of full: just heard, right behind the click of the switch
+  const context = audio.context, now = context.currentTime, caught = now + swellSeconds + screamSeconds, over = caught + ringSeconds;
+  const note = context.createOscillator(), swell = context.createGain(), amplifier = context.createWaveShaper(), loudness = context.createGain();
+  note.type = 'sine';
+  note.frequency.setValueAtTime(pitch, now);
+  note.frequency.exponentialRampToValueAtTime(pitch * pitchCreep, caught);
+  swell.gain.setValueAtTime(faintest, now);
+  swell.gain.exponentialRampToValueAtTime(1, now + swellSeconds);
+  swell.gain.setValueAtTime(1, caught);
+  swell.gain.exponentialRampToValueAtTime(faintest / 10, over);
+  amplifier.curve = createOverdriveCurve(overdrive);
+  amplifier.oversample = '4x';
+  loudness.gain.value = 0.52 * SOUND_LEVELS.intercomShriek;
+  note.connect(swell); swell.connect(amplifier); amplifier.connect(loudness); loudness.connect(sound.bus);
+  note.start(now); note.stop(over);
+  sound.shriekLevel = loudness;
+  note.onended = function () { loudness.disconnect(); if (sound.shriekLevel === loudness) sound.shriekLevel = null; };
+  playNoiseBurst({ duration: 0.05, filterType: 'bandpass', frequency: 900, gain: 0.7 * SOUND_LEVELS.intercomShriek, destination: sound.bus }); // the click of the switch, through them all
+}
+
+// The amplifier goes off under it (or it comes on anew): what was still shrieking stops there.
+function cutIntercomShriek() {
+  const sound = intercom.sound;
+  if (!sound || !sound.shriekLevel || !isAudioReady()) return;
+  sound.shriekLevel.gain.setTargetAtTime(0, audio.context.currentTime, 0.006);
+  sound.shriekLevel = null;
 }
 
 // It goes off: a click and a thump from every loudspeaker.
 function playIntercomClick() {
   const sound = intercom.sound;
   if (!sound || !isAudioReady()) return;
-  playNoiseBurst({ duration: 0.04, filterType: 'bandpass', frequency: 1100, gain: 0.45 * SOUND_LEVELS.intercomShriek, destination: sound.bus });
+  cutIntercomShriek();
+  playNoiseBurst({ duration: 0.04, filterType: 'bandpass', frequency: 1100, gain: 0.65 * SOUND_LEVELS.intercomShriek, destination: sound.bus });
   playTone({ waveform: 'sine', frequency: 140, frequencyEnd: 60, duration: 0.12, gain: 0.3 * SOUND_LEVELS.intercomShriek, destination: sound.bus });
 }

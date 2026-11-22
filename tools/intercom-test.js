@@ -162,9 +162,9 @@ const labSource = String(function () {
     return result;
   });
   check('without the mains the console is dead: nothing is switched on, nothing is heard, and you are told why',
-    switched.promptAtFirst === 'Intercom: switch on' && !switched.dead.isOn && switched.dead.heard === 0 && /runs off the mains/.test(switched.dead.told), switched.dead);
+    switched.promptAtFirst === 'Intercom: switch on' && !switched.dead.isOn && switched.dead.heard === 0 && /No power/.test(switched.dead.told), switched.dead);
   check('with them, [E] at the console switches it on: every loudspeaker shrieks, with a caption, and everything that listens hears every one of them as far as the number says',
-    switched.on.isOn && switched.on.at && switched.on.prompt === 'Intercom: switch off' && switched.on.shrieks === 1 && switched.on.heard === switched.speakers && switched.on.everyOneOfThem && switched.on.caption === 1 && /Intercom on/.test(switched.on.told),
+    switched.on.isOn && switched.on.at && switched.on.prompt === 'Intercom: switch off' && switched.on.shrieks === 1 && switched.on.heard === switched.speakers && switched.on.everyOneOfThem && switched.on.caption === 1,
     [switched.on, switched.speakers, switched.numbers]);
   check('what has still to arrive is brought nearer by it once, and not once for every loudspeaker', switched.on.onceWouldBe > 0 && Math.abs(switched.on.takenOffTheWait - switched.on.onceWouldBe) < 0.02, [switched.on.takenOffTheWait, switched.on.onceWouldBe, switched.speakers]);
   check('you are the one at the microphone; with nobody talking it carries no voice, hisses, and is no more noise to what listens',

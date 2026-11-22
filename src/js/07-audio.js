@@ -79,8 +79,8 @@ const SOUND_LEVELS = {
   surveyorStep: 1,        // its long steps
   surveyorVoice: 1,       // the chirp when it has seen you or runs off, the whine when it is dazzled
   intercomShriek: 1,      // the intercom coming on: the howl of feedback from every loudspeaker, and the click of it going off
-  intercomBed: 0.6,       // the hiss and hum of the loudspeakers while it is on
-  intercomVoice: 1,       // somebody's voice through the loudspeakers (on top of how loud you have that player, and voices)
+  intercomBed: 0.8,       // the hiss and hum of the loudspeakers while it is on
+  intercomVoice: 1.4,       // somebody's voice through the loudspeakers (on top of how loud you have that player, and voices)
   hurt: 1,                // something has hit you
   firstAid: 1,            // a first aid kit, used
   hollowCeilingStep: 1,   // crawling above the ceiling, on its way round a locked door
