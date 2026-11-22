@@ -49,7 +49,7 @@ function fetchText(host, address) {
 function connect(host, origin, forwardedFor) {
   return new Promise(function (resolve) {
     const socket = new WebSocket('ws://' + host + '/relay', { origin: origin || 'http://' + host, headers: forwardedFor ? { 'X-Forwarded-For': forwardedFor } : {} });
-    const member = { socket: socket, heard: [], waiting: [], isClosed: false, wasRefusedAtTheDoor: false };
+    const member = { socket: socket, heard: [], voices: [], waiting: [], isClosed: false, wasRefusedAtTheDoor: false };
     member.say = function (message) { socket.send(JSON.stringify(message)); };
     member.next = function () {
       if (member.heard.length > 0) return Promise.resolve(member.heard.shift());
@@ -57,7 +57,7 @@ function connect(host, origin, forwardedFor) {
       return new Promise(function (hand) { member.waiting.push(hand); });
     };
     const give = function (message) { if (member.waiting.length > 0) member.waiting.shift()(message); else member.heard.push(message); };
-    socket.on('message', function (data) { give(JSON.parse(data.toString())); });
+    socket.on('message', function (data, isBinary) { if (isBinary) member.voices.push(Buffer.from(data)); else give(JSON.parse(data.toString())); }); // (what is not text is a piece of voice)
     socket.on('close', function () { member.isClosed = true; for (const hand of member.waiting.splice(0)) hand({ t: 'gone' }); });
     socket.on('open', function () { resolve(member); });
     socket.on('error', function () { member.wasRefusedAtTheDoor = true; member.isClosed = true; resolve(member); });
@@ -146,6 +146,45 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   await pause(300);
   check('a member that says far too much is shown the door', noisy.isClosed);
   for (const member of [lost, otherBuild, fifth, latecomer, guests[0].member, guests[1].member]) member.socket.close();
+
+  // ---- Voices: what is not text is handed to the others with who said it in front, and nothing else is done with it ----
+  const speaker = await connect(named.host);
+  speaker.say({ t: 'host', build: 'one' });
+  const voiceLobby = await speaker.next();
+  const listeners = [];
+  for (let count = 0; count < 2; count++) { const listener = await connect(named.host); listener.say({ t: 'join', code: voiceLobby.code, build: 'one' }); await listener.next(); listeners.push(listener); }
+  const pieceOfVoice = Buffer.alloc(328, 7); pieceOfVoice[0] = 1;
+  listeners[0].socket.send(pieceOfVoice);
+  await pause(200);
+  const carried = { toTheHost: speaker.voices.length, toTheOther: listeners[1].voices.length, backToThemselves: listeners[0].voices.length,
+    from: speaker.voices[0] ? speaker.voices[0].readUInt16LE(0) : -1, same: speaker.voices[0] ? speaker.voices[0].subarray(2).equals(pieceOfVoice) : false };
+  check('the lobby says it carries voices; a piece of voice goes to the others in the lobby, unchanged, with the number of who said it in front, and not back to them',
+    voiceLobby.voice === true && carried.toTheHost === 1 && carried.toTheOther === 1 && carried.backToThemselves === 0 && carried.from === 2 && carried.same, [voiceLobby.voice, carried]);
+  listeners[0].socket.send(Buffer.alloc(601, 1)); // too long
+  const outsider = await connect(named.host);
+  outsider.socket.send(pieceOfVoice); // from somebody in no lobby
+  await pause(1100); // (a new second: the count of pieces starts again)
+  const before = speaker.voices.length;
+  for (let count = 0; count < 100; count++) listeners[0].socket.send(pieceOfVoice);
+  await pause(300);
+  const flooded = { tooLongOrFromOutside: before - 1, ofAHundred: speaker.voices.length - before, isShownTheDoor: listeners[0].isClosed, outsiderIsShownTheDoor: outsider.isClosed };
+  listeners[0].say({ t: 'say', d: { k: 'still here' } });
+  let afterTheFlood = await speaker.next();
+  while (afterTheFlood.t !== 'said' && afterTheFlood.t !== 'gone') afterTheFlood = await speaker.next();
+  check('a piece that is too long, or from somebody in no lobby, goes nowhere; of a hundred in one second forty are handed on, and nobody is shown the door for it',
+    flooded.tooLongOrFromOutside === 0 && flooded.ofAHundred === 40 && !flooded.isShownTheDoor && !flooded.outsiderIsShownTheDoor && afterTheFlood.t === 'said', flooded);
+  for (const member of [speaker, outsider].concat(listeners)) member.socket.close();
+  const mute = await listen({ voice: false });
+  const quietHost = await connect(mute.host);
+  quietHost.say({ t: 'host', build: 'one' });
+  const quietLobby = await quietHost.next();
+  const quietGuest = await connect(mute.host);
+  quietGuest.say({ t: 'join', code: quietLobby.code, build: 'one' });
+  await quietGuest.next();
+  quietGuest.socket.send(pieceOfVoice);
+  await pause(200);
+  check('a server told not to carry voices says so and hands none on; the lobby works as it did', quietLobby.voice === false && quietHost.voices.length === 0 && !quietGuest.isClosed && (await quietHost.next()).t === 'joined', [quietLobby.voice, quietHost.voices.length]);
+  quietHost.socket.close(); quietGuest.socket.close(); mute.server.close();
 
   // ---- Locking a lobby: with everyone in, nobody else gets in, whatever code they try ----
   const keeper = await connect(named.host);
@@ -279,6 +318,115 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     hostile.long === 200 && hostile.cleaned === 'one two three four five six' && hostile.cleanName === 'Evil Name that g', hostile);
   check('what is not text, is empty, or comes from nobody in the lobby is not shown; nor is more than five lines in five seconds from one of them',
     hostile.notText === 0 && hostile.heardOfFourteen === 5 && hostile.dropped === 9 && hostile.kept, hostile);
+
+  // ---- Voices (src/js/11-voice.js) ----
+  // Packing a piece small and unpacking it: what comes back is the sound that went in, near enough.
+  const packing = await a.evaluate(() => {
+    const d = window.lastReturnDebug, count = d.voiceNumbers.pieceSamples, result = {};
+    let signal = 0, noise = 0;
+    d.voicePacking.value = 0; d.voicePacking.stepIndex = 0;
+    for (let piece = 0; piece < 10; piece++) {
+      const samples = new Float32Array(count);
+      for (let index = 0; index < count; index++) { const time = (piece * count + index) / d.voiceNumbers.rate; samples[index] = 0.3 * Math.sin(2 * Math.PI * 220 * time) + 0.15 * Math.sin(2 * Math.PI * 1370 * time) + 0.05 * Math.sin(2 * Math.PI * 3100 * time); }
+      const packed = d.packVoice(samples, 1, piece), back = d.unpackVoice(packed);
+      result.bytes = packed.length;
+      if (piece > 0) for (let index = 0; index < count; index++) { signal += samples[index] * samples[index]; noise += (samples[index] - back[index]) * (samples[index] - back[index]); }
+      if (piece === 9) { result.tooShort = d.unpackVoice(packed.subarray(0, 300)); const other = packed.slice(); other[0] = 9; result.anotherKind = d.unpackVoice(other); }
+    }
+    result.decibels = Math.round(10 * Math.log10(signal / noise) * 10) / 10;
+    result.secondsAPiece = count / d.voiceNumbers.rate;
+    return result;
+  });
+  check('a piece of voice is a twenty-fifth of a second in 328 bytes, and unpacked it is the sound that went in to within a thirtieth; what is not such a piece is not unpacked',
+    packing.bytes === 328 && Math.abs(packing.secondsAPiece - 0.04) < 0.0001 && packing.decibels > 24 && packing.tooShort === null && packing.anotherKind === null, packing);
+  const voiceAtFirst = await b.evaluate(() => { const d = window.lastReturnDebug; return { mode: d.settings.voiceMode, control: document.getElementById('together-voice').value, isCarried: d.voice.isCarried, microphone: d.voice.microphone,
+    status: document.getElementById('together-voice-status').textContent, players: Array.from(document.querySelectorAll('#together-players .together-player')).map((row) => row.textContent), sliders: document.querySelectorAll('#together-players input[type=range]').length }; });
+  check('voice starts switched off: the microphone is not asked for; the lobby\'s block lists who is here, with a slider for how loud each of the others is',
+    voiceAtFirst.mode === 'off' && voiceAtFirst.control === 'off' && voiceAtFirst.isCarried && voiceAtFirst.microphone === 'none' && /microphone is off/.test(voiceAtFirst.status) &&
+    voiceAtFirst.players.length === 2 && /Mara \(host\)/.test(voiceAtFirst.players[0]) && /Player 2 \(you\)/.test(voiceAtFirst.players[1]) && voiceAtFirst.sliders === 1, voiceAtFirst);
+  // The host opens their microphone (this browser's is made up: a tone that beeps). The other hears it, plainly: both are at the title screen.
+  await a.selectOption('#together-voice', 'open');
+  const wasHeard = await b.waitForFunction(() => window.lastReturnDebug.voice.statistics.heard >= 5, null, { polling: 200, timeout: 15000 }).then(() => true, () => false);
+  const throughTheMicrophone = { host: await a.evaluate(() => { const d = window.lastReturnDebug; return { microphone: d.voice.microphone, sent: d.voice.statistics.sent, status: document.getElementById('together-voice-status').textContent, kept: JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').voiceMode }; }),
+    other: await b.evaluate(() => { const d = window.lastReturnDebug, talker = d.voice.talkers[1]; d.updateVoice(0.05);
+      return { heard: d.voice.statistics.heard, refused: d.voice.statistics.refused, place: talker ? talker.place : -1, plain: talker ? talker.plainLevel : -1, placed: talker ? talker.placedLevel : -1, isPlayed: talker ? talker.node !== null || talker.pending.length > 0 : false }; }) };
+  check('with the microphone open, what it hears is cut up, packed, carried by the server and unpacked in the other\'s game; at the title screen the other hears it plainly, from nowhere',
+    wasHeard && throughTheMicrophone.host.microphone === 'on' && throughTheMicrophone.host.sent >= 5 && throughTheMicrophone.host.kept === 'open' && /microphone is open/.test(throughTheMicrophone.host.status) &&
+    throughTheMicrophone.other.refused === 0 && throughTheMicrophone.other.place === 0 && throughTheMicrophone.other.plain === 1 && throughTheMicrophone.other.placed === 0 && throughTheMicrophone.other.isPlayed, throughTheMicrophone);
+  // Switched off again, the microphone is let go of.
+  await a.selectOption('#together-voice', 'off');
+  await pause(300);
+  const letGo = await a.evaluate(() => { const d = window.lastReturnDebug, sent = d.voice.statistics.sent; return new Promise((resolve) => setTimeout(() => resolve({ microphone: d.voice.microphone, stream: d.voice.stream, sentSince: d.voice.statistics.sent - sent }), 400)); });
+  check('switched off again, the microphone is let go of and nothing more is sent', letGo.microphone === 'none' && letGo.stream === null && letGo.sentSince === 0, letGo);
+  // From here voices are put in by hand: `speak` is what the microphone's program does with a piece, a tone of this pitch.
+  const speak = (page, pieces, options) => page.evaluate(([pieces, options]) => {
+    const d = window.lastReturnDebug, count = d.voiceNumbers.pieceSamples, modeBefore = d.settings.voiceMode;
+    d.settings.voiceMode = options.mode || 'open';
+    if (options.crouched !== undefined) d.player.isCrouching = options.crouched;
+    let sent = 0;
+    for (let piece = 0; piece < pieces; piece++) {
+      const samples = new Float32Array(count);
+      for (let index = 0; index < count; index++) samples[index] = (options.loudness === undefined ? 0.3 : options.loudness) * Math.sin(2 * Math.PI * 300 * (piece * count + index) / d.voiceNumbers.rate);
+      if (d.handleCapturedVoice(samples)) sent++;
+    }
+    if (!options.keepMode) d.settings.voiceMode = modeBefore;
+    return sent;
+  }, [pieces, options || {}]);
+  const heardBy = (page, id) => page.evaluate((id) => { const d = window.lastReturnDebug, talker = d.voice.talkers[id]; d.updateVoice(0.3);
+    return { heard: d.voice.statistics.heard, place: talker ? talker.place : -1, whisper: talker ? talker.isWhispering : null, placed: talker ? Math.round(talker.placedLevel * 1000) / 1000 : -1, plain: talker ? talker.plainLevel : -1,
+      muffled: talker ? talker.isMuffled : null, metres: talker ? Math.round(talker.metres * 100) / 100 : -1, shown: document.getElementById('voice-talkers').textContent,
+      apart: (() => { const other = d.together.others.filter((one) => one.id === id)[0], viewer = d.getViewer(); return other ? Math.round(Math.hypot(other.x - viewer.x, other.z - viewer.z) * 100) / 100 : -1; })() }; }, id);
+  const heardCount = (page) => page.evaluate(() => window.lastReturnDebug.voice.statistics.heard);
+  // Push to talk sends only while the key is held; an open microphone only what is loud enough, and a moment after.
+  await b.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }); // (the box they wrote in has the keys still: B would be typed into it)
+  const gates = { heardBefore: await heardCount(a) };
+  gates.pushNotHeld = await speak(b, 3, { mode: 'push' });
+  await b.keyboard.down('KeyB');
+  gates.pushHeld = await speak(b, 3, { mode: 'push' });
+  await b.keyboard.up('KeyB');
+  gates.pushLetGo = await speak(b, 3, { mode: 'push' });
+  gates.off = await speak(b, 3, { mode: 'off' });
+  await pause(600); // (an open microphone goes on for a moment after the last loud thing: that has to be over)
+  gates.openTooQuiet = await speak(b, 3, { loudness: 0.004 });
+  gates.openLoud = await speak(b, 3, {});
+  gates.openJustAfter = await speak(b, 2, { loudness: 0.004 });
+  await pause(600);
+  gates.openLater = await speak(b, 2, { loudness: 0.004 });
+  await a.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 8, gates.heardBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+  gates.heard = (await heardCount(a)) - gates.heardBefore;
+  check('push to talk sends only while B is held; an open microphone only what is loud enough, and for a moment after; switched off nothing is sent',
+    gates.pushNotHeld === 0 && gates.pushHeld === 3 && gates.pushLetGo === 0 && gates.off === 0 && gates.openTooQuiet === 0 && gates.openLoud === 3 && gates.openJustAfter === 2 && gates.openLater === 0 && gates.heard === 8, gates);
+  // Each of the others has a slider: how loud they are to you, down to not at all. It is kept under their name.
+  // And a piece that is not from somebody in the lobby is not heard at all.
+  const levels = await b.evaluate(() => {
+    const d = window.lastReturnDebug, result = {};
+    const piece = (from, flags) => { const packed = d.packVoice(new Float32Array(d.voiceNumbers.pieceSamples).fill(0.2), flags, 0), all = new Uint8Array(packed.length + 2); all[0] = from & 255; all[1] = from >> 8; all.set(packed, 2); return all.buffer; };
+    const hearing = () => { const got = d.getVoiceHearing(d.getVoiceTalker(1), false); return { placed: got.placed, plain: got.plain }; };
+    const slide = (value, isLetGo) => { const slider = document.querySelector('#together-players input[type=range]'); slider.value = String(value); slider.dispatchEvent(new Event('input')); if (isLetGo) slider.dispatchEvent(new Event('change')); };
+    const said = () => document.querySelector('#together-players .together-player i').textContent;
+    d.hearVoicePiece(piece(1, 0)); result.before = hearing(); result.saidBefore = said();
+    slide(0.5, true); result.half = hearing(); result.saidHalf = said();
+    result.kept = JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').voiceLevels;
+    result.inTheMenu = document.querySelector('#pause-players input[type=range]') ? document.querySelector('#pause-players input[type=range]').value : null;
+    // In another lobby, where they have another number: the name is what it is kept under.
+    delete d.voice.levels[1]; result.byName = d.getVoiceLevel(1);
+    const nameBefore = d.chat.names[1]; d.chat.names[1] = ''; result.withoutAName = d.getVoiceLevel(1); d.chat.names[1] = nameBefore;
+    slide(0, true); const heardBefore = d.voice.statistics.heard; d.hearVoicePiece(piece(1, 0)); result.muted = hearing(); result.saidMuted = said(); result.stillCounted = d.voice.statistics.heard - heardBefore;
+    slide(2, true); result.loudest = hearing();
+    slide(1, true); result.back = hearing(); result.keptAfter = JSON.parse(window.localStorage.getItem('last-return-settings') || '{}').voiceLevels;
+    const refusedBefore = d.voice.statistics.refused;
+    result.fromNobody = d.hearVoicePiece(piece(77, 0)); result.fromYourself = d.hearVoicePiece(piece(2, 0)); result.noSuchPlace = d.hearVoicePiece(piece(1, 3));
+    result.tooShort = d.hearVoicePiece(new Uint8Array(40).buffer); result.notSound = d.hearVoicePiece('text');
+    result.refused = d.voice.statistics.refused - refusedBefore;
+    return result;
+  });
+  check('each of the others has a slider for how loud they are to you, from not at all to twice as loud; it says what it is set to, and the menu has the same list',
+    levels.before.plain === 1 && levels.saidBefore === '100%' && levels.half.plain === 0.5 && levels.saidHalf === '50%' && levels.inTheMenu === '0.5' && levels.muted.plain === 0 && levels.saidMuted === 'muted' && levels.stillCounted === 1 &&
+    levels.loudest.plain === 2 && levels.back.plain === 1, levels);
+  check('what you set is kept under the name they gave, for the next lobby they are in; somebody without a name is as they come; back at 100% nothing is kept',
+    levels.kept && levels.kept.Mara === 0.5 && levels.byName === 0.5 && levels.withoutAName === 1 && levels.keptAfter && levels.keptAfter.Mara === undefined, [levels.kept, levels.byName, levels.withoutAName, levels.keptAfter]);
+  check('a piece from nobody in the lobby, from yourself, from no such place, or too short is not heard',
+    !levels.fromNobody && !levels.fromYourself && !levels.noSuchPlace && !levels.tooShort && !levels.notSound && levels.refused === 4, levels);
 
   // The other's title screen shows what the host has chosen, and follows it when the host changes it.
   await b.waitForFunction(() => window.lastReturnDebug.settings.station === 'generated', null, { timeout: 5000 }).catch(() => {});
@@ -423,6 +571,131 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
     return result;
   });
   check('in play a line is shown for a few seconds, and after that only while the box is open', aging.fresh && !aging.old && aging.withTheBoxOpen && !aging.shutAgain, aging);
+
+  // ---- Voices in the station: from where they stand, by the way they have to come (src/js/11-voice.js) ----
+  // The other talks. The host hears them from two metres off, with nothing in between.
+  await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0];
+    for (const way of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+      const spot = d.findWalkableSpotNear(other.x + way[0], other.z + way[1]);
+      if (spot && Math.abs(Math.hypot(spot.x - other.x, spot.z - other.z) - 2) < 0.3 && !d.castScannerRay(spot.x, 1.5, spot.z, (other.x - spot.x) / 2, 0, (other.z - spot.z) / 2, 1.2)) { d.teleport(spot.x, spot.z, 0); break; }
+    }
+    d.simulate(0.1);
+  });
+  const voicesBefore = await heardCount(a);
+  const sentInPlay = await speak(b, 4, {});
+  await a.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 4, voicesBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+  const near = await heardBy(a, 2);
+  const numbers = await a.evaluate(() => { const tuning = window.lastReturnDebug.tuning; return { full: tuning.voiceFullWithinMetres, carries: tuning.voiceCarriesMetres, whisper: tuning.voiceWhisperFactor, muffled: tuning.voiceMuffledFactor,
+    noise: tuning.noiseRadiusVoice, noiseWhisper: tuning.noiseRadiusVoiceWhisper, walkStep: tuning.noiseRadiusWalkStep }; });
+  check('down in the station a voice is heard from where the one talking stands: two metres off with nothing in between, at full, and the screen says who is talking',
+    sentInPlay === 4 && near.place === 1 && near.plain === 0 && near.placed > 0.99 && near.muffled === false && near.apart <= numbers.full && Math.abs(near.metres - near.apart) < 0.3 && /Player 2/.test(near.shown), [near, numbers]);
+  // How loud by how far: by the numbers, for a voice and for a whisper. (They are put at each distance by hand,
+  // in the host's game alone and for the length of this: only the distance is asked about.)
+  const byDistance = await a.evaluate(() => {
+    const d = window.lastReturnDebug, tuning = d.tuning, other = d.together.others[0], talker = d.getVoiceTalker(2), was = { x: other.x, z: other.z, eyeY: other.eyeY, whisper: talker.isWhispering, muffled: talker.isMuffled, metres: talker.metres };
+    const expected = (metres, reach) => { const full = tuning.voiceFullWithinMetres * reach, gone = tuning.voiceCarriesMetres * reach, nearness = Math.max(0, Math.min(1, 1 - (metres - full) / (gone - full))); return nearness * nearness; };
+    const result = { voice: [], whisper: [] };
+    other.eyeY = d.getPlayerEyeY(); talker.isMuffled = false; talker.metres = 0;
+    for (const [name, reach] of [['voice', 1], ['whisper', tuning.voiceWhisperFactor]]) {
+      talker.isWhispering = name === 'whisper';
+      for (const share of [0.05, 0.3, 0.6, 0.9, 1.05]) {
+        const metres = tuning.voiceCarriesMetres * reach * share;
+        other.x = d.player.x + metres; other.z = d.player.z;
+        result[name].push({ metres: Math.round(metres * 10) / 10, heard: d.getVoiceHearing(talker, false).placed, expected: expected(metres, reach) });
+      }
+    }
+    other.x = was.x; other.z = was.z; other.eyeY = was.eyeY; talker.isWhispering = was.whisper; talker.isMuffled = was.muffled; talker.metres = was.metres;
+    return result;
+  });
+  const follows = (rows) => rows.every((row) => Math.abs(row.heard - row.expected) < 0.001) && rows[0].heard === 1 && rows[4].heard === 0 && rows[1].heard > rows[2].heard && rows[2].heard > rows[3].heard && rows[3].heard > 0;
+  check('a voice is at full close by, quieter with every metre, and gone where the number says; a whisper the same over a good deal less far',
+    follows(byDistance.voice) && follows(byDistance.whisper) && byDistance.whisper[4].metres < byDistance.voice[4].metres * 0.5, byDistance);
+  // Crouched, what you say is a whisper, and the others' games know it.
+  const whisperBefore = await heardCount(a);
+  await speak(b, 2, { crouched: true });
+  await a.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 2, whisperBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+  const whispered = await heardBy(a, 2);
+  await speak(b, 1, { crouched: false });
+  check('crouched, you whisper: the others\' games are told so with every piece', whispered.whisper === true && whispered.place === 1, whispered);
+  // A door between them. Shut, the voice comes through the wall, muffled. Open, with the two of them not in line
+  // with it, it comes round through the doorway: clear, and from as far as that way is long.
+  const throughADoor = await a.evaluate(() => {
+    const d = window.lastReturnDebug, other = d.together.others[0], talker = d.getVoiceTalker(2), result = { found: false };
+    const was = { x: other.x, z: other.z, eyeY: other.eyeY, playerX: d.player.x, playerZ: d.player.z, place: talker.place, whisper: talker.isWhispering };
+    const walkable = (x, z) => { const spot = d.findWalkableSpotNear(x + 0.5, z + 0.5); return spot && spot.x === x + 0.5 && spot.z === z + 0.5; };
+    const setDoor = (door, isOpen) => { door.openFraction = isOpen ? 1 : 0; door.slab.isRemoved = isOpen; };
+    const hear = () => { d.refreshVoiceWays(1); const got = d.getVoiceHearing(talker, true); return { placed: got.placed, muffled: got.isMuffled, metres: got.metres, straight: Math.hypot(other.x - d.player.x, other.z - d.player.z) }; };
+    talker.place = 1; talker.isWhispering = false; other.eyeY = d.getPlayerEyeY();
+    result.doors = d.doors.length; result.withFloorInLine = 0; result.withFloorAside = 0;
+    const stand = (mine, theirs) => { d.teleport(mine[0] + 0.5, mine[1] + 0.5, 0); other.x = theirs[0] + 0.5; other.z = theirs[1] + 0.5; };
+    for (const door of d.doors) {
+      if (door === d.getLiftDoor() || door.isBroken) continue;
+      const before = { openFraction: door.openFraction, isRemoved: door.slab.isRemoved };
+      for (const [alongX, alongZ] of [[1, 0], [0, 1]]) {
+        const sideX = alongZ, sideZ = alongX;
+        // In line with the door, a few tiles to either side of it.
+        for (const out of [3, 2, 4]) {
+          const inLine = [[door.tileX - alongX * out, door.tileZ - alongZ * out], [door.tileX + alongX * out, door.tileZ + alongZ * out]];
+          if (result.shut || !inLine.every((tile) => walkable(tile[0], tile[1]))) continue;
+          result.withFloorInLine++;
+          stand(inLine[0], inLine[1]);
+          setDoor(door, true); const open = hear();
+          setDoor(door, false); const shut = hear();
+          if (!open.muffled && Math.abs(open.metres - open.straight) < 0.01) { result.shut = shut; result.open = open; }
+        }
+        // Round the corner from it: out from the door and then sideways, the two of them opposite ways, so that
+        // the wall is in the way of the straight line and the doorway is the way round.
+        for (const out of [2, 3, 1]) for (const aside of [2, 3, 1, 4]) for (const turn of [1, -1]) {
+          const round = [[door.tileX - alongX * out + sideX * aside * turn, door.tileZ - alongZ * out + sideZ * aside * turn], [door.tileX + alongX * out - sideX * aside * turn, door.tileZ + alongZ * out - sideZ * aside * turn]];
+          if (result.openAside || !round.every((tile) => walkable(tile[0], tile[1]))) continue;
+          result.withFloorAside++;
+          stand(round[0], round[1]);
+          setDoor(door, true); const openAside = hear();
+          setDoor(door, false); const shutAside = hear();
+          if (!openAside.muffled && openAside.metres > openAside.straight + 0.5) { result.openAside = openAside; result.shutAside = shutAside; }
+        }
+      }
+      door.openFraction = before.openFraction; door.slab.isRemoved = before.isRemoved;
+    }
+    result.found = Boolean(result.shut && result.openAside);
+    d.teleport(was.playerX, was.playerZ, d.player.yaw); other.x = was.x; other.z = was.z; other.eyeY = was.eyeY; talker.place = was.place; talker.isWhispering = was.whisper;
+    d.refreshVoiceWays(1);
+    return result;
+  });
+  check('the station has a door with floor to both sides of it, and one with floor round the corner from it', throughADoor.found, throughADoor);
+  if (throughADoor.found) {
+    check('through a shut door a voice is muffled: quieter by the number, as far off as the two are apart; with the door open it is clear',
+      throughADoor.shut.muffled && !throughADoor.open.muffled && Math.abs(throughADoor.shut.placed - throughADoor.open.placed * numbers.muffled) < 0.001 && Math.abs(throughADoor.shut.metres - throughADoor.shut.straight) < 0.01 && Math.abs(throughADoor.open.metres - throughADoor.open.straight) < 0.01, throughADoor);
+    check('round the corner from an open door a voice is clear and comes the way round, from further off than the two are apart; shut the door and it is muffled again',
+      !throughADoor.openAside.muffled && throughADoor.openAside.metres > throughADoor.openAside.straight + 0.5 && throughADoor.shutAside.muffled &&
+      throughADoor.shutAside.placed < throughADoor.openAside.placed, throughADoor);
+  }
+  // Talking is a noise where you stand, twice a second, a little quieter than a walking step; a whisper a good deal quieter.
+  await a.evaluate(() => { const d = window.lastReturnDebug; window.heardNoises = []; d.creatureKinds.push({ key: 'testEars', update: function () {}, reset: function () {}, hear: function (x, z, radius) { window.heardNoises.push({ x: x, z: z, radius: radius }); } }); });
+  const noisy2 = { at: await b.evaluate(() => ({ x: window.lastReturnDebug.player.x, z: window.lastReturnDebug.player.z })) };
+  for (let turn = 0; turn < 6; turn++) { await speak(b, 2, {}); await b.evaluate(() => { window.lastReturnDebug.updateVoice(0.26); }); await pause(120); }
+  await pause(400);
+  noisy2.talking = await a.evaluate(() => window.heardNoises.splice(0));
+  await pause(400); // (they have stopped: no more of it)
+  await b.evaluate(() => { for (let count = 0; count < 4; count++) window.lastReturnDebug.updateVoice(0.26); });
+  await pause(300);
+  noisy2.afterwards = await a.evaluate(() => window.heardNoises.splice(0));
+  // (Crouched for real, with the key held: a frame of their game drawn in between would stand them up again otherwise.)
+  await b.keyboard.down('KeyC');
+  await b.evaluate(() => { window.lastReturnDebug.simulate(0.3); });
+  noisy2.isCrouched = await b.evaluate(() => window.lastReturnDebug.player.isCrouching);
+  await pause(700); // (and what was said standing is over)
+  await a.evaluate(() => { window.heardNoises.splice(0); });
+  for (let turn = 0; turn < 4; turn++) { await speak(b, 2, {}); await b.evaluate(() => { window.lastReturnDebug.updateVoice(0.26); }); await pause(120); }
+  await pause(400);
+  noisy2.whispering = await a.evaluate(() => window.heardNoises.splice(0));
+  await b.keyboard.up('KeyC');
+  await b.evaluate(() => { window.lastReturnDebug.simulate(0.3); });
+  await a.evaluate(() => { const d = window.lastReturnDebug; d.creatureKinds.splice(d.creatureKinds.findIndex((kind) => kind.key === 'testEars'), 1); window.heardNoises = null; });
+  check('talking is a noise where you stand for what listens in the host\'s game, about twice a second while you talk and not after: a little quieter than a walking step; a whisper a good deal quieter',
+    noisy2.talking.length >= 2 && noisy2.talking.length <= 4 && noisy2.talking.every((noise) => noise.radius === numbers.noise && Math.hypot(noise.x - noisy2.at.x, noise.z - noisy2.at.z) < 0.1) && numbers.noise < numbers.walkStep && numbers.noise > numbers.walkStep * 0.6 &&
+    noisy2.afterwards.length === 0 && noisy2.isCrouched && noisy2.whispering.length >= 1 && noisy2.whispering.every((noise) => noise.radius === numbers.noiseWhisper) && numbers.noiseWhisper < numbers.noise * 0.5, [noisy2, numbers]);
 
   // Your own body is in the way of the others' scanners, though you never see it. The host scans the other from
   // a metre and a half, with a narrow beam: on the other's screen none of that light gets past them, and none
@@ -717,6 +990,25 @@ const pause = function (milliseconds) { return new Promise(function (resolve) { 
   const fromTheDead = { host: (await linesIn(a)).filter((line) => line.text === 'carry me back' || /is down/.test(line.text)), own: (await linesIn(b)).filter((line) => line.text === 'carry me back') };
   check('the dead can talk: their line is marked as from somebody who is down, and the log said when they fell',
     fromTheDead.host.some((line) => line.who === 'Player 2 (down)' && line.kind === 'said') && fromTheDead.host.some((line) => line.kind === 'note' && /Player 2 is down/.test(line.text)) && fromTheDead.own.length === 1 && fromTheDead.own[0].who === 'Player 2 (down)', fromTheDead);
+  // The dead are not heard by the living; they hear the living from where the one they are watching stands; and the dead hear the dead.
+  const deadVoicesBefore = await heardCount(a);
+  await speak(b, 3, {});
+  await a.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 3, deadVoicesBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+  const fromTheDown = await heardBy(a, 2);
+  const livingBefore = await heardCount(b);
+  await speak(a, 3, {});
+  await b.waitForFunction((before) => window.lastReturnDebug.voice.statistics.heard >= before + 3, livingBefore, { polling: 100, timeout: 5000 }).catch(() => {});
+  const fromTheLiving = await heardBy(b, 1);
+  const amongTheDead = await b.evaluate(() => {
+    const d = window.lastReturnDebug, talker = d.getVoiceTalker(1), placeBefore = talker.place;
+    talker.place = 2; // (as if the host were down too)
+    const got = d.getVoiceHearing(talker, false), result = { placed: got.placed, plain: got.plain, ownPlace: d.getOwnVoicePlace() };
+    talker.place = placeBefore;
+    return result;
+  });
+  check('the dead are not heard by the living, and are not shown as talking; they hear the living from where the one they are watching stands; and the dead hear the dead plainly',
+    fromTheDown.place === 2 && fromTheDown.placed === 0 && fromTheDown.plain === 0 && !/Player 2/.test(fromTheDown.shown) &&
+    fromTheLiving.place === 1 && fromTheLiving.placed > 0.99 && fromTheLiving.plain === 0 && fromTheLiving.metres < 0.5 && amongTheDead.ownPlace === 2 && amongTheDead.plain === 1 && amongTheDead.placed === 0, [fromTheDown, fromTheLiving, amongTheDead]);
   const stillDown = await a.evaluate(() => { const d = window.lastReturnDebug, other = d.together.others[0]; return { isFallen: other.isFallen, players: d.players.length }; });
   check('watching changes nothing for the others: you are as down as you were, and nothing hunts you', stillDown.isFallen && stillDown.players === 1, stillDown);
 

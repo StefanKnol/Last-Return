@@ -38,7 +38,9 @@ const { chromium } = require('playwright');
 function launchBrowser() {
   return chromium.launch({
     channel: 'chromium',
-    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl']
+    // (The last two give a page that asks for the microphone a made-up one, without asking anybody: a tone that
+    // beeps. The two-player suite talks through it. No other suite asks for a microphone.)
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
   });
 }
 

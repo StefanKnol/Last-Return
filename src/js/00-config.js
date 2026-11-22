@@ -170,6 +170,17 @@ const TUNING = {
   noiseRadiusSweep: 22,
   noiseRadiusDoor: 6,           // a door you open (doors the Hollow opens do not count)
   noiseRadiusPickup: 4,
+  // ---- Voices, descending together (11-voice.js) ----
+  noiseRadiusVoice: 3.5,        // talking, heard by the Hollow this far, twice a second for as long as you talk: a little less than a walking step (4)
+  noiseRadiusVoiceWhisper: 1.2, // ... and whispering (crouched): about a crouched step (1.1)
+  voiceNoiseEverySeconds: 0.5,  // how often talking is a noise
+  voiceFullWithinMetres: 3,     // the others hear you at full within this ...
+  voiceCarriesMetres: 24,       // ... and not at all from this far (measured along the way your voice has to come). In between it falls off faster near the end
+  voiceWhisperFactor: 0.35,     // crouched you whisper: both of those distances times this
+  voiceMuffledFactor: 0.5,      // through a wall, with every door between you shut, a voice is this much as loud ...
+  voiceMuffledHertz: 900,       // ... and nothing of it above this pitch comes through
+  voiceOpenLevel: 0.02,         // "Open microphone": it sends when it hears something at least this loud (0 to 1). Higher = keys and breathing stay out, and so do quiet words
+  voiceOpenHoldSeconds: 0.4,    // ... and goes on for this long after, so that the end of a word is not cut off
   // ---- The looters (08-looter.js): small things that live in the vents and carry off what lies loose ----
   looterBodies: ['looter', 'looterF'], // the bodies there are for them: creatures made in the workshop (src/creatures/<name>.json), or kinds
                                     // written as code (FIGURE_KINDS, 04-figures.js). A station's looters take them in turn, so

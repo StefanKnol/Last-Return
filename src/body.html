@@ -181,6 +181,20 @@
               <input type="text" id="together-name" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Player">
             </label>
           </div>
+          <div class="station-options">
+            <label>Voice
+              <select id="together-voice">
+                <option value="off">Off: your microphone is not used</option>
+                <option value="push">Push to talk: hold B</option>
+                <option value="open">Open microphone</option>
+              </select>
+            </label>
+            <label>Voices
+              <input type="range" id="together-voice-volume" min="0" max="1.5" step="0.05" value="1" aria-label="How loud the others' voices are">
+            </label>
+          </div>
+          <div id="together-players" class="together-players" hidden></div>
+          <p id="together-voice-status" class="difficulty-description together-status" aria-live="polite"></p>
           <div id="together-lobby" class="station-options" hidden>
             <span class="together-code">Lobby <b id="together-lobby-code"></b></span>
             <button type="button" id="button-lock-lobby" class="button-quiet" hidden>Lock it</button>
@@ -204,7 +218,8 @@
           <div><dt>Map</dt><dd><kbd>Tab</kbd> or <kbd>M</kbd></dd></div>
           <div><dt>Colours</dt><dd><kbd>V</kbd></dd></div>
           <div><dt>Pause</dt><dd><kbd>Esc</kbd></dd></div>
-          <div><dt>Talk</dt><dd><kbd>Enter</kbd> or <kbd>T</kbd> (descending together)</dd></div>
+          <div><dt>Write</dt><dd><kbd>Enter</kbd> or <kbd>T</kbd> (descending together)</dd></div>
+          <div><dt>Talk</dt><dd>Hold <kbd>B</kbd> (descending together, with voice on)</dd></div>
         </dl>
         <p class="card-note">On a touch screen the controls appear on screen: left thumb moves, right thumb looks, hold SCAN to paint.</p>
         <div class="settings-grid">
@@ -303,6 +318,13 @@
           <option value="3">Height</option>
         </select>
       </div>
+      <div id="pause-voices" class="pause-voices" hidden>
+        <div class="settings-grid">
+          <label for="pause-voice-volume">Voices</label>
+          <input type="range" id="pause-voice-volume" min="0" max="1.5" step="0.05" value="1">
+        </div>
+        <div id="pause-players" class="together-players"></div>
+      </div>
       <div class="button-row">
         <button type="button" id="button-resume" class="button-primary">Resume</button>
         <button type="button" id="button-pause-restart" class="button-quiet">Abandon survey</button>
@@ -359,11 +381,13 @@
   </section>
 
   <div id="chat" hidden>
+    <div id="voice-talkers" class="voice-talkers" aria-label="Who is talking" hidden></div>
     <div id="chat-log" aria-live="polite" aria-label="What the others have said"></div>
     <form id="chat-form" hidden>
       <input type="text" id="chat-input" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="send" aria-label="Say to the others" placeholder="Say to the others: Enter sends, Esc shuts">
     </form>
-    <button type="button" id="chat-open" class="chat-open" hidden>Enter: talk</button>
+    <button type="button" id="chat-open" class="chat-open" hidden>Enter: write</button>
+    <button type="button" id="voice-talk" class="chat-open voice-talk" hidden>Hold to talk (B)</button>
   </div>
 
   <div id="fatal-error" class="screen screen-dark" hidden>

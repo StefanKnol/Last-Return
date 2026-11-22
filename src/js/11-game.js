@@ -1174,6 +1174,7 @@ function runFrame(timestamp) {
   else frameState.debug = game.mode === 'title' || !debugHooks.buildFrameData ? null : debugHooks.buildFrameData();
   updateTogether(realDt); // the others down here with you: where they are now, and what their scanners show
   updateWatching(realDt); // ... and, dead, watching one of them (11-watching.js)
+  updateVoice(realDt); // ... and their voices, from where they stand (11-voice.js)
   renderFrame(renderCamera, frameState);
   updateHud(realDt);
   updateChat(realDt); // what was said grows old (11-chat.js)
@@ -1212,6 +1213,7 @@ function startApplication() {
   initializeInterface();
   initializeChat();
   initializeWatching();
+  initializeVoice();
   initializeTogether();
   liftDoor.forcedState = true;
   liftDoor.openFraction = 1;
@@ -1413,6 +1415,11 @@ function startApplication() {
     setLootersWanted: function (isWanted) { areLootersWanted = isWanted !== false; }, createLooters: createLooters,
     hitPlayer: hitPlayer, healPlayer: healPlayer, catchPlayer: catchPlayer, getNearestEyeDistanceTo: getNearestEyeDistanceTo, describeIfOutOfReach: describeIfOutOfReach, getHitDamage: getHitDamage, saveCheckpoint: saveCheckpoint, updateHud: updateHud,
     hasClearWalkingLine: hasClearWalkingLine,
+    // Voices (11-voice.js).
+    voice: voice, packVoice: packVoice, unpackVoice: unpackVoice, voicePacking: voicePacking, handleCapturedVoice: handleCapturedVoice, hearVoicePiece: hearVoicePiece, updateVoice: updateVoice,
+    getVoiceHearing: getVoiceHearing, getVoiceTalker: getVoiceTalker, setVoiceMode: setVoiceMode, setVoiceVolume: setVoiceVolume, getOwnVoicePlace: getOwnVoicePlace, isTalkingNow: isTalkingNow, getVoiceLevel: getVoiceLevel, setVoiceLevel: setVoiceLevel,
+    voiceNumbers: { rate: VOICE_RATE, pieceSamples: VOICE_PIECE_SAMPLES, headBytes: VOICE_HEAD_BYTES, talkKey: VOICE_TALK_KEY }, voiceWorkletSource: VOICE_WORKLET_SOURCE, audio: audio,
+    refreshVoiceWays: refreshVoiceWays, getVoiceWayMetres: getVoiceWayMetres, voiceWays: voiceWays,
     // Talking to the others (11-chat.js) and watching them (11-watching.js).
     chat: chat, sendChat: sendChat, openChat: openChat, closeChat: closeChat, getPlayerName: getPlayerName, cleanChatText: cleanChatText, hearChat: hearChat,
     watching: watching, beginWatching: beginWatching, watchNext: watchNext, canWatchSomebody: canWatchSomebody, getViewer: getViewer, getWatchedPlayer: getWatchedPlayer,

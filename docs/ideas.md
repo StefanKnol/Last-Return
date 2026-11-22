@@ -112,7 +112,8 @@
   - joining by lobby code 
   - ~~on death, watch one of the others~~ (in: 11-watching.js. Through their scanner, with their ears; A and D go from one to the next)
   - ~~regular chat~~ (in: 11-chat.js, with names. Enter or T)
-  - voice chat: not built. What would make it worth having over a call the players set up themselves is that it is part of the station: quieter with distance, and heard by the Hollow
+  - ~~voice chat, by distance, through the server, heard by the Hollow, muffled through walls until a door is open~~ (in: 11-voice.js)
+    - still open: a radio to buy or find, that carries a voice across the station; the Hollow hearing how loud you really are (a shout, not only talk and whisper); looters startled by talking
   - dev backdoor to mess with people :P (play/direct the monsters, play sounds, control doors, disco mode with random lidar dots coming out of a disco ball and music)
     - only on same server host, not other hosted
     - statistics of players (anonymous, but survival time, playtime and count, etc.)
