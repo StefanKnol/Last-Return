@@ -1424,7 +1424,7 @@ function startApplication() {
     hasClearWalkingLine: hasClearWalkingLine,
     // The intercom (08-intercom.js).
     intercom: intercom, intercomObjectIds: INTERCOM_OBJECT_IDS, useIntercomConsole: useIntercomConsole, switchIntercomOff: switchIntercomOff, updateIntercom: updateIntercom, isIntercomYours: isIntercomYours,
-    isIntercomCarryingVoice: isIntercomCarryingVoice, makeIntercomNoise: makeIntercomNoise, getIntercomSpeakerLevel: getIntercomSpeakerLevel, findNearestIntercomSpeaker: findNearestIntercomSpeaker, placeIntercomSpeakers: placeIntercomSpeakers,
+    isIntercomCarryingVoice: isIntercomCarryingVoice, makeIntercomNoise: makeIntercomNoise, getIntercomSpeakerLevel: getIntercomSpeakerLevel, getIntercomSpeakerHearing: getIntercomSpeakerHearing, updateIntercomSound: updateIntercomSound, findNearestIntercomSpeaker: findNearestIntercomSpeaker, placeIntercomSpeakers: placeIntercomSpeakers,
     // Voices (11-voice.js).
     voice: voice, packVoice: packVoice, unpackVoice: unpackVoice, voicePacking: voicePacking, handleCapturedVoice: handleCapturedVoice, hearVoicePiece: hearVoicePiece, updateVoice: updateVoice,
     getVoiceHearing: getVoiceHearing, getVoiceTalker: getVoiceTalker, setVoiceMode: setVoiceMode, setVoiceVolume: setVoiceVolume, getOwnVoicePlace: getOwnVoicePlace, isTalkingNow: isTalkingNow, getVoiceLevel: getVoiceLevel, setVoiceLevel: setVoiceLevel,

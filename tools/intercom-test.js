@@ -3,7 +3,8 @@
 // that switching it on is a shriek from every loudspeaker which everything that listens hears, and which
 // brings what has still to arrive nearer once and not once for every loudspeaker; that it is switched off at
 // the console and goes off by itself when whoever switched it on leaves the desk or the mains go; that the
-// Hollow goes to the loudspeaker nearest to it; and how loud a loudspeaker is by how far off it is.
+// Hollow goes to the loudspeaker nearest to it; how loud a loudspeaker is by how far off it is; and that a
+// loudspeaker is heard the way a voice is: straight, round through what stands open, or through the wall, muffled.
 //
 // (A voice through it, and that it is one intercom for everybody down there: together-test.js.)
 const { openGame, startGame } = require('./browser-harness.js');
@@ -220,6 +221,107 @@ const labSource = String(function () {
   }
   check('a loudspeaker is at full close by, a quarter as loud half way out, and gone where the number says',
     heard.loudness.close === 1 && heard.loudness.atFull === 1 && Math.abs(heard.loudness.half - 0.25) < 0.01 && heard.loudness.nearlyGone > 0 && heard.loudness.nearlyGone < 0.02 && heard.loudness.gone === 0 && heard.loudness.beyond === 0, heard.loudness);
+
+  // --- through a wall ---
+  // Every tile you can stand on, with every door shut and then with every door open: how each loudspeaker comes
+  // to you from there. Wanted: a loudspeaker in plain sight; one behind a shut door that comes round through it
+  // once the door is open; and, standing there, the loudspeakers you hear chosen and muffled as that says.
+  const walls = await inGame(async () => {
+    const d = window.lastReturnDebug, lab = window.lab, result = {}, tuning = d.tuning;
+    d.loadStation('generated', 7, 'medium', 'mixed', 'two');
+    d.game.difficulty = d.difficultyPresets.standard;
+    d.startOver(); d.game.flags.hasLeftLift = true; d.grantPower();
+    d.setDebugOption('invulnerable', true);
+    result.numbers = { factor: tuning.intercomSpeakerMuffledFactor, hertz: tuning.intercomSpeakerMuffledHertz, carries: tuning.intercomSpeakerCarriesMetres };
+    const doors = d.doors.filter((door) => door !== d.getLiftDoor() && !door.isBroken);
+    const doorsWere = doors.map((door) => ({ openFraction: door.openFraction, isRemoved: door.slab.isRemoved }));
+    const setDoors = (isOpen) => { for (const door of doors) { door.openFraction = isOpen ? 1 : 0; door.slab.isRemoved = isOpen; } };
+    const hearAll = () => {
+      d.refreshVoiceWays(1);
+      const earY = d.getPlayerEyeY();
+      return d.level.intercomSpeakers.map((speaker) => {
+        const got = d.getIntercomSpeakerHearing(speaker, d.player, earY);
+        return { level: got.level, metres: got.metres, muffled: got.isMuffled, straight: Math.hypot(speaker.x - d.player.x, speaker.y - earY, speaker.z - d.player.z), plain: d.getIntercomSpeakerLevel(speaker, d.player, earY),
+          atItsMetres: Math.pow(Math.min(1, Math.max(0, 1 - (got.metres - tuning.intercomSpeakerFullWithinMetres) / (tuning.intercomSpeakerCarriesMetres - tuning.intercomSpeakerFullWithinMetres))), 2) };
+      });
+    };
+    const walkable = (x, z) => { const spot = d.findWalkableSpotNear(x + 0.5, z + 0.5); return spot && spot.x === x + 0.5 && spot.z === z + 0.5; };
+    result.doors = doors.length; result.tilesTried = 0; result.speakers = d.level.intercomSpeakers.length;
+    const level = d.level;
+    for (let tileZ = level.boundsMinimumZ; tileZ <= level.boundsMaximumZ && !(result.inSight && result.behindADoor && result.tooFar); tileZ++) {
+      for (let tileX = level.boundsMinimumX; tileX <= level.boundsMaximumX; tileX++) {
+        if (!walkable(tileX, tileZ)) continue;
+        result.tilesTried++;
+        d.teleport(tileX + 0.5, tileZ + 0.5, 0);
+        setDoors(false); const shut = hearAll();
+        setDoors(true); const open = hearAll();
+        for (let index = 0; index < shut.length; index++) {
+          const whenShut = shut[index], whenOpen = open[index];
+          if (!result.inSight && !whenShut.muffled && whenShut.straight > 4 && Math.abs(whenShut.metres - whenShut.straight) < 0.001 && whenShut.level > 0)
+            result.inSight = { tile: [tileX, tileZ], speaker: index, whenShut: whenShut };
+          // (One that opening the door makes louder: a long way round can leave less of it than half through the wall.
+          // And one among the few loudest from there, door shut and door open, so that it is one of those you hear.)
+          const louderThanIt = (heard, level) => heard.filter((other) => other.level > level).length;
+          if (!result.behindADoor && whenShut.muffled && !whenOpen.muffled && whenShut.level > 0.05 && whenOpen.level > whenShut.level &&
+            louderThanIt(shut, whenShut.level) < 3 && louderThanIt(open, whenOpen.level) < 3)
+            result.behindADoor = { tile: [tileX, tileZ], speaker: index, whenShut: whenShut, whenOpen: whenOpen };
+          if (!result.tooFar && whenShut.straight > tuning.intercomSpeakerCarriesMetres + 1) result.tooFar = { whenShut: whenShut, whenOpen: whenOpen };
+        }
+        if (result.tilesTried % 200 === 0) await window.letTheBrowserCatchUp();
+      }
+    }
+    // Standing behind that door, with the intercom on: which loudspeakers you hear, and how.
+    if (result.behindADoor) {
+      const at = result.behindADoor.tile, speaker = d.level.intercomSpeakers[result.behindADoor.speaker];
+      d.teleport(at[0] + 0.5, at[1] + 0.5, 0);
+      const wasOn = d.intercom.isOn;
+      d.intercom.isOn = true; // (only for the sound: nobody is at the desk, and nothing here asks)
+      const slotsNow = () => {
+        d.updateIntercomSound(0, true);
+        const sound = d.intercom.sound;
+        if (!sound) return null;
+        const heard = hearAll(), inSlots = sound.slots.filter((slot) => slot.speaker).map((slot) => d.level.intercomSpeakers.indexOf(slot.speaker));
+        const quietestInASlot = Math.min.apply(null, inSlots.map((index) => heard[index].level).concat([Infinity]));
+        const loudestLeftOut = Math.max.apply(null, heard.filter((one, index) => inSlots.indexOf(index) < 0).map((one) => one.level).concat([0]));
+        const slotOfIt = sound.slots.find((slot) => slot.speaker === speaker) || null;
+        return { inSlots: inSlots, quietestInASlot: quietestInASlot, loudestLeftOut: loudestLeftOut, loudestChosen: loudestLeftOut <= quietestInASlot + 1e-9,
+          itsSlot: slotOfIt ? sound.slots.indexOf(slotOfIt) : -1, itIsMuffled: slotOfIt ? slotOfIt.isMuffled : null, itsLevel: slotOfIt ? slotOfIt.level : null,
+          itsFilter: slotOfIt ? slotOfIt.muffle.type : null, slotsMatchHearing: sound.slots.every((slot) => !slot.speaker || (slot.isMuffled === heard[d.level.intercomSpeakers.indexOf(slot.speaker)].muffled && Math.abs(slot.level - heard[d.level.intercomSpeakers.indexOf(slot.speaker)].level) < 1e-9)) };
+      };
+      setDoors(false); const first = slotsNow(), again = slotsNow();
+      setDoors(true); const opened = slotsNow();
+      result.slots = first === null ? null : { shut: first, shutAgain: again, opened: opened, keptTheirSlots: JSON.stringify(first.inSlots) === JSON.stringify(again.inSlots) };
+      d.intercom.isOn = wasOn;
+      d.updateIntercomSound(0, false);
+    }
+    doors.forEach((door, index) => { door.openFraction = doorsWere[index].openFraction; door.slab.isRemoved = doorsWere[index].isRemoved; });
+    d.refreshVoiceWays(1);
+    d.setDebugOption('invulnerable', false);
+    return result;
+  });
+  check('the station has a loudspeaker in plain sight of somewhere, one behind a shut door, and one too far off to hear', Boolean(walls.inSight && walls.behindADoor && walls.tooFar), { tiles: walls.tilesTried, doors: walls.doors, speakers: walls.speakers });
+  if (walls.inSight) {
+    check('a loudspeaker in plain sight is clear: as loud as its distance makes it, from as far as it is',
+      !walls.inSight.whenShut.muffled && Math.abs(walls.inSight.whenShut.level - walls.inSight.whenShut.plain) < 1e-9, walls.inSight);
+  }
+  if (walls.behindADoor) {
+    const shut = walls.behindADoor.whenShut, open = walls.behindADoor.whenOpen;
+    check('behind a shut door it comes through the wall, muffled: quieter by the number, from as far as it is',
+      shut.muffled && Math.abs(shut.level - shut.plain * walls.numbers.factor) < 1e-9 && Math.abs(shut.metres - shut.straight) < 0.001 && walls.numbers.factor < 1, walls.behindADoor);
+    // (Louder here, because the search above asked for one like that. It is not always so: a long way round can leave
+    // less of it than half through the wall. Voices are the same.)
+    check('open the door and it is clear again: round through the doorway, as loud as that way is long, from at least as far as it is',
+      !open.muffled && open.metres >= open.straight - 0.001 && Math.abs(open.level - open.atItsMetres) < 1e-9 && open.level > shut.level, walls.behindADoor);
+  }
+  if (walls.tooFar) check('a loudspeaker further off than it carries is not heard at all, door or no door', walls.tooFar.whenShut.level === 0 && walls.tooFar.whenOpen.level === 0, walls.tooFar);
+  if (walls.behindADoor && walls.slots === null) console.log('note  the browser gave the page no sound, so which loudspeakers are heard through the slots was not looked at');
+  if (walls.slots) {
+    check('with it on, the loudspeakers you hear are the loudest ones, and each slot is muffled and as loud as its loudspeaker comes to you',
+      walls.slots.shut.loudestChosen && walls.slots.opened.loudestChosen && walls.slots.shut.slotsMatchHearing && walls.slots.opened.slotsMatchHearing, walls.slots);
+    check('the one behind the shut door plays through its slot muffled; door open, it plays clear',
+      walls.slots.shut.itsSlot >= 0 && walls.slots.shut.itIsMuffled === true && walls.slots.shut.itsFilter === 'lowpass' && walls.slots.opened.itsSlot >= 0 && walls.slots.opened.itIsMuffled === false, walls.slots);
+    check('looked at again from the same place, every loudspeaker keeps the slot it had', walls.slots.keptTheirSlots, walls.slots);
+  }
 
   check('no script errors were reported', problems.length === 0, problems);
   await browser.close();

@@ -189,6 +189,8 @@ const TUNING = {
   intercomSpeakerTilesEach: 110,    // ... and one more for every so many tiles of it, three at the most
   intercomSpeakerFullWithinMetres: 3, // you hear a loudspeaker at full within this ...
   intercomSpeakerCarriesMetres: 22,   // ... and not at all from this far
+  intercomSpeakerMuffledFactor: 0.5,  // through a wall, with every door between you and it shut, a loudspeaker is this much as loud ...
+  intercomSpeakerMuffledHertz: 900,   // ... and nothing of it above this pitch comes through. (The same as a voice: voiceMuffledFactor, voiceMuffledHertz.)
   voiceOpenHoldSeconds: 0.4,    // ... and goes on for this long after, so that the end of a word is not cut off
   // ---- The looters (08-looter.js): small things that live in the vents and carry off what lies loose ----
   looterBodies: ['looter', 'looterF'], // the bodies there are for them: creatures made in the workshop (src/creatures/<name>.json), or kinds
