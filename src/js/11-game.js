@@ -184,8 +184,10 @@ function resetWorldState() {
     door.slab.centerY = door.baseY + 1.15; door.slab.isRemoved = false;
     door.slab.minimumY = door.baseY; door.slab.maximumY = door.baseY + 2.3;
   }
-  liftDoor.forcedState = true;
-  liftDoor.openFraction = 1;
+  if (liftDoor) { // (a room built on its own, 03-single-room.js, has no lift)
+    liftDoor.forcedState = true;
+    liftDoor.openFraction = 1;
+  }
   shutHollowHatches(); // the ceiling hatches are shut again until it has been through them
   raycastableFigures.length = 0;
   resetIntercom(); // the intercom is off (08-intercom.js)
@@ -845,7 +847,8 @@ function noteLiftLeft() {
   if (game.flags.hasLeftLift) return;
   game.flags.hasLeftLift = true;
   // Alone, the door comes down behind you and the car goes up. Where the car stays, its door stays as it is.
-  if (!game.isCarStaying) { liftDoor.forcedState = false; game.isLiftDoorClosingBehindYou = true; }
+  // (A room built on its own, 03-single-room.js, has no car and no door.)
+  if (!game.isCarStaying && liftDoor) { liftDoor.forcedState = false; game.isLiftDoorClosingBehindYou = true; }
   saveCheckpoint();
   refreshObjective();
   fireGameEvent('leftLift'); // (the car is heard going up when its door is down: updateGameProgress)
@@ -1238,6 +1241,20 @@ function startApplication() {
     auditProgression: auditLevelProgression, auditVents: auditVents, measureVents: measureVents,
     level: level, interactables: interactables, zoneNames: ZONE_NAMES,
     loadStation: function (kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey) { const result = loadStation(kind, seed, sizeKey, layoutKey, levelsKey, questSeed, workOrders, locationKey); resetWorldState(); return result; },
+    // A room of a test's own instead of a station (03-single-room.js): `source` is a room as a room file has it,
+    // with what lies loose in it and where you start, or the key of a room file in src/rooms/. The run starts
+    // afresh in it: you where the room says, its loose things where it has them, at rest, nothing in your
+    // pockets, and you already out of the lift (it has none). Returns { problems, start, origin }: what in it
+    // could not be built (a kind of loose object that does not exist), where you stand, and where on the map
+    // its north-west corner is, so a test can turn the room's own numbers into the world's.
+    loadTestRoom: function (source, options) {
+      const built = buildSingleRoomForPlay(source, options);
+      if (!built) return null;
+      resetWorldState();
+      game.flags.hasLeftLift = true;
+      if (debugHooks.stationLoaded) debugHooks.stationLoaded();
+      return { problems: built.problems, start: { x: player.x, z: player.z, yaw: player.yaw }, origin: { x: SINGLE_ROOM_ORIGIN_X, z: SINGLE_ROOM_ORIGIN_Z } };
+    },
     workOrders: WORK_ORDERS, questComplications: QUEST_COMPLICATIONS, rankWorkOrders: rankWorkOrders, getWorkOrderProgressShare: getWorkOrderProgressShare, getDirectorPaceFactor: getDirectorPaceFactor, areSpoolsOnTheOrder: areSpoolsOnTheOrder, describeUploadManifest: describeUploadManifest, getIntroLines: getIntroLines, areStillsHunting: function () { return stillsAreHunting; }, getAllowedWorkOrders: getAllowedWorkOrders,
     auditMapApartFromQuests: auditMapApartFromQuests, computeMapFingerprint: computeMapFingerprint, planQuests: planQuests,
     getFloorHeightAt: getFloorHeightAt,
@@ -1269,6 +1286,7 @@ function startApplication() {
     ventHeight: VENT_HEIGHT,
     chooseSeedFromText: chooseSeedFromText,
     getLiftDoor: function () { return liftDoor; },
+    designedRooms: designedRooms, // the rooms from src/rooms/, cleaned up, by key (03-workshop-rooms.js)
     director: director, chooseHollowRoamTarget: chooseHollowRoamTarget,
     // Walking distance from the player to a point, in tiles (what the director calls steps).
     stepsFromPlayerTo: function (x, z) {

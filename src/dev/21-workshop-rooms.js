@@ -170,66 +170,11 @@ function createRoomWorkshopSignShape(room, item) {
 function rebuildRoomWorkshopWorld() {
   const state = roomWorkshop;
   state.needsRebuild = false;
-  const definition = state.room ? createDesignedRoomDefinition(state.room) : ROOM_CATALOGUE[state.key];
-  state.definition = definition;
-  const name = state.room ? state.room.name : definition.name;
-  const rect = definition.rect;
-  prepareWorkshopWorld('Workshop · ' + name);
-  ZONE_NAMES.push('UNSURVEYED', name, 'OUTSIDE', 'LIFT CAR');
-  // The place it is shown in: that says what it is made of where the room does not, and what is outside its doors.
-  const locationKey = getRoomWorkshopLocation();
-  level.locationKey = locationKey;
-  level.signTexts = getLocation(locationKey).signTexts;
-  const roomLook = state.room ? LOOK_KEYS[state.room.look || getLocation(locationKey).look] || LOOK_PANEL : getLocationRoomLook(locationKey, state.key);
-  const placeRoom = function () {
-    clearPlacement();
-    setPlacement(0, rect[0], rect[1], WORKSHOP_ORIGIN_X, WORKSHOP_ORIGIN_Z);
-    placement.zone = 1;
-    placement.look = roomLook;
-    placement.zoneMap = state.key === 'liftLobby' ? { [ZONE_LIFT_CAR]: 3 } : null;
-  };
-
-  placeRoom();
-  grownRoomPreviewSeed = state.seed; // (a cavern that is grown is grown from the number that shuffles everything else here)
-  definition.carve();
-  if (definition.isFlooded) setTileFlagInRectangle(rect[0], rect[1], rect[2], rect[3], TILE_FLAG_WATER);
-  if (liftDoor) liftDoor.forcedState = true;
-
-  // Every doorway gets a door and a few metres of corridor behind it, so it can be walked through.
-  definition.sockets.forEach(function (socket, socketIndex) {
-    placeRoom();
-    const tile = placeTile(socket[0], socket[1]);
-    const step = WALL_DIRECTIONS[placeWall(socket[2])];
-    clearPlacement();
-    placement.zone = 2;
-    placement.look = getLocationRoomLook(locationKey, 'corridor');
-    placement.offsetY = definition.socketDrops ? definition.socketDrops[socketIndex] : 0;
-    const nearX = tile[0] + step[0], nearZ = tile[1] + step[1], farX = tile[0] + step[0] * 3, farZ = tile[1] + step[1] * 3;
-    const sideX = step[0] === 0 ? 1 : 0, sideZ = step[1] === 0 ? 1 : 0;
-    carveRoom(Math.min(nearX, farX) - sideX, Math.min(nearZ, farZ) - sideZ, Math.max(nearX, farX) + sideX + 1, Math.max(nearZ, farZ) + sideZ + 1, 2.8, ZONE_GENERATED_ROOM);
-    addDoor(tile[0], tile[1], DOOR_KIND_AUTOMATIC);
-  });
-
-  placeRoom();
-  const random = createSeededRandomGenerator(state.seed);
-  state.itemRanges.length = 0;
-  if (state.room) {
-    furnishDesignedRoom(state.room, random, name, state.itemRanges, definition.shape, !state.showsAsAStationHasIt);
-    // Show what a spool looks like on the spot it may be left on.
-    if (definition.itemSpot) addSurveySpool(OBJECT_SPOOL_1, definition.itemSpot[0], definition.itemSpot[1], definition.itemSpot[2], 'SPOOL');
-  } else {
-    definition.furnish(random, name);
-    // What the place it is shown in has done to it since it was built, as a station there would have it (04-caverns.js).
-    const dressing = getLocation(locationKey).roomDressing;
-    if (dressing && !definition.isGrown) {
-      dressBuiltRoom({ key: state.key, zone: 1, startX: WORKSHOP_ORIGIN_X, startZ: WORKSHOP_ORIGIN_Z, endX: WORKSHOP_ORIGIN_X + rect[2] - rect[0], endZ: WORKSHOP_ORIGIN_Z + rect[3] - rect[1] }, random, dressing);
-    }
-  }
-  clearPlacement();
-  if (state.key !== 'liftLobby' && !definition.shape && !definition.isGrown) {
-    addBeamsToLargeRoom({ startX: WORKSHOP_ORIGIN_X, startZ: WORKSHOP_ORIGIN_Z, endX: WORKSHOP_ORIGIN_X + rect[2] - rect[0], endZ: WORKSHOP_ORIGIN_Z + rect[3] - rect[1], ceiling: definition.ceiling });
-  }
-  finishWorkshopWorld();
+  // Built the way a test room is built (03-single-room.js), so what is seen here is what a test gets.
+  state.definition = buildSingleRoom({ room: state.room, roomKey: state.key, locationKey: getRoomWorkshopLocation(), seed: state.seed,
+    keepsEverything: !state.showsAsAStationHasIt, itemRanges: state.itemRanges, showsItemSpot: true,
+    description: 'Workshop · ' + (state.room ? state.room.name : ROOM_CATALOGUE[state.key].name) });
+  workshop.needsScanBurst = true;
   createStills(); // the calibration store comes with its dummies
 
   // What can be clicked on: the props each thing became, or a stand-in box for lettering and floor areas.

@@ -6,7 +6,9 @@
 // where it faces and on nothing behind it or beside it, stops on what is in its way, counts as light on a
 // creature and is taken by that creature for where the light came from; and that its battery runs down only
 // while it is on, and then it is spent; that the light on it is lit while there is charge in it; and that a
-// fallen scanner is switched on and scans the same way, with no battery, and is lit as well.
+// fallen scanner is switched on and scans the same way, with no battery, and is lit as well. The scan grenades are
+// here too, the bouncing betty among them: its jumps are watched in a room built for the check (loadTestRoom),
+// empty, under a table, and boxed in by shelf racks.
 const { openGame, startGame } = require('./browser-harness.js');
 
 const failures = [];
@@ -69,24 +71,24 @@ const labSource = String(function () {
     return tripod;
   };
   lab.switch = function (tripod) { d.askToAct({ what: 'setOff', id: tripod.id }); };
-  // A point ahead of the place, along its clear view, with open floor all round it and nothing over it: nothing
-  // within `room` metres on any side from shin to head height, and nothing above any of that floor lower than
-  // the ceiling. (The nearest such; a metre and a half ahead if the view has none, as it used to be.)
-  lab.openPointAhead = function (room) {
-    const isHit = function (x, y, z, directionX, directionY, directionZ, metres) { return d.castScannerRay(x, y, z, directionX, directionY, directionZ, metres); };
-    for (let metres = 1.5; metres < lab.place.clear - room; metres += 0.5) {
-      const at = lab.pointAt(metres, 0);
-      let isOpen = true;
-      for (let turn = 0; turn < 12 && isOpen; turn++) {
-        const yaw = turn * Math.PI / 6, sideX = Math.sin(yaw), sideZ = -Math.cos(yaw);
-        for (const height of [0.3, 1.0, 1.6]) if (isHit(at[0], lab.place.floorY + height, at[1], sideX, 0, sideZ, room)) isOpen = false;
-        // Straight up from the floor, here and at a step and two steps out this way: no lamp, shelf or duct in the way of a jump.
-        for (const out of [0, 0.7, 1.4]) if (isHit(at[0] + sideX * out, lab.place.floorY + 0.3, at[1] + sideZ * out, 0, 1, 0, 2.0)) isOpen = false;
-      }
-      if (isOpen) { lab.openMetresAhead = metres; return at; }
-    }
-    lab.openMetresAhead = -1;
-    return lab.pointAt(1.5, 0);
+  // A room of this check's own instead of a station (loadTestRoom, src/js/03-single-room.js): `width` by `depth`
+  // metres under a ceiling of `ceiling`, with one door in the middle of its south wall and the things in `items`
+  // (as a room file lists them). You stand a metre and a half in from the door, facing north, and nothing else
+  // is in it: no creatures, nothing loose. `lab.place` is then the middle of the room, facing north, so that
+  // lab.pointAt works in it as it does in a station. Returns the middle as [x, z] on the map.
+  lab.room = function (width, depth, ceiling, items) {
+    d.game.difficulty = d.difficultyPresets.standard;
+    d.setDebugOption('holdArrivals', true); d.setDebugOption('invulnerable', true);
+    const loaded = d.loadTestRoom({ name: 'TRIPOD CHECK', width: width, depth: depth, ceiling: ceiling, doors: [{ wall: 'south', at: Math.floor(width / 2) }],
+      items: items || [], playerStart: { x: width / 2, z: depth - 1.5, angle: 0 } });
+    d.hollow.isActive = false;
+    d.clearLooseObjects();
+    d.settings.captions = 'all';
+    lab.loadedRoom = loaded;
+    const middle = [loaded.origin.x + width / 2, loaded.origin.z + depth / 2];
+    lab.place = { x: middle[0], z: middle[1], yaw: 0, clear: depth / 2, floorY: d.getFloorHeightAt(middle[0], middle[1]) };
+    lab.forward = [0, -1];
+    return middle;
   };
   // A point `metres` from the place, `turn` round from the way the tripod faces.
   lab.pointAt = function (metres, turn) {
@@ -473,13 +475,14 @@ const labSource = String(function () {
   const jumping = await inGame(() => {
     const d = window.lastReturnDebug, lab = window.lab, seen = { jumpers: [], plain: null };
     const watch = function (key, isCarried) {
-      lab.station();
-      d.clearLooseObjects();
-      // (Left to jump, it lies on open floor with nothing over it: what is asked is how it jumps and when its
-      // light is on, and a jump that clips a shelf on the way up is another matter. It used to lie a metre and
-      // a half into the room, beside the archive's shelving, and whether its second jump caught the edge of a
-      // shelf went by the moment in the game's clock at which this check happened to begin.)
-      const at = isCarried ? lab.pointAt(1.5, 0) : lab.openPointAhead(2.6), floorY = lab.place.floorY;
+      // (Left to jump, it lies in the middle of an empty room twelve metres square: what is asked is how it
+      // jumps and when its light is on, and a jump that clips a shelf on the way up is another matter, checked
+      // below. It used to lie in the classic station, wherever open floor could be found, and beside the
+      // archive's shelving when none could; whether its second jump caught the edge of a shelf then went by the
+      // moment in the game's clock at which this check happened to begin.)
+      const middle = lab.room(12, 12, 3.5, []);
+      // Carried, it is picked up from a metre and a half in front of you.
+      const at = isCarried ? [middle[0], middle[1] + 3] : middle, floorY = lab.place.floorY;
       const grenade = d.createLooseObject(key, at[0], floorY + 0.2, at[1], 0);
       d.simulate(1.5);
       const lyingAt = grenade.y - floorY, pointsBefore = d.pointCloud.totalReturns;
@@ -525,6 +528,72 @@ const labSource = String(function () {
     jumping.jumpers.every((jumper) => jumper.inTheBeam.isSpent && jumper.inTheBeam.stillInTheBeam && jumper.inTheBeam.scans.length === jumper.inTheBeam.wanted && jumper.inTheBeam.points > 8000), jumping.jumpers.map((jumper) => jumper.inTheBeam));
   check('the plain scan grenade does not jump: it scans from where it lies',
     jumping.plain.jump === 0 && jumping.plain.isSpent && jumping.plain.scans.length === 1 && jumping.plain.scans[0][1] < jumping.plain.lyingAt + 0.1 && jumping.plain.metresFromWhereItLay < 0.5, jumping.plain);
+
+  // --- the bouncing betty and the furniture around it. That a jump can catch the edge of a shelf is not a fault
+  //     (it may well be fun): these checks only pin down what it does then, in a room built for them, so that
+  //     a change to it is noticed. Under a table it jumps only as high as there is room for; boxed in by shelf
+  //     racks it bounces off them, stays in, and still makes every one of its scans ---
+  const furniture = await inGame(() => {
+    const d = window.lastReturnDebug, lab = window.lab, seen = {};
+    // True when the point is inside one of the boxes the room is built of (a shelf board, a box on a shelf, an upright).
+    const isInsideABox = function (x, y, z) {
+      return d.worldProps.some((prop) => {
+        if (prop.isRemoved || prop.halfX === undefined || prop.cosineYaw === undefined || y < prop.minimumY || y > prop.maximumY) return false;
+        const awayX = x - prop.centerX, awayZ = z - prop.centerZ;
+        const alongX = awayX * prop.cosineYaw + awayZ * prop.sineYaw, alongZ = -awayX * prop.sineYaw + awayZ * prop.cosineYaw;
+        return Math.abs(alongX) < prop.halfX && Math.abs(alongZ) < prop.halfZ;
+      });
+    };
+    // Arms the betty lying at `at` and watches it until it is spent: the highest it was at each scan, where
+    // it went, and how far from where it lay it got along x and along z.
+    const watchBetty = function (at) {
+      const floorY = lab.place.floorY;
+      const grenade = d.createLooseObject('bouncingBetty', at[0], floorY + 0.2, at[1], 0);
+      d.simulate(1.5);
+      const lyingAt = grenade.y - floorY;
+      d.askToAct({ what: 'setOff', id: grenade.id });
+      const highestPerScan = [];
+      let highest = -Infinity, done = 0, furthestX = 0, furthestZ = 0, isAlwaysInOpenSpace = true;
+      for (let step = 0; step < 2400 && !grenade.isSpent; step++) {
+        d.simulate(1 / 60);
+        const height = grenade.y - floorY;
+        if (grenade.burstSeconds > 0 && grenade.burstsDone === done) highest = Math.max(highest, height);
+        if (grenade.burstsDone > done) { highestPerScan.push(lab.round(highest)); highest = -Infinity; done = grenade.burstsDone; }
+        furthestX = Math.max(furthestX, Math.abs(grenade.x - at[0])); furthestZ = Math.max(furthestZ, Math.abs(grenade.z - at[1]));
+        if (!d.isSpaceOpenAt(grenade.x, grenade.y, grenade.z) || isInsideABox(grenade.x, grenade.y, grenade.z)) isAlwaysInOpenSpace = false;
+      }
+      // (Its last scan may end in the air: it is given time to come down and lie still, wherever that is.)
+      for (let step = 0; step < 240 && !grenade.isAsleep; step++) {
+        d.simulate(1 / 60);
+        if (!d.isSpaceOpenAt(grenade.x, grenade.y, grenade.z) || isInsideABox(grenade.x, grenade.y, grenade.z)) isAlwaysInOpenSpace = false;
+      }
+      return { lyingAt: lab.round(lyingAt), jump: d.getLooseNumber(grenade, 'scanGrenadeHopMetres'), wanted: d.getLooseNumber(grenade, 'scanGrenadeBursts'), highestPerScan: highestPerScan,
+        isSpent: grenade.isSpent, comesToRest: grenade.isAsleep, endsAt: [lab.round(grenade.x - at[0]), lab.round(grenade.y - floorY), lab.round(grenade.z - at[1])],
+        furthestX: lab.round(furthestX), furthestZ: lab.round(furthestZ), isAlwaysInOpenSpace: isAlwaysInOpenSpace };
+    };
+    // Under a table three metres square, 0.76 high: too wide to hop out from under in a few jumps.
+    const tableHeight = 0.76;
+    let middle = lab.room(8, 8, 3, [{ type: 'table', x: 4, z: 4, angle: 0, lengthX: 3, lengthZ: 3, height: tableHeight }]);
+    seen.underTheTable = watchBetty(middle);
+    seen.underTheTable.tableHeight = tableHeight;
+    seen.underTheTable.problems = lab.loadedRoom.problems;
+    // In a pen of four shelf racks, 2.6 metres long and 2.3 high, with 1.6 metres of floor between their faces.
+    middle = lab.room(8, 8, 3, [
+      { type: 'shelfRack', x: 2.95, z: 4, angle: 0, length: 2.6, height: 2.3, fillAmount: 0.6 },
+      { type: 'shelfRack', x: 5.05, z: 4, angle: 0, length: 2.6, height: 2.3, fillAmount: 0.6 },
+      { type: 'shelfRack', x: 4, z: 2.95, angle: 90, length: 2.6, height: 2.3, fillAmount: 0.6 },
+      { type: 'shelfRack', x: 4, z: 5.05, angle: 90, length: 2.6, height: 2.3, fillAmount: 0.6 }]);
+    seen.amongShelves = watchBetty(middle);
+    seen.amongShelves.penHalf = 0.8;
+    return seen;
+  });
+  const underTheTable = furniture.underTheTable, amongShelves = furniture.amongShelves;
+  check('under a table the bouncing betty still jumps before every scan, but only as high as there is room for: every scan from under the table top, none from on or over it',
+    underTheTable.problems.length === 0 && underTheTable.isSpent && underTheTable.highestPerScan.length === underTheTable.wanted &&
+      underTheTable.highestPerScan.every((height) => height > underTheTable.lyingAt + 0.1 && height < underTheTable.tableHeight - 0.05) && underTheTable.comesToRest && underTheTable.endsAt[1] < underTheTable.tableHeight, underTheTable);
+  check('boxed in by shelf racks it bounces off them: it makes every one of its scans, is spent at the end, comes to rest, never ends up inside a shelf, and never gets out past their faces (it may come to rest on a shelf: that is allowed)',
+    amongShelves.isSpent && amongShelves.comesToRest && amongShelves.highestPerScan.length === amongShelves.wanted && amongShelves.isAlwaysInOpenSpace &&
+      Math.abs(amongShelves.endsAt[0]) < amongShelves.penHalf && Math.abs(amongShelves.endsAt[2]) < amongShelves.penHalf, amongShelves);
 
   // --- a tripod of a better mark: it is a tripod (it stands, it is switched on, it scans), with the numbers its
   //     file says, and it scans out of its own shape: its lens is on it, not where the plain one's is ---

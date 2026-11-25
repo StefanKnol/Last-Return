@@ -352,7 +352,39 @@ function normalizeDesignedRoom(source, key) {
     const item = normalizeDesignedItem(sourceItem, room);
     if (item) room.items.push(item);
   }
+  // What a room built on its own for play has besides (03-single-room.js): things lying loose in it, and where
+  // you start. Only there when the file has them, so that saving a room without them leaves its file as it was.
+  if (Array.isArray(source.looseObjects) && source.looseObjects.length > 0) {
+    room.looseObjects = [];
+    for (const sourceEntry of source.looseObjects) {
+      const entry = normalizeDesignedLooseObject(sourceEntry, room);
+      if (entry) room.looseObjects.push(entry);
+    }
+  }
+  if (source.playerStart && typeof source.playerStart === 'object') {
+    room.playerStart = {
+      x: normalizeDesignedNumber(source.playerStart.x, room.width / 2, 0.3, room.width - 0.3),
+      z: normalizeDesignedNumber(source.playerStart.z, room.depth / 2, 0.3, room.depth - 0.3),
+      angle: normalizeDesignedNumber(source.playerStart.angle, 0, -360, 360)
+    };
+  }
   return room;
+}
+
+// A clean copy of one loose thing in a room (03-single-room.js says what it holds), or null if it names no kind.
+// Whether the kind exists is not known yet when the room files are read (the kinds are made later, in
+// 08-loose-objects.js): planSingleRoomLooseObjects leaves out one that does not.
+function normalizeDesignedLooseObject(source, room) {
+  if (!source || typeof source !== 'object' || typeof source.kind !== 'string' || source.kind === '') return null;
+  const entry = {
+    kind: source.kind,
+    x: normalizeDesignedNumber(source.x, room.width / 2, 0, room.width),
+    z: normalizeDesignedNumber(source.z, room.depth / 2, 0, room.depth),
+    angle: normalizeDesignedNumber(source.angle, 0, -360, 360),
+    height: normalizeDesignedNumber(source.height, 0, 0, DESIGNED_ROOM_LIMITS.maximumCeiling),
+    onItsSide: source.onItsSide === true
+  };
+  return entry;
 }
 
 // ---------------------------------------------------------------------------

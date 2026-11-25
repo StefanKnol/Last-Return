@@ -86,6 +86,14 @@
   - other types of blind monsters with different systems for it
   - kidnapping monster that moves a player somewhere else
 
+- a workshop room to play in: walk about in a room and try things (items, visuals) without going down into a station, and place things as you go; a first step from props that stand where they were put towards room layouts that are made fresh
+  - ~~a room built on its own, from data, for the tests~~ (in: `src/js/03-single-room.js`, `lastReturnDebug.loadTestRoom`. A room file may now list things lying loose in it and where you start. The bouncing betty's checks use such rooms)
+  - still open: **Play this room** in the workshop's room tool (the real game in the room: pockets, grenades, damage; debug mode beside it; back to the editor with Escape)
+  - still open: placing things while you play (every prop, loose thing and creature, a see-through outline where you look, saved as a room file). Placing a prop rebuilds the room, which clears what lies loose and what walks, so those have to be kept aside and put back
+  - still open: the room tool showing and changing a room's loose things and start; stations putting a room's loose things out
+  - still open: moving other checks that search a station for a spot onto rooms of their own, where the check is about a thing and not about the station (tripod, looter, surveyor, parts of together)
+  - still open: room layouts made fresh from rules (two to four shelf racks along the walls, a clear way between the doors) instead of things at fixed places
+
 - more cave like rooms for deeper levels (or different locations)
   - ~~rooms that are not a box~~ (in: "Paint tiles" in the workshop's room tool. Rock, and a floor and a ceiling for every tile; `src/js/03-workshop-rooms.js`)
     - still open: floor you can see and not walk to (a ledge, a hollow), which a station would have to know to leave nothing on; real pits in a room; a crawl that is not a vent; slanted and round walls

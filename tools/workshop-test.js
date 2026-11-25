@@ -232,8 +232,9 @@ function checkSourcePatching() {
     await page.keyboard.press('Escape');
 
     // --- the shape of the room: the mouse as a brush ---
-    // Where the workshop puts the room it shows (its north-west corner), read from where that is written.
-    const workshopOrigin = /WORKSHOP_ORIGIN_X = (\d+), WORKSHOP_ORIGIN_Z = (\d+)/.exec(fs.readFileSync(path.join(root, 'src', 'dev', '20-workshop.js'), 'utf8')).slice(1).map(Number);
+    // Where the workshop puts the room it shows (its north-west corner), read from where that is written: the
+    // workshop builds its room the way a test room is built (src/js/03-single-room.js).
+    const workshopOrigin = /SINGLE_ROOM_ORIGIN_X = (\d+), SINGLE_ROOM_ORIGIN_Z = (\d+)/.exec(fs.readFileSync(path.join(root, 'src', 'js', '03-single-room.js'), 'utf8')).slice(1).map(Number);
     // What the tool knows of the tile under the mouse, and what the world has there: 99 m of headroom is rock.
     const underTheBrush = () => inPage((origin) => {
       const debug = window.lastReturnDebug, state = debug.roomWorkshop, tile = state.hoverTile;
