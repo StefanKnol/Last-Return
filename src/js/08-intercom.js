@@ -11,6 +11,9 @@
 //   - Descending together, with voice on (11-voice.js): what the one at the desk says comes out of every
 //     loudspeaker, for everybody, thin and overdriven, a little late from the ones further off. Not for
 //     themselves: your own voice back from a loudspeaker, into your own microphone, would be the real thing.
+//   - A loudspeaker is heard the way a voice is (11-voice.js): straight if nothing is in between, round through
+//     what stands open if there is a way round, and otherwise through the wall, muffled: duller and quieter.
+//     So a shut door muffles the loudspeaker behind it, and opening it lets it through.
 //   - Everything that listens hears the loudspeakers. The shriek is a noise at every one of them, and so is a
 //     voice for as long as it talks. So alone, with no voice at all, it is still worth pressing: the Hollow
 //     goes to the loudspeaker nearest to it. And together it is a way to talk to everybody at once that
@@ -25,8 +28,11 @@ const OBJECT_INTERCOM_DESK = 17;     // the console in the security office
 const OBJECT_INTERCOM_CONTROL = 18;  // ... and the one in the control room
 const INTERCOM_OBJECT_IDS = [OBJECT_INTERCOM_DESK, OBJECT_INTERCOM_CONTROL];
 const INTERCOM_PROMPT_OFF = 'Intercom: switch on', INTERCOM_PROMPT_ON = 'Intercom: switch off';
-const INTERCOM_SLOTS = 3;            // how many loudspeakers you hear at once: the nearest ones
+const INTERCOM_SLOTS = 3;            // how many loudspeakers you hear at once: the loudest ones, as they come to you (through a wall, or round)
 const INTERCOM_SOUND_METRES_A_SECOND = 230; // how fast its sound seems to travel: slower than sound does, so that the echo between two loudspeakers is heard
+const INTERCOM_SLOT_SECONDS = 0.2;   // how often which loudspeakers you hear, and how, is looked at again
+const INTERCOM_CLEAR_HERTZ = 8000;   // a loudspeaker that is not muffled: everything it says comes through (it says nothing above 2600 anyway)
+const INTERCOM_IN_THE_WAY_MARGIN = 0.5; // something nearer to a loudspeaker than this along the line to it is its own box and rim, or the wall it hangs on: not in between
 
 const intercom = {
   isOn: false,
@@ -248,11 +254,11 @@ function updateIntercom(dt) {
 
 // ---- Its sound ----
 //
-// Everything it says goes into one place (`bus`) and from there to the few loudspeakers nearest to you, each as
-// loud as it is near, and each a little late by how far off it is: that lateness is the echo of a hall with
-// loudspeakers in it. Into the bus go the hiss and hum of it being on, the shriek of it coming on, and the
-// voice of whoever is at the microphone (`voiceIn`: 11-voice.js joins a voice to it), squeezed thin and
-// overdriven first.
+// Everything it says goes into one place (`bus`) and from there to the few loudspeakers you hear best, each as
+// loud as it is near, each a little late by how far off it is (that lateness is the echo of a hall with
+// loudspeakers in it), and each muffled if it comes through a wall ("Through a wall", below). Into the bus go
+// the hiss and hum of it being on, the shriek of it coming on, and the voice of whoever is at the microphone
+// (`voiceIn`: 11-voice.js joins a voice to it), squeezed thin and overdriven first.
 
 function buildIntercomSound() {
   if (intercom.sound || !isAudioReady()) return intercom.sound;
@@ -278,9 +284,12 @@ function buildIntercomSound() {
   sound.bedGain.connect(sound.bus);
   hiss.start(); hum.start();
   for (let index = 0; index < INTERCOM_SLOTS; index++) {
-    const slot = { delay: context.createDelay(0.5), gain: context.createGain(), panner: createPannerNode(0, 2.3, 0, 3, 0), speaker: null };
+    // bus -> a little late by how far -> duller when through a wall -> as loud as it comes to you -> from where it hangs
+    const slot = { delay: context.createDelay(0.5), muffle: context.createBiquadFilter(), gain: context.createGain(), panner: createPannerNode(0, 2.3, 0, 3, 0),
+      speaker: null, level: 0, metres: 0, isMuffled: false };
+    slot.muffle.type = 'lowpass'; slot.muffle.frequency.value = INTERCOM_CLEAR_HERTZ; slot.muffle.Q.value = 0.5;
     slot.gain.gain.value = 0;
-    sound.bus.connect(slot.delay); slot.delay.connect(slot.gain); slot.gain.connect(slot.panner);
+    sound.bus.connect(slot.delay); slot.delay.connect(slot.muffle); slot.muffle.connect(slot.gain); slot.gain.connect(slot.panner);
     sound.slots.push(slot);
   }
   intercom.sound = sound;
@@ -295,35 +304,100 @@ function quietIntercomSound() {
   cutIntercomShriek();
 }
 
-// How loud a loudspeaker is from where you hear the station, 0 to 1.
-function getIntercomSpeakerLevel(speaker, listener, earY) {
-  const metres = Math.hypot(speaker.x - listener.x, speaker.y - earY, speaker.z - listener.z);
+// How loud a loudspeaker is from this far away, 0 to 1, with nothing in between.
+function getIntercomSpeakerLevelAtMetres(metres) {
   const nearness = clampNumber(1 - (metres - TUNING.intercomSpeakerFullWithinMetres) / (TUNING.intercomSpeakerCarriesMetres - TUNING.intercomSpeakerFullWithinMetres), 0, 1);
   return nearness * nearness;
 }
 
-// The loudspeakers you hear: the nearest few, each from where it hangs.
-function updateIntercomSound(dt) {
+// How loud a loudspeaker is from where you hear the station, 0 to 1, as the crow flies (walls left out).
+function getIntercomSpeakerLevel(speaker, listener, earY) {
+  return getIntercomSpeakerLevelAtMetres(Math.hypot(speaker.x - listener.x, speaker.y - earY, speaker.z - listener.z));
+}
+
+// ---- Through a wall ----
+//
+// A loudspeaker comes to you the way a voice does (11-voice.js, "Which way a voice comes to you"):
+//   - with nothing in a straight line between you and it, it comes straight: as far as it is;
+//   - otherwise, if there is a way round through what stands open (a doorway, an open door, a vent), it comes
+//     that way, clear, and from as far as that way is long: quieter, and a little later;
+//   - with no way round near enough (every door between you is shut), it comes through the wall: muffled.
+//     TUNING.intercomSpeakerMuffledFactor as loud, and nothing of it above TUNING.intercomSpeakerMuffledHertz.
+// What counts as in between is the station itself: walls, floors, ceilings, doors and what stands about.
+// Bodies do not: yours, the others' and the creatures' are not a wall.
+// The way round is the voices' own (refreshVoiceWays, 11-voice.js), worked out from where you hear the station.
+//
+// How you hear one loudspeaker just now: { level, metres, isMuffled }. `level` is 0 to 1, `metres` is how far
+// its sound has to come (straight, or the way round), `isMuffled` is whether it comes through the wall.
+const intercomSpeakerHearing = { level: 0, metres: 0, isMuffled: false };
+function getIntercomSpeakerHearing(speaker, listener, earY) {
+  const hearing = intercomSpeakerHearing;
+  const offsetX = speaker.x - listener.x, offsetY = speaker.y - earY, offsetZ = speaker.z - listener.z;
+  const straight = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
+  hearing.level = 0; hearing.metres = straight; hearing.isMuffled = false;
+  if (straight >= TUNING.intercomSpeakerCarriesMetres) return hearing; // (too far to hear even straight: no need to look)
+  if (straight > INTERCOM_IN_THE_WAY_MARGIN) {
+    const isSomethingBetween = castRayAgainstWorld(listener.x, earY, listener.z, offsetX / straight, offsetY / straight, offsetZ / straight, straight) &&
+      rayHit.distance < straight - INTERCOM_IN_THE_WAY_MARGIN;
+    if (isSomethingBetween) {
+      const round = getVoiceWayMetres(speaker.x, speaker.z);
+      if (round < 0) hearing.isMuffled = true;                // no way round: through the wall
+      else hearing.metres = Math.max(straight, round);        // round through what stands open
+    }
+  }
+  hearing.level = getIntercomSpeakerLevelAtMetres(hearing.metres) * (hearing.isMuffled ? TUNING.intercomSpeakerMuffledFactor : 1);
+  return hearing;
+}
+
+// The loudspeakers you hear: the loudest few, each from where it hangs, as loud, as late and as dull as the way
+// its sound comes to you makes it. Looked at every INTERCOM_SLOT_SECONDS while it is on (and at once when
+// `shouldChooseNow` says so: it has just come on, or the workshop's sound board plays it).
+function updateIntercomSound(dt, shouldChooseNow) {
   const isHeard = intercom.isOn && game.mode !== 'title' && level.intercomSpeakers.length > 0;
-  const sound = isHeard ? buildIntercomSound() : intercom.sound;
+  const sound = isHeard || shouldChooseNow ? buildIntercomSound() : intercom.sound;
   if (!sound || !isAudioReady()) return;
   const now = audio.context.currentTime;
   sound.bedGain.gain.setTargetAtTime(isHeard ? SOUND_LEVELS.intercomBed : 0, now, 0.08);
+  if (!isHeard && !shouldChooseNow) return; // (off: the slots stay where they were, for the click of it going off)
   intercom.slotTimer -= dt;
-  if (intercom.slotTimer > 0) return;
-  intercom.slotTimer = 0.2;
+  if (intercom.slotTimer > 0 && !shouldChooseNow) return;
+  intercom.slotTimer = INTERCOM_SLOT_SECONDS;
+  chooseHeardIntercomSpeakers(sound, now);
+}
+
+function chooseHeardIntercomSpeakers(sound, now) {
   const listener = getViewer(), earY = listener === player ? getPlayerEyeY() : listener.eyeY;
-  const nearest = level.intercomSpeakers.slice().sort(function (first, second) {
-    return distanceBetweenPoints(first.x, first.z, listener.x, listener.z) - distanceBetweenPoints(second.x, second.z, listener.x, listener.z);
-  });
-  for (let index = 0; index < sound.slots.length; index++) {
-    const slot = sound.slots[index], speaker = nearest[index] || null;
-    slot.speaker = speaker;
-    if (!speaker) { slot.gain.gain.setTargetAtTime(0, now, 0.05); continue; }
+  refreshVoiceWays(1); // which way a sound can come round to you, through what stands open, as it is now
+  // How each loudspeaker within hearing comes to you, loudest first.
+  const heard = [];
+  for (const speaker of level.intercomSpeakers) {
+    const hearing = getIntercomSpeakerHearing(speaker, listener, earY);
+    if (hearing.level > 0) heard.push({ speaker: speaker, level: hearing.level, metres: hearing.metres, isMuffled: hearing.isMuffled });
+  }
+  heard.sort(function (first, second) { return second.level - first.level; });
+  const chosen = heard.slice(0, sound.slots.length);
+  // Each loudspeaker that is still heard keeps the slot it had, so that a slot is not swung across the station
+  // from one loudspeaker to another while it is loud; the others take what slots are left.
+  const slotFor = new Map();
+  for (const slot of sound.slots) for (const one of chosen) if (one.speaker === slot.speaker && !slotFor.has(one)) slotFor.set(one, slot);
+  const takenSlots = new Set(slotFor.values());
+  for (const one of chosen) {
+    if (slotFor.has(one)) continue;
+    const freeSlot = sound.slots.find(function (slot) { return !takenSlots.has(slot); });
+    slotFor.set(one, freeSlot); takenSlots.add(freeSlot);
+  }
+  for (const slot of sound.slots) {
+    if (takenSlots.has(slot)) continue;
+    slot.speaker = null; slot.level = 0; slot.isMuffled = false;
+    slot.gain.gain.setTargetAtTime(0, now, 0.05);
+  }
+  for (const one of chosen) {
+    const slot = slotFor.get(one), speaker = one.speaker;
+    slot.speaker = speaker; slot.level = one.level; slot.isMuffled = one.isMuffled; slot.metres = one.metres;
     setPannerPosition(slot.panner, speaker.x, speaker.y, speaker.z);
-    const metres = Math.hypot(speaker.x - listener.x, speaker.y - earY, speaker.z - listener.z);
-    slot.delay.delayTime.setTargetAtTime(Math.min(0.45, metres / INTERCOM_SOUND_METRES_A_SECOND), now, 0.05);
-    slot.gain.gain.setTargetAtTime(getIntercomSpeakerLevel(speaker, listener, earY), now, 0.08);
+    slot.delay.delayTime.setTargetAtTime(Math.min(0.45, one.metres / INTERCOM_SOUND_METRES_A_SECOND), now, 0.05);
+    slot.muffle.frequency.setTargetAtTime(one.isMuffled ? TUNING.intercomSpeakerMuffledHertz : INTERCOM_CLEAR_HERTZ, now, 0.08);
+    slot.gain.gain.setTargetAtTime(one.level, now, 0.08);
   }
 }
 
@@ -341,7 +415,7 @@ function updateIntercomSound(dt) {
 function playIntercomShriek() {
   const sound = buildIntercomSound();
   if (!sound) return;
-  updateIntercomSound(1); // (so that it comes from the loudspeakers near you at once)
+  updateIntercomSound(0, true); // (so that it comes from the loudspeakers you hear at once)
   cutIntercomShriek();
   const pitch = 2400;        // TWEAK: Hz. 2000 to 3500 is the squeal of a PA; under 1000 it is a howl
   const pitchCreep = 1.04;   // TWEAK: how far it has crept up by the time it is caught. 1 is dead steady

@@ -403,7 +403,8 @@ function forgetAllVoices() {
 // The way round is worked out as the Hollow's walking distance is, tile by tile, from where you hear the
 // station (voiceWays.steps: 0 for a tile it does not reach, otherwise steps and one). It goes through any tile
 // that can be stood in whatever its height, and not through the tile of a door that is not open. It is only
-// taken as far as a voice carries at all.
+// taken as far as a voice carries at all, or a loudspeaker of the intercom, whichever is further: the intercom
+// asks it the same question of each loudspeaker (08-intercom.js, "Through a wall").
 const VOICE_METRES_A_STEP = 0.85; // a way round is counted in steps along the grid, which overstate a slanting one
 const voiceWays = { steps: new Uint16Array(TILE_COUNT), reached: new Int32Array(8192), reachedCount: 0, fromIndex: -1, timer: 0, doorTiles: [] };
 
@@ -420,7 +421,7 @@ function refreshVoiceWays(dt) {
   ways.doorTiles.length = 0;
   for (const door of doors) if (door.openFraction < 0.5) ways.doorTiles.push(tileIndexAt(door.tileX, door.tileZ));
   for (const index of ways.doorTiles) if (index !== fromIndex) ways.steps[index] = 65535;
-  const mostSteps = Math.ceil(TUNING.voiceCarriesMetres / VOICE_METRES_A_STEP) + 1;
+  const mostSteps = Math.ceil(Math.max(TUNING.voiceCarriesMetres, TUNING.intercomSpeakerCarriesMetres) / VOICE_METRES_A_STEP) + 1;
   let head = 0;
   ways.steps[fromIndex] = 1; ways.reached[ways.reachedCount++] = fromIndex;
   while (head < ways.reachedCount) {
