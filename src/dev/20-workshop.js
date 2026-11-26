@@ -19,7 +19,7 @@
 
 const WORKSHOP_STORAGE_KEY = 'last-return-workshop';
 // Where on the (otherwise empty) map the room being worked on is put: its north-west corner.
-const WORKSHOP_ORIGIN_X = 40, WORKSHOP_ORIGIN_Z = 40;
+const WORKSHOP_ORIGIN_X = SINGLE_ROOM_ORIGIN_X, WORKSHOP_ORIGIN_Z = SINGLE_ROOM_ORIGIN_Z; // (03-single-room.js)
 const WORKSHOP_FLY_SPEED = 3.5;        // metres per second
 const WORKSHOP_FLY_SPEED_FAST = 11;    // with Shift held
 const WORKSHOP_SCAN_RAYS_PER_FRAME = 3500;  // "lights off": pulses fired across the whole view every frame
@@ -292,36 +292,11 @@ function addWorkshopText(container, label, value, onInput, maximumLength) {
 // Empties the map and everything that lives on it, ready for a tool to build its own small world.
 // The tool then carves and furnishes, and calls finishWorkshopWorld.
 function prepareWorkshopWorld(description) {
-  resetWorldForNewLevel();
-  stillSpawnPoints.length = 0; lateStillSpawnPoints.length = 0; phantomDefinitions.length = 0;
-  stills.length = 0; phantoms.length = 0;
-  stillsAreHunting = false;
-  raycastableFigures.length = 0;
-  hollow.isActive = false;
-  liftDoor = null;
-  level.kind = 'generated';
-  level.seed = 0;
-  level.locationKey = DEFAULT_LOCATION_KEY; // (the room tool shows a room as it is in a place of its choosing)
-  level.signTexts = null;
-  level.description = description;
-  level.storeZone = 0;
-  level.stillZones.length = 0;
-  level.unlabelledZones.length = 0;
-  level.roomCount = 1; level.loopCount = 0; level.stairCount = 0;
-  relocatedObjectives.spool1 = false; relocatedObjectives.keycard = false;
-  game.scheduledEvents.length = 0;
-  ZONE_NAMES.length = 0;
-  placement.isGenerating = true; // rooms are placed the way a generated station places them
+  prepareWorldForSingleRoom(description); // (03-single-room.js: the same as a test room gets)
 }
 
 function finishWorkshopWorld() {
-  placement.isGenerating = false;
-  clearPlacement();
-  computeNavigationGrid();
-  computeLevelBounds();
-  uploadWorldOccluderMesh(buildWorldOccluderVertices());
-  // Points left by the scanner belong to the world as it was a moment ago.
-  clearAllPoints();
+  finishWorldForSingleRoom();
   workshop.needsScanBurst = true;
 }
 
